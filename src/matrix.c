@@ -95,7 +95,6 @@ void removeDeadLinks(void) {
             printf("\n[MATRIX] ⏱️  TIMEOUT: Nó %d expirou (Age: %.1fs). Removendo...\n", 
                    g_myMatrix.idOfActiveNodes[i], age);
 
-            // Atualizar link quality
             MATRIX_updateLinkQuality(g_myMatrix.idOfActiveNodes[i], true);
 
             int8_t myPos = searchId(&g_myMatrix, getMyIP());
@@ -126,7 +125,7 @@ void parameterPos(uint8_t *numberOfActiveNodesStart, uint8_t *matrixStart, uint8
 }
 
 void * serializeMatrix(tdma_matrix_t copy_ignored){
-    (void)copy_ignored; // Suprimir warning
+    (void)copy_ignored;
     removeDeadLinks(); 
 
     tdma_matrix_t *mat = &g_myMatrix;
@@ -226,27 +225,18 @@ void discoverIds(tdma_matrix_t *finalMatrix, tdma_matrix_t *matrixA, tdma_matrix
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MATRIX UPDATE - COM DETECÇÃO DE MUDANÇAS! ✅
+// MATRIX UPDATE - ESTABILIZADO ✅
 // ═══════════════════════════════════════════════════════════════
 
 void matrix_update( tdma_matrix_t *newMat, uint8_t other_IP) {
-    // ───────────────────────────────────────────────────────────
-    // 0. GUARDAR ESTADO ANTERIOR (para detectar mudanças)
-    // ───────────────────────────────────────────────────────────
-    
     int nodes_before = g_myMatrix.numberOfActiveNodes;
     
-    // Guardar MST antiga
+    // Backup da MST atual para comparação futura
     uint8_t old_mst[MAX_NODES][MAX_NODES];
     for(int i = 0; i < MAX_NODES; i++) {
         memcpy(old_mst[i], g_spanningTree[i], MAX_NODES * sizeof(uint8_t));
     }
     
-    // ───────────────────────────────────────────────────────────
-    // 1. MERGE NORMAL (código original)
-    // ───────────────────────────────────────────────────────────
-    
-    // Atualizar link quality
     MATRIX_updateLinkQuality(other_IP, false);
     
     tdma_matrix_t *final = (tdma_matrix_t*) malloc(sizeof(tdma_matrix_t));
@@ -265,40 +255,34 @@ void matrix_update( tdma_matrix_t *newMat, uint8_t other_IP) {
     
     double time = getEpoch();
     
-    int lines_updated = 0;
     for(int i = 0; i < newMat->numberOfActiveNodes; i++){
         if(newMat->idOfActiveNodes[i] == getMyIP() || newMat->age[i] >= MAX_AGE ) continue; 
 
         int8_t myPos = searchId(&g_myMatrix, newMat->idOfActiveNodes[i]);
-        int8_t newPos = i;
         int8_t finalPos = searchId(final, newMat->idOfActiveNodes[i]);
         
-        double newCreationTime = time - newMat->age[newPos];
+        double newCreationTime = time - newMat->age[i];
         double myCreationTime = (myPos != -1) ? g_myMatrix.creationTime[myPos] : 0;
 
         if(myPos == -1 || myCreationTime < newCreationTime){  
             memset(final->matrix[finalPos], 0, MAX_NODES);
-            copyLine(final, newMat, newPos, finalPos);   
+            copyLine(final, newMat, i, finalPos);   
             final->creationTime[finalPos] = newCreationTime;
-            final->age[finalPos] = newMat->age[newPos];
-            lines_updated++;
+            final->age[finalPos] = newMat->age[i];
         }
     }
 
     int8_t myIpPos = searchId(final, getMyIP());
     int8_t otherIpPos = searchId(final, other_IP);
 
-    bool new_direct_link = false;
     if(myIpPos >= 0 && otherIpPos >= 0) {
         if(final->matrix[myIpPos][otherIpPos] == 0) {
              printf("\n[MATRIX] 🔗 Ligação Direta: Nó %d conectado!\n", other_IP);
-             new_direct_link = true;
         }
         final->matrix[myIpPos][otherIpPos] = 1; 
         final->creationTime[myIpPos] = time;
     }
     
-    // Copiar link quality
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++) {
         int8_t finalPos = searchId(final, g_myMatrix.idOfActiveNodes[i]);
         if(finalPos >= 0) {
@@ -314,56 +298,30 @@ void matrix_update( tdma_matrix_t *newMat, uint8_t other_IP) {
     memcpy(&g_myMatrix, final, sizeof(tdma_matrix_t));
     free(final);
     
-    // ───────────────────────────────────────────────────────────
-    // 2. RECALCULAR MST
-    // ───────────────────────────────────────────────────────────
+    primAlgorithm_weighted(); // Atualiza g_spanningTree
     
-    primAlgorithm_weighted();
-    
-    // ───────────────────────────────────────────────────────────
-    // 3. DETECTAR SE HOUVE MUDANÇA REAL! ✅
-    // ───────────────────────────────────────────────────────────
-    
+    // DETECÇÃO DE MUDANÇA REAL (Estrutural ou MST) ✅
     bool topology_changed = false;
     
-    // Mudou número de nós?
     if (g_myMatrix.numberOfActiveNodes != nodes_before) {
         topology_changed = true;
-        printf("[MATRIX]   ⚠️  Número de nós mudou: %d → %d\n", 
-               nodes_before, g_myMatrix.numberOfActiveNodes);
+        printf("[MATRIX] ⚠️ Mudança no número de nós: %d -> %d\n", nodes_before, g_myMatrix.numberOfActiveNodes);
     }
     
-    // Linhas atualizadas?
-    if (lines_updated > 0) {
-        topology_changed = true;
-        printf("[MATRIX]   ⚠️  %d linhas atualizadas\n", lines_updated);
-    }
-    
-    // Link direto novo?
-    if (new_direct_link) {
-        topology_changed = true;
-    }
-    
-    // MST mudou?
     bool mst_changed = false;
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes && !mst_changed; i++) {
         for(int j = 0; j < g_myMatrix.numberOfActiveNodes; j++) {
             if (old_mst[i][j] != g_spanningTree[i][j]) {
                 mst_changed = true;
                 topology_changed = true;
-                printf("[MATRIX]   ⚠️  MST mudou!\n");
+                printf("[MATRIX] ⚠️ MST mudou!\n");
                 break;
             }
         }
     }
     
-    // ───────────────────────────────────────────────────────────
-    // 4. CRIAR EVENTO SÓ SE MUDOU! ✅
-    // ───────────────────────────────────────────────────────────
-    
     if (topology_changed) {
         printf("[MATRIX] 🔔 TOPOLOGIA MUDOU - Criando evento para routing!\n\n");
-        
         extern event_queue_t *g_event_queue;
         if (g_event_queue) {
             event_t *evt = malloc(sizeof(event_t));
@@ -374,7 +332,7 @@ void matrix_update( tdma_matrix_t *newMat, uint8_t other_IP) {
             event_queue_push(g_event_queue, evt);
         }
     } else {
-        printf("[MATRIX] ✓ Nenhuma mudança de topologia detectada\n\n");
+        printf("[MATRIX] ✓ Nenhuma mudança estrutural detectada\n\n");
     }
 }
 
@@ -392,7 +350,6 @@ void MATRIX_init(uint8_t my_id) {
     g_myMatrix.idOfActiveNodes[0] = my_id;
     g_myMatrix.creationTime[0] = getEpoch();
     
-    // Inicializar link quality
     for (int i = 0; i < MAX_NODES; i++) {
         for (int j = 0; j < MAX_NODES; j++) {
             g_myMatrix.link_quality[i][j] = 100;
@@ -404,7 +361,6 @@ void MATRIX_init(uint8_t my_id) {
         g_spanningTree[r] = (uint8_t *) malloc(MAX_NODES * sizeof(uint8_t));
         memset(g_spanningTree[r], 0, MAX_NODES * sizeof(uint8_t));
     }
-    
     printf("[MATRIX] Sistema inicializado.\n");
 }
 
@@ -429,10 +385,6 @@ void MATRIX_print(void) {
     printf("\n");
 }
 
-// ═══════════════════════════════════════════════════════════════
-// LINK QUALITY
-// ═══════════════════════════════════════════════════════════════
-
 void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout) {
     int8_t my_idx = searchId(&g_myMatrix, getMyIP());
     int8_t node_idx = searchId(&g_myMatrix, node_id);
@@ -454,17 +406,10 @@ void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PRIM COM LINK QUALITY
-// ═══════════════════════════════════════════════════════════════
-
 void primAlgorithm_weighted(void) {
     int num = g_myMatrix.numberOfActiveNodes;
-    
     if (num <= 1) {
-        for(int i = 0; i < MAX_NODES; i++) {
-            memset(g_spanningTree[i], 0, MAX_NODES * sizeof(uint8_t));
-        }
+        for(int i = 0; i < MAX_NODES; i++) memset(g_spanningTree[i], 0, MAX_NODES);
         return;
     }
     
@@ -480,22 +425,18 @@ void primAlgorithm_weighted(void) {
     key[0] = 0;
     
     for (int count = 0; count < num; count++) {
-        int min_key = 999;
-        int u = -1;
-        
+        int min_key = 999, u = -1;
         for (int v = 0; v < num; v++) {
             if (!in_mst[v] && key[v] < min_key) {
                 min_key = key[v];
                 u = v;
             }
         }
-        
         if (u == -1) break;
         in_mst[u] = true;
         
         for (int v = 0; v < num; v++) {
             uint8_t quality = g_myMatrix.link_quality[u][v];
-            
             if (g_myMatrix.matrix[u][v] && !in_mst[v] && quality > 0) {
                 int cost = 100 - quality;
                 if (cost < key[v]) {
@@ -506,10 +447,7 @@ void primAlgorithm_weighted(void) {
         }
     }
     
-    for(int i = 0; i < MAX_NODES; i++) {
-        memset(g_spanningTree[i], 0, MAX_NODES * sizeof(uint8_t));
-    }
-    
+    for(int i = 0; i < MAX_NODES; i++) memset(g_spanningTree[i], 0, MAX_NODES);
     for (int i = 1; i < num; i++) {
         if (parent[i] != -1) {
             g_spanningTree[parent[i]][i] = 1;
