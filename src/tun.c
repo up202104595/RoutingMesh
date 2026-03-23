@@ -91,14 +91,41 @@ int tun_open(uint8_t node_id) {
 
     close(sock);
 
-    /* Instala rota 10.0.0.0/24 dev tun<N> explicitamente.
-     * O ioctl SIOCSIFADDR não garante criação automática da rota
-     * de rede em todas as versões de kernel. Sem esta rota o Netlink
-     * recusa rotas de host via 10.0.0.X com "Network is unreachable". */
-    char route_cmd[128];
-    snprintf(route_cmd, sizeof(route_cmd),
+    /* Instala rota 10.0.0.0/24 dev tun<N> explicitamente. */
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
              "ip route add 10.0.0.0/24 dev tun%u 2>/dev/null", node_id);
-    system(route_cmd);
+    system(cmd);
+
+    /* iptables — redirige tráfego de aplicação para tun<N>
+     * (exactamente como Ana Morais, secção 3.2.5)
+     *
+     * Marca todos os pacotes saindo pela interface física,
+     * excepto os pacotes TDMA (UDP porta BASE_PORT+node_id).
+     * Pacotes marcados são redirecionados para tun<N> via
+     * routing table 100, onde o TDMA os processa e envia
+     * no slot correcto.
+     *
+     * MESH_PHY_IFACE: interface física (enp0s3 na VM, wlan0 na RPi)
+     * compilar com: make MESH_PHY_IFACE=wlan0
+     */
+#ifndef MESH_PHY_IFACE
+#define MESH_PHY_IFACE "enp0s3"
+#endif
+    int tdma_port = 7000 + node_id;
+    snprintf(cmd, sizeof(cmd),
+        /* marca todo o tráfego saindo pela interface física */
+        "iptables -t mangle -A OUTPUT -o " MESH_PHY_IFACE " -j MARK --set-mark 1 2>/dev/null; "
+        /* exclui pacotes TDMA (UDP porta do nó) — evita loop */
+        "iptables -t mangle -A OUTPUT -o " MESH_PHY_IFACE " -p udp --sport %d -j MARK --set-mark 0 2>/dev/null; "
+        /* pacotes marcados usam routing table 100 */
+        "ip rule add fwmark 1 table 100 2>/dev/null; "
+        /* routing table 100: envia tudo para tun<N> */
+        "ip route add default dev tun%u table 100 2>/dev/null",
+        tdma_port, node_id);
+    system(cmd);
+    printf("[TUN] iptables: tráfego de aplicação → tun%u (excluindo porta %d)\n",
+           node_id, tdma_port);
 
     printf("[TUN] IP %s/24 atribuido, interface UP\n", ip_str);
     return fd;
@@ -114,8 +141,11 @@ void tun_close(int tun_fd, uint8_t node_id) {
          * haja referências pendentes (ex: crash anterior). */
         close(tun_fd);
 
-        char cmd[128];
+        char cmd[256];
         snprintf(cmd, sizeof(cmd),
+                 "iptables -t mangle -F OUTPUT 2>/dev/null; "
+                 "ip rule del fwmark 1 table 100 2>/dev/null; "
+                 "ip route flush table 100 2>/dev/null; "
                  "ip route del 10.0.0.0/24 dev tun%u 2>/dev/null; "
                  "ip link delete tun%u 2>/dev/null", node_id, node_id);
         system(cmd);

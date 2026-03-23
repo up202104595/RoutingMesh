@@ -4,9 +4,14 @@ LDFLAGS = -pthread -lm
 
 # Prefixo da rede física mesh.
 # Testes locais (default): 127.0.0
-# Produção WiFi/Raspberry:  make MESH_NET_PREFIX=192.168.2
+# Produção WiFi/Raspberry:  make MESH_NET_PREFIX=192.168.0
 MESH_NET_PREFIX ?= 127.0.0
 CFLAGS += -DMESH_NET_PREFIX=\"$(MESH_NET_PREFIX)\"
+
+# Interface física mesh (enp0s3 na VM, wlan0 na Raspberry)
+# make MESH_PHY_IFACE=wlan0
+MESH_PHY_IFACE ?= enp0s3
+CFLAGS += -DMESH_PHY_IFACE=\"$(MESH_PHY_IFACE)\"
 
 SRC_DIR = src
 OBJ_DIR = obj
