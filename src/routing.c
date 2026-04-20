@@ -189,6 +189,7 @@ routing_manager_t* routing_manager_create(uint8_t my_node_id, uint8_t num_nodes)
 void routing_manager_destroy(routing_manager_t *rm) {
     if (!rm) return;
     /* remove rotas do kernel antes de terminar */
+    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, MESH_PHY_IFACE);
     ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
     pthread_mutex_destroy(&rm->lock);
     free(rm);
@@ -233,6 +234,11 @@ void routing_manager_recompute(routing_manager_t *rm,
     printf("[ROUTING] Recalculando rotas (Método Ana + Link Quality)\n");
     printf("[ROUTING] =============================================\n");
 
+    /* remove rotas antigas antes de instalar as novas —
+     * garante que rotas obsoletas são removidas do kernel */
+    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, MESH_PHY_IFACE);
+    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
+
     /* 1. Constrói linked lists da MST (método da Ana) */
     route_node_t *primary_list = build_routing_structure(
         rm->my_node_id,
@@ -267,13 +273,21 @@ void routing_manager_recompute(routing_manager_t *rm,
         if (my_idx != -1 && nh_idx != -1)
             rm->routing_table[i].quality = link_quality[my_idx][nh_idx];
 
-        /* escreve rota no kernel via Netlink (RTM_NEWROUTE, sem fork).
-         * Vizinhos directos (dest == next_hop) já são alcançáveis pela
-         * rota /24 instalada pelo tun_open() — não precisam de rota
-         * host explícita e o kernel rejeitaria "via <self>" com ENETUNREACH. */
+        /* vizinhos directos: instala rota 10.0.0.X via 172.20.10.X dev wlan0
+         * Assim o kernel envia directamente pela interface física sem ciclo pela TUN.
+         * Comparável ao método ARP da Ana Morais mas usando routing table Layer 3. */
         if (dest_id == next_hop) {
-            printf("[ROUTING]   %s.%u via directo (covered by /24)\n",
-                   MESH_NET_BASE, dest_id);
+            char dest_tun_ip[32], gw_physical_ip[32];
+            snprintf(dest_tun_ip,    sizeof(dest_tun_ip),    "10.0.0.%u", dest_id);
+            snprintf(gw_physical_ip, sizeof(gw_physical_ip), "%s.%u", MESH_NET_PREFIX, dest_id);
+
+            if (ip_route_add(dest_tun_ip, gw_physical_ip, MESH_PHY_IFACE) == 0) {
+                printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
+                       dest_tun_ip, gw_physical_ip, MESH_PHY_IFACE);
+            } else {
+                fprintf(stderr, "[ROUTING]   ERRO: ip route add %s via %s dev %s\n",
+                        dest_tun_ip, gw_physical_ip, MESH_PHY_IFACE);
+            }
         } else {
             char dest_ip[32], gw_ip[32];
             snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE, dest_id);
