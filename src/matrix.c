@@ -200,15 +200,27 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
     double time = getEpoch();
     
     for(int i = 0; i < newMat->numberOfActiveNodes; i++){
-        if(newMat->idOfActiveNodes[i] == getMyIP() || newMat->age[i] >= MAX_AGE) continue; 
+        if(newMat->idOfActiveNodes[i] == getMyIP() || newMat->age[i] >= MAX_AGE) continue;
+
+        bool is_direct = (newMat->idOfActiveNodes[i] == other_IP);
         int8_t myPos = searchId(&g_myMatrix, newMat->idOfActiveNodes[i]);
         int8_t finalPos = searchId(final, newMat->idOfActiveNodes[i]);
+
+        if (!is_direct && myPos != -1) {
+            double age_local = time - g_myMatrix.creationTime[myPos];
+            if (age_local >= MAX_AGE) continue;
+        }
+
         double newCreationTime = time - newMat->age[i];
         double myCreationTime = (myPos != -1) ? g_myMatrix.creationTime[myPos] : 0;
         if(myPos == -1 || myCreationTime < newCreationTime){  
             memset(final->matrix[finalPos], 0, MAX_NODES);
-            copyLine(final, newMat, i, finalPos);   
-            final->creationTime[finalPos] = newCreationTime;
+            copyLine(final, newMat, i, finalPos);
+            if(is_direct) {
+                final->creationTime[finalPos] = newCreationTime;
+            } else {
+                final->creationTime[finalPos] = (myPos != -1) ? g_myMatrix.creationTime[myPos] : newCreationTime;
+            }
             final->age[finalPos] = newMat->age[i];
         }
     }
@@ -220,7 +232,6 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         if(final->matrix[myIpPos][otherIpPos] == 0)
             printf("\n[MATRIX] 🔗 Ligação Direta: Nó %d conectado!\n", other_IP);
         final->matrix[myIpPos][otherIpPos] = 1;
-        final->matrix[otherIpPos][myIpPos] = 1;  /* simetria garantida */
         final->creationTime[myIpPos] = time;
     }
     
@@ -235,7 +246,6 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         }
     }
 
-    /* inicializa link_quality de novos links a INITIAL_LINK_QUALITY */
     for(int i = 0; i < final->numberOfActiveNodes; i++)
         for(int j = 0; j < final->numberOfActiveNodes; j++)
             if(i != j && final->matrix[i][j] == 1 && final->link_quality[i][j] == 0)
@@ -253,7 +263,6 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         printf("[MATRIX] ⚠️ Mudança no número de nós: %d -> %d\n", nodes_before, g_myMatrix.numberOfActiveNodes);
     }
     
-    /* só compara MST se havia e continuam a existir pelo menos 2 nós */
     if(g_myMatrix.numberOfActiveNodes >= 2 && nodes_before >= 2) {
         for(int i = 0; i < g_myMatrix.numberOfActiveNodes && !topology_changed; i++) {
             for(int j = 0; j < g_myMatrix.numberOfActiveNodes; j++) {
@@ -307,6 +316,10 @@ tdma_matrix_t* MATRIX_get(void) {
     return &g_myMatrix;
 }
 
+uint8_t MATRIX_getNumNodes(void) {
+    return g_myMatrix.numberOfActiveNodes;
+}
+
 void MATRIX_print(void) {
     printf("[MATRIX] Nodes: ");
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++)
@@ -358,15 +371,15 @@ void primAlgorithm_weighted(void) {
         if(u == -1) break;
         in_mst[u] = true;
         for(int v = 0; v < num; v++) {
-            if(g_myMatrix.matrix[u][v] && !in_mst[v]) {
+            if(g_myMatrix.matrix[u][v] && g_myMatrix.matrix[v][u] && !in_mst[v]) {
                 uint8_t quality = g_myMatrix.link_quality[u][v];
                 if(quality == 0) quality = g_myMatrix.link_quality[v][u];
-                if(quality == 0) quality = INITIAL_LINK_QUALITY; /* default se sem info */
+                if(quality == 0) quality = INITIAL_LINK_QUALITY;
                 int cost = 100 - quality;
                 if(cost < key[v]) { parent[v] = u; key[v] = cost; }
             }
         }
-    }   /* fecha for(count) */
+    }
     for(int i = 0; i < MAX_NODES; i++) memset(g_spanningTree[i], 0, MAX_NODES);
     for(int i = 1; i < num; i++)
         if(parent[i] != -1) {
