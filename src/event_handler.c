@@ -1,7 +1,13 @@
 /*
- * ═══════════════════════════════════════════════════════════════
- * event_handler.c - Event Handler Thread (Simples)
- * ═══════════════════════════════════════════════════════════════
+ * event_handler.c - Event Handler Thread
+ *
+ * EVENT_TOPOLOGY_CHANGED: recalcula routing apenas
+ * EVENT_NODE_TIMEOUT:     fecha stream TCP (limpa buffers) — so se streaming activo
+ * EVENT_NODE_JOINED:      nenhuma accao no stream
+ *
+ * O stream e gerido exclusivamente pelo alphabot_node.py.
+ * O event_handler so fecha o ffmpeg quando um no morre —
+ * o watchdog do alphabot_node.py trata do reinicio.
  */
 
 #include "event_handler.h"
@@ -11,91 +17,70 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // ═══════════════════════════════════════════════════════════════
-// EVENT QUEUE IMPLEMENTATION
+// EVENT QUEUE
 // ═══════════════════════════════════════════════════════════════
 
 event_queue_t* event_queue_create(void) {
     event_queue_t *queue = calloc(1, sizeof(event_queue_t));
     if (!queue) return NULL;
-    
-    queue->head = NULL;
-    queue->tail = NULL;
-    queue->count = 0;
+    queue->head    = NULL;
+    queue->tail    = NULL;
+    queue->count   = 0;
     queue->running = true;
-    
-    pthread_mutex_init(&queue->lock, NULL);
-    pthread_cond_init(&queue->not_empty, NULL);
-    
+    pthread_mutex_init(&queue->lock,      NULL);
+    pthread_cond_init (&queue->not_empty, NULL);
     printf("[EVENT] Fila de eventos criada\n");
     return queue;
 }
 
 void event_queue_destroy(event_queue_t *queue) {
     if (!queue) return;
-    
     queue->running = false;
     pthread_cond_broadcast(&queue->not_empty);
-    
     pthread_mutex_lock(&queue->lock);
-    
     event_t *curr = queue->head;
     while (curr) {
         event_t *next = curr->next;
         free(curr);
         curr = next;
     }
-    
     pthread_mutex_unlock(&queue->lock);
-    
     pthread_mutex_destroy(&queue->lock);
-    pthread_cond_destroy(&queue->not_empty);
-    
+    pthread_cond_destroy (&queue->not_empty);
     free(queue);
 }
 
 void event_queue_push(event_queue_t *queue, event_t *evt) {
     pthread_mutex_lock(&queue->lock);
-    
     evt->next = NULL;
-    
     if (queue->tail) {
         queue->tail->next = evt;
         queue->tail = evt;
     } else {
         queue->head = queue->tail = evt;
     }
-    
     queue->count++;
     pthread_cond_signal(&queue->not_empty);
-    
     pthread_mutex_unlock(&queue->lock);
 }
 
 event_t* event_queue_pop(event_queue_t *queue) {
     pthread_mutex_lock(&queue->lock);
-    
-    while (queue->head == NULL && queue->running) {
+    while (queue->head == NULL && queue->running)
         pthread_cond_wait(&queue->not_empty, &queue->lock);
-    }
-    
     if (!queue->running) {
         pthread_mutex_unlock(&queue->lock);
         return NULL;
     }
-    
-    event_t *evt = queue->head;
-    queue->head = evt->next;
-    
-    if (queue->head == NULL) {
+    event_t *evt  = queue->head;
+    queue->head   = evt->next;
+    if (queue->head == NULL)
         queue->tail = NULL;
-    }
-    
     queue->count--;
-    
     pthread_mutex_unlock(&queue->lock);
-    
     return evt;
 }
 
@@ -103,25 +88,24 @@ event_t* event_queue_pop(event_queue_t *queue) {
 // EVENT HANDLER THREAD
 // ═══════════════════════════════════════════════════════════════
 
-void* event_handler_loop(void* arg) {
-    node_t *node = (node_t*)arg;
-    
+void* event_handler_loop(void *arg) {
+    node_t *node = (node_t *)arg;
+
     printf("[EVENT] Thread iniciada\n");
-    
+
     while (node->running) {
-        
+
         event_t *evt = event_queue_pop(node->event_queue);
-        
         if (!evt) break;
-        
+
         switch (evt->type) {
-            
-            case EVENT_TOPOLOGY_CHANGED:
-                printf("\n[EVENT] 🔄 Topologia mudou - recalculando routing...\n");
-                
+
+            case EVENT_TOPOLOGY_CHANGED: {
+                printf("\n[EVENT] Topologia mudou — recalculando routing...\n");
+
                 tdma_matrix_t *matrix = MATRIX_get();
-                uint8_t **mst = MATRIX_getSpanningTree();
-                
+                uint8_t      **mst    = MATRIX_getSpanningTree();
+
                 routing_manager_recompute(
                     node->routing,
                     mst,
@@ -129,22 +113,70 @@ void* event_handler_loop(void* arg) {
                     matrix->idOfActiveNodes,
                     matrix->numberOfActiveNodes
                 );
-                
+
+                routing_manager_print(node->routing);
+                printf("[EVENT] Routing actualizado\n");
+                break;
+            }
+
+            case EVENT_NODE_TIMEOUT: {
+                printf("\n[EVENT] Node %d timeout — recalculando routing...\n",
+                       evt->node_id);
+
+                /* Recalcula routing — usa relay se disponivel */
+                tdma_matrix_t *matrix = MATRIX_get();
+                uint8_t      **mst    = MATRIX_getSpanningTree();
+
+                routing_manager_recompute(
+                    node->routing,
+                    mst,
+                    matrix->link_quality,
+                    matrix->idOfActiveNodes,
+                    matrix->numberOfActiveNodes
+                );
+
+                routing_manager_print(node->routing);
+
+                /* Fecha socket TCP do no que morreu — keepalive reconecta via relay */
+                if (evt->node_id >= 1 && evt->node_id <= node->num_nodes) {
+                    if (node->tcp_sockfd[evt->node_id] >= 0) {
+                        close(node->tcp_sockfd[evt->node_id]);
+                        node->tcp_sockfd[evt->node_id] = -1;
+                        printf("[EVENT] TCP peer %d fechado — vai reconectar via relay\n", evt->node_id);
+                    }
+                }
+
+                /* Apenas reinicia o ffplay no PC para limpar buffers TCP acumulados. */
+                system("pkill -f ffplay 2>/dev/null");
+                printf("[EVENT] ffplay reiniciado — buffers TCP limpos\n");
+                break;
+            }
+
+            case EVENT_NODE_JOINED: {
+                /* Novo no entrou — recalcula routing mas nao toca no stream.
+                 * O stream continua a funcionar normalmente. */
+                printf("[EVENT] Node %d entrou — recalculando routing...\n",
+                       evt->node_id);
+
+                tdma_matrix_t *matrix = MATRIX_get();
+                uint8_t      **mst    = MATRIX_getSpanningTree();
+
+                routing_manager_recompute(
+                    node->routing,
+                    mst,
+                    matrix->link_quality,
+                    matrix->idOfActiveNodes,
+                    matrix->numberOfActiveNodes
+                );
+
                 routing_manager_print(node->routing);
                 break;
-                
-            case EVENT_NODE_TIMEOUT:
-                printf("[EVENT] ⏱️  Node %d timeout\n", evt->node_id);
-                break;
-                
-            case EVENT_NODE_JOINED:
-                printf("[EVENT] 🆕 Node %d entrou\n", evt->node_id);
-                break;
+            }
         }
-        
+
         free(evt);
     }
-    
+
     printf("[EVENT] Thread terminada\n");
     return NULL;
 }
