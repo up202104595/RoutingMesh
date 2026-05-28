@@ -59,6 +59,17 @@ typedef struct {
 } tdma_matrix_t;
 
 // ═══════════════════════════════════════════════════════════════
+// Snapshot atómico da matriz + MST (para uso thread-safe)
+// ═══════════════════════════════════════════════════════════════
+typedef struct {
+    uint8_t  numberOfActiveNodes;
+    uint8_t  idOfActiveNodes[MAX_NODES];
+    uint8_t  link_quality[MAX_NODES][MAX_NODES];
+    uint8_t  mst[MAX_NODES][MAX_NODES];
+    uint8_t *mst_ptrs[MAX_NODES]; /* apontadores para mst[][] — prontos para recompute */
+} matrix_snapshot_t;
+
+// ═══════════════════════════════════════════════════════════════
 // Funções Públicas
 // ═══════════════════════════════════════════════════════════════
 void MATRIX_init(uint8_t my_id);
@@ -66,8 +77,12 @@ void MATRIX_parsePkt(void* rx_tdmapkt_ptr, ssize_t num_bytes_read, uint8_t other
 void MATRIX_print(void);
 tdma_matrix_t* MATRIX_get(void);
 uint8_t MATRIX_getNumNodes(void);
+void MATRIX_get_snapshot(matrix_snapshot_t *snap);
 
-void* serializeMatrix(tdma_matrix_t matrix);
+/* serializeMatrix: serializa a matriz global de forma thread-safe.
+ * Devolve buffer alocado (free() pelo caller) ou NULL em erro.
+ * *out_payload_len recebe o tamanho do buffer. */
+void* serializeMatrix(int *out_payload_len);
 void parameterSize(uint16_t *idOfActiveNodesSize, uint16_t *matrixSize,
                    uint16_t *ageSize, uint8_t numberOfActiveNodes);
 

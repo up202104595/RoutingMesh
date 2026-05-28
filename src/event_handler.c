@@ -103,15 +103,18 @@ void* event_handler_loop(void *arg) {
             case EVENT_TOPOLOGY_CHANGED: {
                 printf("\n[EVENT] Topologia mudou — recalculando routing...\n");
 
-                tdma_matrix_t *matrix = MATRIX_get();
-                uint8_t      **mst    = MATRIX_getSpanningTree();
+                /* BUG 1 FIX: MATRIX_get() devolve ponteiro não protegido.
+                 * MATRIX_get_snapshot() copia atomicamente matriz + MST
+                 * sob g_matrix_mutex antes de chamar recompute. */
+                matrix_snapshot_t snap;
+                MATRIX_get_snapshot(&snap);
 
                 routing_manager_recompute(
                     node->routing,
-                    mst,
-                    matrix->link_quality,
-                    matrix->idOfActiveNodes,
-                    matrix->numberOfActiveNodes
+                    snap.mst_ptrs,
+                    snap.link_quality,
+                    snap.idOfActiveNodes,
+                    snap.numberOfActiveNodes
                 );
 
                 routing_manager_print(node->routing);
@@ -123,50 +126,50 @@ void* event_handler_loop(void *arg) {
                 printf("\n[EVENT] Node %d timeout — recalculando routing...\n",
                        evt->node_id);
 
-                /* Recalcula routing — usa relay se disponivel */
-                tdma_matrix_t *matrix = MATRIX_get();
-                uint8_t      **mst    = MATRIX_getSpanningTree();
+                matrix_snapshot_t snap;
+                MATRIX_get_snapshot(&snap);
 
                 routing_manager_recompute(
                     node->routing,
-                    mst,
-                    matrix->link_quality,
-                    matrix->idOfActiveNodes,
-                    matrix->numberOfActiveNodes
+                    snap.mst_ptrs,
+                    snap.link_quality,
+                    snap.idOfActiveNodes,
+                    snap.numberOfActiveNodes
                 );
 
                 routing_manager_print(node->routing);
 
-                /* Fecha socket TCP do no que morreu — keepalive reconecta via relay */
+                /* BUG TCP: fechar socket sem tcp_mutex causava race com
+                 * tcp_rx_peer_loop e tcp_keepalive_loop */
                 if (evt->node_id >= 1 && evt->node_id <= node->num_nodes) {
-                    if (node->tcp_sockfd[evt->node_id] >= 0) {
-                        close(node->tcp_sockfd[evt->node_id]);
+                    pthread_mutex_lock(&node->tcp_mutex);
+                    int fd = node->tcp_sockfd[evt->node_id];
+                    if (fd >= 0) {
+                        close(fd);
                         node->tcp_sockfd[evt->node_id] = -1;
                         printf("[EVENT] TCP peer %d fechado — vai reconectar via relay\n", evt->node_id);
                     }
+                    pthread_mutex_unlock(&node->tcp_mutex);
                 }
 
-                /* Apenas reinicia o ffplay no PC para limpar buffers TCP acumulados. */
                 system("pkill -f ffplay 2>/dev/null");
                 printf("[EVENT] ffplay reiniciado — buffers TCP limpos\n");
                 break;
             }
 
             case EVENT_NODE_JOINED: {
-                /* Novo no entrou — recalcula routing mas nao toca no stream.
-                 * O stream continua a funcionar normalmente. */
                 printf("[EVENT] Node %d entrou — recalculando routing...\n",
                        evt->node_id);
 
-                tdma_matrix_t *matrix = MATRIX_get();
-                uint8_t      **mst    = MATRIX_getSpanningTree();
+                matrix_snapshot_t snap;
+                MATRIX_get_snapshot(&snap);
 
                 routing_manager_recompute(
                     node->routing,
-                    mst,
-                    matrix->link_quality,
-                    matrix->idOfActiveNodes,
-                    matrix->numberOfActiveNodes
+                    snap.mst_ptrs,
+                    snap.link_quality,
+                    snap.idOfActiveNodes,
+                    snap.numberOfActiveNodes
                 );
 
                 routing_manager_print(node->routing);
