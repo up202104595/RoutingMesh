@@ -118,9 +118,12 @@ static int tcp_connect_peer(const char *peer_ip, int peer_id) {
         return -1;
     }
 
-    /* Timeout de envio de 1s apos ligacao — evita bloquear tx_loop */
+    /* Timeouts definidos aqui, no momento da criação — a thread RX
+     * não precisa de os repetir e arriscar aplicá-los num fd já substituído */
     struct timeval tv_snd = {1, 0};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv_snd, sizeof(tv_snd));
+    struct timeval tv_rcv = {2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_rcv, sizeof(tv_rcv));
 
     printf("[TCP] Ligado ao peer %d (%s:%d)\n", peer_id, peer_ip, BASE_TCP_PORT + peer_id);
     return fd;
@@ -155,9 +158,11 @@ void* tcp_accept_loop(void *arg) {
         int opt = 1;
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-        /* Timeout de envio de 1s — evita bloquear o tx_loop */
+        /* Timeouts definidos aqui (accept) — mesma lógica do connect */
         struct timeval tv_snd = {1, 0};
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv_snd, sizeof(tv_snd));
+        struct timeval tv_rcv = {2, 0};
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_rcv, sizeof(tv_rcv));
 
         pthread_mutex_lock(&node->tcp_mutex);
         if (node->tcp_sockfd[peer_id] >= 0) {
@@ -253,9 +258,9 @@ void* tcp_rx_peer_loop(void *arg) {
         pthread_mutex_unlock(&node->tcp_mutex);
         if (tcp_fd < 0) { usleep(100000); continue; }
 
-        /* Timeout de 2s no recv para detectar mudanca de fd */
-        struct timeval tv = {2, 0};
-        setsockopt(tcp_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        /* SO_RCVTIMEO (2s) já foi definido em tcp_connect_peer/tcp_accept_loop
+         * no momento da criação do fd — não repetir aqui para não arriscar
+         * aplicar num fd já substituído por outra thread */
 
         /* Lê 4 bytes de tamanho primeiro */
         uint32_t net_len = 0;
@@ -469,18 +474,17 @@ void* tx_loop(void *arg) {
 
         uint64_t slot_start_us = now;
         (void)slot_start_us;
-        removeDeadLinks();
+        /* BUG 5 FIX: removeDeadLinks() era chamado aqui E dentro de
+         * serializeMatrix(), causando dupla remoção por slot.
+         * serializeMatrix() já trata disto internamente. */
         uint64_t slot_end = (now - time_in_frame) +
                             ((uint64_t)(current_slot + 1) * SLOT_DURATION_US)
                             - GUARD_US;
 
         /* MATRIX broadcast via UDP */
-        void *matrix_payload = serializeMatrix(*MATRIX_get());
+        int payload_len = 0;
+        void *matrix_payload = serializeMatrix(&payload_len);
         if (matrix_payload) {
-            uint16_t idSize, matSize, ageSize;
-            parameterSize(&idSize, &matSize, &ageSize,
-                          MATRIX_get()->numberOfActiveNodes);
-            int payload_len = sizeof(uint8_t) + idSize + matSize + ageSize;
 
             slot_limits_t sl   = sync_get_slot();
             tdma_header_t *hdr = (tdma_header_t *)pkt_buffer;

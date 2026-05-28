@@ -6,10 +6,16 @@
 #include <sys/time.h>
 #include <inttypes.h>
 #include <math.h>
+#include <pthread.h>
 
 tdma_matrix_t g_myMatrix;
 uint8_t **g_spanningTree;
 FILE *topologyLog = NULL;
+
+/* ── mutex recursivo: protege g_myMatrix e g_spanningTree ──
+ * Recursivo porque removeDeadLinks é chamado internamente por
+ * serializeMatrix, que já detém o lock. */
+static pthread_mutex_t g_matrix_mutex;
 
 void removeDeadLinks(void);
 void removeIdList(tdma_matrix_t *matrix, uint8_t pos);
@@ -24,6 +30,7 @@ double getEpoch(void) {
 }
 
 uint8_t getMyIP(void) {
+    /* myId nunca muda após init — sem lock necessário */
     return g_myMatrix.myId;
 }
 
@@ -66,23 +73,38 @@ void removeIdMatrix(tdma_matrix_t *matrix, uint8_t pos){
     }
 }
 
-void removeDeadLinks(void) {
+/* ── versão interna sem lock (chamada com g_matrix_mutex já detido) ── */
+static void removeDeadLinks_locked(void) {
     double time = getEpoch();
     double age;
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++){
-        if(g_myMatrix.idOfActiveNodes[i] == getMyIP()) continue; 
+        if(g_myMatrix.idOfActiveNodes[i] == getMyIP()) continue;
         age = time - g_myMatrix.creationTime[i];
         if(age >= MAX_AGE){
-            printf("\n[MATRIX] TIMEOUT: No %d expirou (Age: %.1fs). Removendo...\n", 
+            printf("\n[MATRIX] TIMEOUT: No %d expirou (Age: %.1fs). Removendo...\n",
                    g_myMatrix.idOfActiveNodes[i], age);
-            MATRIX_updateLinkQuality(g_myMatrix.idOfActiveNodes[i], true);
+            /* penaliza link quality — sem lock extra (recursivo) */
+            int8_t my_idx  = searchId(&g_myMatrix, getMyIP());
+            int8_t node_idx = i; /* já é a posição */
+            if(my_idx != -1 && node_idx != -1) {
+                if(g_myMatrix.link_quality[my_idx][node_idx] > 20)
+                    g_myMatrix.link_quality[my_idx][node_idx] -= 20;
+                else
+                    g_myMatrix.link_quality[my_idx][node_idx] = 0;
+            }
             int8_t myPos = searchId(&g_myMatrix, getMyIP());
             if(myPos >= 0) g_myMatrix.matrix[myPos][i] = 0;
             removeIdMatrix(&g_myMatrix, i);
-            removeIdList(&g_myMatrix, i); 
+            removeIdList(&g_myMatrix, i);
             i--;
         }
     }
+}
+
+void removeDeadLinks(void) {
+    pthread_mutex_lock(&g_matrix_mutex);
+    removeDeadLinks_locked();
+    pthread_mutex_unlock(&g_matrix_mutex);
 }
 
 void parameterSize(uint16_t *idOfActiveNodesSize, uint16_t *matrixSize, uint16_t *ageSize, uint8_t numberOfActiveNodes){
@@ -97,43 +119,56 @@ void parameterPos(uint8_t *numberOfActiveNodesStart, uint8_t *matrixStart, uint8
     *ageStart = 1 + 1 + numberActiveNodes + (numberActiveNodes * numberActiveNodes) + 1;
 }
 
-void * serializeMatrix(tdma_matrix_t copy_ignored){
-    (void)copy_ignored;
-    removeDeadLinks(); 
-    tdma_matrix_t *mat = &g_myMatrix;
-    uint16_t numberOfActiveNodesSize, idOfActiveNodesSize, matrixSize, ageSize;
-    uint8_t idOfActiveNodesStart, matrixStart, ageStart;
-    double time = getEpoch();
+/* BUG 1 (mutex) + BUG 2 (buffer overflow) corrigidos:
+ *  - lock protege g_myMatrix contra escrita concorrente do RX
+ *  - payloadpkt_len calculado a partir de ageStart+ageSize para
+ *    cobrir os 2 bytes de gap que o parameterPos introduz */
+void * serializeMatrix(int *out_payload_len){
+    pthread_mutex_lock(&g_matrix_mutex);
+    removeDeadLinks_locked();
 
-    /* ── FIX: renova sempre o creationTime do proprio no ──
-     * Sem isto, quando todos os outros nos morrem, o proprio no
-     * nao renova o seu creationTime e a age cresce indefinidamente.
-     * removeDeadLinks() ja ignora o proprio no, por isso esta
-     * renovacao nao afecta a deteccao de timeout dos outros nos. */
+    tdma_matrix_t *mat = &g_myMatrix;
+    uint16_t idOfActiveNodesSize, matrixSize, ageSize;
+    uint8_t  idOfActiveNodesStart, matrixStart, ageStart;
+    double   time = getEpoch();
+
     int8_t myPos = searchId(mat, getMyIP());
     if (myPos >= 0)
         mat->creationTime[myPos] = time;
 
     for(int x = 0; x < mat->numberOfActiveNodes; x++){
         if(mat->idOfActiveNodes[x] == getMyIP()){
-            mat->age[x] = 0; 
+            mat->age[x] = 0;
             continue;
         }
         mat->age[x] = time - mat->creationTime[x];
     }
-    numberOfActiveNodesSize = sizeof(uint8_t);
+
     parameterSize(&idOfActiveNodesSize, &matrixSize, &ageSize, mat->numberOfActiveNodes);
     parameterPos(&idOfActiveNodesStart, &matrixStart, &ageStart, mat->numberOfActiveNodes);
-    uint16_t payloadpkt_len = numberOfActiveNodesSize + idOfActiveNodesSize + matrixSize + ageSize;
+
+    /* BUG 2 FIX: o tamanho real é ageStart+ageSize, não a soma ingénua
+     * que ignorava os 2 bytes de gap introduzidos por parameterPos */
+    uint16_t payloadpkt_len = (uint16_t)ageStart + ageSize;
+
+    if (out_payload_len) *out_payload_len = (int)payloadpkt_len;
+
     void *payloadpkt_ptr = malloc(payloadpkt_len);
-    if (!payloadpkt_ptr) return NULL;
-    memcpy(payloadpkt_ptr, &mat->numberOfActiveNodes, numberOfActiveNodesSize);
+    if (!payloadpkt_ptr) {
+        pthread_mutex_unlock(&g_matrix_mutex);
+        return NULL;
+    }
+    memset(payloadpkt_ptr, 0, payloadpkt_len);
+
+    memcpy(payloadpkt_ptr, &mat->numberOfActiveNodes, sizeof(uint8_t));
     memcpy((char*)payloadpkt_ptr + idOfActiveNodesStart, &mat->idOfActiveNodes, idOfActiveNodesSize);
     for(int x = 0; x < mat->numberOfActiveNodes; x++){
         memcpy((char*)payloadpkt_ptr + matrixStart + (mat->numberOfActiveNodes * x),
                mat->matrix[x], mat->numberOfActiveNodes * sizeof(uint8_t));
     }
     memcpy((char*)payloadpkt_ptr + ageStart, &mat->age, ageSize);
+
+    pthread_mutex_unlock(&g_matrix_mutex);
     return payloadpkt_ptr;
 }
 
@@ -185,6 +220,7 @@ void discoverIds(tdma_matrix_t *finalMatrix, tdma_matrix_t *matrixA, tdma_matrix
 }
 
 void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
+    pthread_mutex_lock(&g_matrix_mutex);
     int nodes_before = g_myMatrix.numberOfActiveNodes;
     
     uint8_t old_mst[MAX_NODES][MAX_NODES];
@@ -223,14 +259,13 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
 
         double newCreationTime = time - newMat->age[i];
         double myCreationTime = (myPos != -1) ? g_myMatrix.creationTime[myPos] : 0;
-        if(myPos == -1 || myCreationTime < newCreationTime){  
+        if(myPos == -1 || myCreationTime < newCreationTime){
             memset(final->matrix[finalPos], 0, MAX_NODES);
             copyLine(final, newMat, i, finalPos);
-            if(is_direct) {
-                final->creationTime[finalPos] = newCreationTime;
-            } else {
-                final->creationTime[finalPos] = (myPos != -1) ? g_myMatrix.creationTime[myPos] : newCreationTime;
-            }
+            /* BUG 4 FIX: para nós indirectos, usava o creationTime LOCAL
+             * (antigo) mesmo quando a info recebida era mais recente,
+             * causando expiração prematura. Agora usa sempre o mais recente. */
+            final->creationTime[finalPos] = newCreationTime;
             final->age[finalPos] = newMat->age[i];
         }
     }
@@ -241,8 +276,16 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
     if(myIpPos >= 0 && otherIpPos >= 0) {
         if(final->matrix[myIpPos][otherIpPos] == 0)
             printf("\n[MATRIX] Ligacao Direta: No %d conectado!\n", other_IP);
+        /* BUG 3 FIX: a MST exige matrix[u][v] && matrix[v][u].
+         * copyLine podia copiar matrix[other][me]=0 do MATRIX recebido
+         * (se o vizinho ainda não nos tinha ouvido no ciclo anterior),
+         * excluindo a aresta da MST mesmo com ligação directa confirmada.
+         * Como recebemos o MATRIX do vizinho, a ligação é bidireccional:
+         * forçamos ambas as direcções a 1 e refrescamos os dois tempos. */
         final->matrix[myIpPos][otherIpPos] = 1;
-        final->creationTime[myIpPos] = time;
+        final->matrix[otherIpPos][myIpPos] = 1;
+        final->creationTime[myIpPos]    = time;
+        final->creationTime[otherIpPos] = time;
     }
     
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++) {
@@ -285,6 +328,9 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         }
     }
     
+    pthread_mutex_unlock(&g_matrix_mutex);
+
+    /* dispara evento FORA do lock para evitar inversão de prioridade */
     if(topology_changed) {
         printf("[MATRIX] TOPOLOGIA MUDOU - Criando evento para routing!\n\n");
         extern event_queue_t *g_event_queue;
@@ -309,6 +355,12 @@ void MATRIX_parsePkt(void* rx_tdmapkt_ptr, ssize_t num_bytes_read, uint8_t other
 }
 
 void MATRIX_init(uint8_t my_id) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_matrix_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+
     memset(&g_myMatrix, 0, sizeof(tdma_matrix_t));
     g_myMatrix.myId = my_id;
     g_myMatrix.numberOfActiveNodes = 1;
@@ -323,14 +375,32 @@ void MATRIX_init(uint8_t my_id) {
 }
 
 tdma_matrix_t* MATRIX_get(void) {
+    /* Devolve ponteiro directo — caller deve ter g_matrix_mutex
+     * ou usar MATRIX_get_snapshot() para acesso thread-safe. */
     return &g_myMatrix;
 }
 
 uint8_t MATRIX_getNumNodes(void) {
-    return g_myMatrix.numberOfActiveNodes;
+    pthread_mutex_lock(&g_matrix_mutex);
+    uint8_t n = g_myMatrix.numberOfActiveNodes;
+    pthread_mutex_unlock(&g_matrix_mutex);
+    return n;
+}
+
+void MATRIX_get_snapshot(matrix_snapshot_t *snap) {
+    pthread_mutex_lock(&g_matrix_mutex);
+    snap->numberOfActiveNodes = g_myMatrix.numberOfActiveNodes;
+    memcpy(snap->idOfActiveNodes, g_myMatrix.idOfActiveNodes, sizeof(snap->idOfActiveNodes));
+    memcpy(snap->link_quality,    g_myMatrix.link_quality,    sizeof(snap->link_quality));
+    for(int i = 0; i < MAX_NODES; i++) {
+        memcpy(snap->mst[i], g_spanningTree[i], MAX_NODES);
+        snap->mst_ptrs[i] = snap->mst[i];
+    }
+    pthread_mutex_unlock(&g_matrix_mutex);
 }
 
 void MATRIX_print(void) {
+    pthread_mutex_lock(&g_matrix_mutex);
     printf("[MATRIX] Nodes: ");
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++)
         printf("%d ", g_myMatrix.idOfActiveNodes[i]);
@@ -344,12 +414,17 @@ void MATRIX_print(void) {
         printf(" (age: %.2f)\n", getEpoch() - g_myMatrix.creationTime[i]);
     }
     printf("\n");
+    pthread_mutex_unlock(&g_matrix_mutex);
 }
 
 void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout) {
-    int8_t my_idx = searchId(&g_myMatrix, getMyIP());
+    pthread_mutex_lock(&g_matrix_mutex);
+    int8_t my_idx  = searchId(&g_myMatrix, getMyIP());
     int8_t node_idx = searchId(&g_myMatrix, node_id);
-    if(my_idx == -1 || node_idx == -1) return;
+    if(my_idx == -1 || node_idx == -1) {
+        pthread_mutex_unlock(&g_matrix_mutex);
+        return;
+    }
     if(timeout) {
         if(g_myMatrix.link_quality[my_idx][node_idx] > 20)
             g_myMatrix.link_quality[my_idx][node_idx] -= 20;
@@ -361,12 +436,15 @@ void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout) {
         else
             g_myMatrix.link_quality[my_idx][node_idx] = 100;
     }
+    pthread_mutex_unlock(&g_matrix_mutex);
 }
 
 void primAlgorithm_weighted(void) {
+    pthread_mutex_lock(&g_matrix_mutex);
     int num = g_myMatrix.numberOfActiveNodes;
     if(num <= 1) {
         for(int i = 0; i < MAX_NODES; i++) memset(g_spanningTree[i], 0, MAX_NODES);
+        pthread_mutex_unlock(&g_matrix_mutex);
         return;
     }
     bool in_mst[MAX_NODES] = {false};
@@ -396,15 +474,19 @@ void primAlgorithm_weighted(void) {
             g_spanningTree[parent[i]][i] = 1;
             g_spanningTree[i][parent[i]] = 1;
         }
+    pthread_mutex_unlock(&g_matrix_mutex);
 }
 
 uint8_t** MATRIX_getSpanningTree(void) {
+    /* Devolve ponteiro directo — usar MATRIX_get_snapshot() para acesso seguro */
     return g_spanningTree;
 }
 
 void MATRIX_setLinkQuality(uint8_t node_id, uint8_t quality) {
+    pthread_mutex_lock(&g_matrix_mutex);
     int8_t my_idx   = searchId(&g_myMatrix, getMyIP());
     int8_t node_idx = searchId(&g_myMatrix, node_id);
-    if (my_idx == -1 || node_idx == -1) return;
-    g_myMatrix.link_quality[my_idx][node_idx] = quality;
+    if (my_idx != -1 && node_idx != -1)
+        g_myMatrix.link_quality[my_idx][node_idx] = quality;
+    pthread_mutex_unlock(&g_matrix_mutex);
 }
