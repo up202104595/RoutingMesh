@@ -282,10 +282,12 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
          * excluindo a aresta da MST mesmo com ligação directa confirmada.
          * Como recebemos o MATRIX do vizinho, a ligação é bidireccional:
          * forçamos ambas as direcções a 1 e refrescamos os dois tempos. */
+        /* Confirmamos que NÓS ouvimos other — só actualizamos a nossa linha.
+         * NÃO forçamos matrix[other][me]=1: o canal pode ser assimétrico
+         * (eu ouço-o mas ele não me ouve). O Prim's usa OR para incluir
+         * arestas parcialmente confirmadas. */
         final->matrix[myIpPos][otherIpPos] = 1;
-        final->matrix[otherIpPos][myIpPos] = 1;
-        final->creationTime[myIpPos]    = time;
-        final->creationTime[otherIpPos] = time;
+        final->creationTime[myIpPos] = time;
     }
     
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++) {
@@ -459,10 +461,19 @@ void primAlgorithm_weighted(void) {
         if(u == -1) break;
         in_mst[u] = true;
         for(int v = 0; v < num; v++) {
-            if(g_myMatrix.matrix[u][v] && g_myMatrix.matrix[v][u] && !in_mst[v]) {
+            /* BUG 3 FIX (corrigido): AND original falhava quando o vizinho
+             * ainda não tinha actualizado matrix[vizinho][eu] (staleness de
+             * até 1 frame). OR inclui a aresta se pelo menos uma direcção
+             * está confirmada. Arestas unidireccionais recebem penalidade
+             * de 20 pontos para serem preteridas face a arestas confirmadas
+             * nos dois sentidos quando a MST tem alternativas. */
+            bool fwd = g_myMatrix.matrix[u][v];
+            bool rev = g_myMatrix.matrix[v][u];
+            if((fwd || rev) && !in_mst[v]) {
                 uint8_t quality = g_myMatrix.link_quality[u][v];
                 if(quality == 0) quality = g_myMatrix.link_quality[v][u];
                 if(quality == 0) quality = INITIAL_LINK_QUALITY;
+                if(!(fwd && rev) && quality > 20) quality -= 20; /* penalidade unidireccional */
                 int cost = 100 - quality;
                 if(cost < key[v]) { parent[v] = u; key[v] = cost; }
             }
