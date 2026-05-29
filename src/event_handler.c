@@ -14,7 +14,6 @@
 #include "routing.h"
 #include "matrix.h"
 #include "node.h"
-#include "tx_queue.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,28 +116,6 @@ void* event_handler_loop(void *arg) {
 
                 routing_manager_print(node->routing);
                 printf("[EVENT] Routing actualizado\n");
-
-                /* Descarta pacotes obsoletos acumulados antes da mudança
-                 * de rota — evita que o lag do período anterior persista. */
-                tx_queue_flush(node->tx_queue);
-
-                /* Reconecta TCP apenas se o socket estiver genuinamente
-                 * fechado (< 0). Sockets obsoletos mas "abertos" são tratados
-                 * pelo TX loop (EPIPE → fecha → keepalive reconecta).
-                 * Evita fechar tcp_sockfd[relay_gw] desnecessariamente. */
-                if (evt->node_id >= 1 && evt->node_id <= node->num_nodes) {
-                    uint8_t nh = routing_manager_lookup(node->routing, evt->node_id);
-                    if (nh == evt->node_id) {
-                        pthread_mutex_lock(&node->tcp_mutex);
-                        bool disconnected = (node->tcp_sockfd[evt->node_id] < 0);
-                        pthread_mutex_unlock(&node->tcp_mutex);
-                        if (disconnected) {
-                            printf("[EVENT] TCP peer %d desconectado — a reconectar...\n",
-                                   evt->node_id);
-                            node_tcp_reconnect(node, evt->node_id);
-                        }
-                    }
-                }
                 break;
             }
 

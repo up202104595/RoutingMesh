@@ -148,8 +148,6 @@ routing_manager_t* routing_manager_create(uint8_t my_node_id, uint8_t num_nodes)
 
 void routing_manager_destroy(routing_manager_t *rm) {
     if (!rm) return;
-    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, MESH_PHY_IFACE);
-    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
     pthread_mutex_destroy(&rm->lock);
     free(rm);
 }
@@ -182,12 +180,6 @@ void routing_manager_recompute(routing_manager_t *rm,
     printf("\n[ROUTING] =============================================\n");
     printf("[ROUTING] Recalculando rotas (Metodo Ana + Link Quality)\n");
     printf("[ROUTING] =============================================\n");
-
-    /* remove rotas antigas — só no modo ip_forward */
-#ifndef RELAY_METHOD_ARP
-    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, MESH_PHY_IFACE);
-    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
-#endif
 
     route_node_t *primary_list = build_routing_structure(
         rm->my_node_id, spanning_tree, link_quality, active_nodes, num_active);
@@ -238,38 +230,16 @@ void routing_manager_recompute(routing_manager_t *rm,
         }
 
 #else
-        /* ── Metodo TUN unificado ──
-         *
-         * Todas as rotas (directas e relay) passam pelo TUN:
-         *   10.0.0.X via 10.0.0.MY_ID dev tunN
-         *
-         * O meu próprio IP no TUN (10.0.0.MY_ID) é alcançável via tunN,
-         * portanto o kernel aceita-o como gateway e mete o pacote na fila
-         * do TUN. A thread tun_reader_loop lê o pacote, chama
-         * routing_manager_lookup(dst) → next_hop, e envia via tcp_sockfd.
-         * Para directos: next_hop == dest_id → tcp_sockfd[N3] usado.
-         * Para relay:    next_hop != dest_id → tcp_sockfd[N2] usado.
-         *
-         * A rota via interface física (172.20.10.X dev enp0s3) bypassava
-         * o TUN — a thread nunca via os pacotes e nada era enviado. */
-        {
-            char dest_ip[32], gw_ip[32];
-            snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE, dest_id);
-            snprintf(gw_ip,   sizeof(gw_ip),   "%s.%u", MESH_NET_BASE, rm->my_node_id);
-
-            if (ip_route_add(dest_ip, gw_ip, rm->mesh_iface) == 0) {
-                if (dest_id == next_hop)
-                    printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
-                           dest_ip, gw_ip, rm->mesh_iface);
-                else
-                    printf("[ROUTING]   ip route add %s via %s dev %s  [relay via %d, quality=%u]\n",
-                           dest_ip, gw_ip, rm->mesh_iface, next_hop,
-                           rm->routing_table[i].quality);
-            } else {
-                fprintf(stderr, "[ROUTING]   ERRO: ip route add %s via %s dev %s\n",
-                        dest_ip, gw_ip, rm->mesh_iface);
-            }
-        }
+        /* tun.c já adicionou "ip route add 10.0.0.0/24 dev tunN src 10.0.0.MY_ID".
+         * Essa rota /24 cobre todo o tráfego mesh — não são necessárias rotas /32
+         * por destino. A tabela rm->routing_table é usada apenas por
+         * routing_manager_lookup() dentro da thread tun_reader_loop. */
+        if (dest_id == next_hop)
+            printf("[ROUTING]   %u -> %u  [directo, quality=%u]\n",
+                   dest_id, next_hop, rm->routing_table[i].quality);
+        else
+            printf("[ROUTING]   %u -> %u  [relay via %d, quality=%u]\n",
+                   dest_id, next_hop, next_hop, rm->routing_table[i].quality);
 #endif
     }
 
