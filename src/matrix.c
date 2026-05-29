@@ -292,6 +292,14 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
          * arestas parcialmente confirmadas. */
         final->matrix[myIpPos][otherIpPos] = 1;
         final->creationTime[myIpPos] = time;
+        /* Recebemos um MATRIX directo de other_IP: a qualidade observada
+         * directamente deve superar imediatamente o relay baseline
+         * (INITIAL_LINK_QUALITY). Sem isto, quality[me][other] começa em 0
+         * e sobe só 5 por pacote — o Prim's mantém relay durante 11+
+         * frames (~1.6 s mínimo, muito mais com perdas) porque
+         * quality[relay][other] = INITIAL_LINK_QUALITY já de início. */
+        if(final->link_quality[myIpPos][otherIpPos] < INITIAL_LINK_QUALITY + 10)
+            final->link_quality[myIpPos][otherIpPos] = INITIAL_LINK_QUALITY + 10;
     }
     
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++) {
