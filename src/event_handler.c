@@ -103,9 +103,6 @@ void* event_handler_loop(void *arg) {
             case EVENT_TOPOLOGY_CHANGED: {
                 printf("\n[EVENT] Topologia mudou — recalculando routing...\n");
 
-                /* BUG 1 FIX: MATRIX_get() devolve ponteiro não protegido.
-                 * MATRIX_get_snapshot() copia atomicamente matriz + MST
-                 * sob g_matrix_mutex antes de chamar recompute. */
                 matrix_snapshot_t snap;
                 MATRIX_get_snapshot(&snap);
 
@@ -119,6 +116,20 @@ void* event_handler_loop(void *arg) {
 
                 routing_manager_print(node->routing);
                 printf("[EVENT] Routing actualizado\n");
+
+                /* Reconecta TCP imediatamente para o nó que voltou a ser
+                 * alcançável. Sem isto, tcp_sockfd[peer]=-1 até o keepalive
+                 * acordar (até 5s), descartando pacotes mesmo com rota directa. */
+                if (evt->node_id >= 1 && evt->node_id <= node->num_nodes) {
+                    pthread_mutex_lock(&node->tcp_mutex);
+                    bool needs = (node->tcp_sockfd[evt->node_id] < 0);
+                    pthread_mutex_unlock(&node->tcp_mutex);
+                    if (needs) {
+                        printf("[EVENT] TCP peer %d desconectado — a reconectar...\n",
+                               evt->node_id);
+                        node_tcp_reconnect(node, evt->node_id);
+                    }
+                }
                 break;
             }
 
