@@ -280,28 +280,14 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
     if(myIpPos >= 0 && otherIpPos >= 0) {
         if(final->matrix[myIpPos][otherIpPos] == 0)
             printf("\n[MATRIX] Ligacao Direta: No %d conectado!\n", other_IP);
-        /* BUG 3 FIX: a MST exige matrix[u][v] && matrix[v][u].
-         * copyLine podia copiar matrix[other][me]=0 do MATRIX recebido
-         * (se o vizinho ainda não nos tinha ouvido no ciclo anterior),
-         * excluindo a aresta da MST mesmo com ligação directa confirmada.
-         * Como recebemos o MATRIX do vizinho, a ligação é bidireccional:
-         * forçamos ambas as direcções a 1 e refrescamos os dois tempos. */
         /* Confirmamos que NÓS ouvimos other — só actualizamos a nossa linha.
          * NÃO forçamos matrix[other][me]=1: o canal pode ser assimétrico
          * (eu ouço-o mas ele não me ouve). O Prim's usa OR para incluir
          * arestas parcialmente confirmadas. */
         final->matrix[myIpPos][otherIpPos] = 1;
         final->creationTime[myIpPos] = time;
-        /* Recebemos um MATRIX directo de other_IP: a qualidade observada
-         * directamente deve superar imediatamente o relay baseline
-         * (INITIAL_LINK_QUALITY). Sem isto, quality[me][other] começa em 0
-         * e sobe só 5 por pacote — o Prim's mantém relay durante 11+
-         * frames (~1.6 s mínimo, muito mais com perdas) porque
-         * quality[relay][other] = INITIAL_LINK_QUALITY já de início. */
-        if(final->link_quality[myIpPos][otherIpPos] < INITIAL_LINK_QUALITY + 10)
-            final->link_quality[myIpPos][otherIpPos] = INITIAL_LINK_QUALITY + 10;
     }
-    
+
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++) {
         int8_t finalPos = searchId(final, g_myMatrix.idOfActiveNodes[i]);
         if(finalPos >= 0) {
@@ -317,6 +303,17 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         for(int j = 0; j < final->numberOfActiveNodes; j++)
             if(i != j && final->matrix[i][j] == 1 && final->link_quality[i][j] == 0)
                 final->link_quality[i][j] = INITIAL_LINK_QUALITY;
+
+    /* Boost aplicado DEPOIS do copy loop e fill-zeros para não ser
+     * sobrescrito. O copy loop copia g_myMatrix.link_quality[me][other]
+     * (apenas 5 após MATRIX_updateLinkQuality) e anulava o boost.
+     * quality[relay][other] = INITIAL_LINK_QUALITY = 50 (fill-zeros).
+     * Com quality[me][other] = INITIAL+10 = 60 > 50, o Prim's escolhe
+     * directo imediatamente no primeiro MATRIX directo recebido. */
+    if(myIpPos >= 0 && otherIpPos >= 0) {
+        if(final->link_quality[myIpPos][otherIpPos] < INITIAL_LINK_QUALITY + 10)
+            final->link_quality[myIpPos][otherIpPos] = INITIAL_LINK_QUALITY + 10;
+    }
 
     memcpy(&g_myMatrix, final, sizeof(tdma_matrix_t));
     free(final);
