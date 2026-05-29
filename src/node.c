@@ -213,13 +213,18 @@ void* tcp_keepalive_loop(void *arg) {
                     pthread_mutex_unlock(&node->tcp_mutex);
                     printf("[TCP] Peer %d ligado\n", i);
                 } else {
-                    printf("[TCP] Peer %d nao disponivel — a tentar em 3s...\n", i);
+                    printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
                 }
             } else {
                 char probe;
                 ssize_t r = recv(cur_fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
-                if (r == 0) {
-                    printf("[TCP] Peer %d socket morto — a reconectar\n", i);
+                /* r==0: FIN (peer fechou graciosamente)
+                 * r<0 && errno != EAGAIN/EWOULDBLOCK: RST ou erro real */
+                bool dead = (r == 0) ||
+                            (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK);
+                if (dead) {
+                    printf("[TCP] Peer %d socket morto (r=%zd errno=%d) — a reconectar\n",
+                           i, r, errno);
                     pthread_mutex_lock(&node->tcp_mutex);
                     if (node->tcp_sockfd[i] == cur_fd) {
                         close(cur_fd);
@@ -229,7 +234,7 @@ void* tcp_keepalive_loop(void *arg) {
                 }
             }
         }
-        sleep(3);
+        sleep(1);
         if (!node->running || !g_running) break;
     }
 

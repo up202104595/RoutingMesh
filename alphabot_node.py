@@ -58,7 +58,6 @@ CMD_PORT           = 9000
 TEL_PORT           = 9001
 BASE_IP            = "10.0.0.3"
 TELEMETRY_INTERVAL = 0.2
-WATCHDOG_TIMEOUT   = 2.0
 
 # ── Parâmetros de vídeo ───────────────────────────────────────
 VIDEO_WIDTH   = 640
@@ -278,14 +277,6 @@ def cmd_receiver():
     sock.close()
     print("[CMD] Thread terminada")
 
-def watchdog():
-    """Para os motores se não chegar comando em WATCHDOG_TIMEOUT segundos."""
-    while g_running:
-        with g_lock:
-            age = time.time() - g_last_cmd
-        if age > WATCHDOG_TIMEOUT:
-            motors_stop()
-        time.sleep(0.1)
 
 def telemetry_sender():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -331,7 +322,6 @@ def main():
 
     threading.Thread(target=cmd_receiver,               daemon=True).start()
     threading.Thread(target=telemetry_sender,           daemon=True).start()
-    threading.Thread(target=watchdog,                   daemon=True).start()
     threading.Thread(target=stream_watchdog,
                      args=(proc_ref,),                  daemon=True).start()
 
