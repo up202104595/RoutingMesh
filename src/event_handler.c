@@ -117,7 +117,18 @@ void* event_handler_loop(void *arg) {
                 routing_manager_print(node->routing);
                 printf("[EVENT] Routing actualizado\n");
 
-                /* Não há acção TCP aqui — o keepalive trata da reconexão. */
+                /* Se o nó voltou a ser alcançável directamente, força o fecho
+                 * do socket obsoleto (pode estar vivo mas morto — iptables
+                 * bloqueava sem fechar o TCP). Sem isto, o TX obtém EPIPE,
+                 * fecha e aguarda o keepalive (até 3-5 s). */
+                if (evt->node_id >= 1 && evt->node_id <= node->num_nodes) {
+                    uint8_t nh = routing_manager_lookup(node->routing, evt->node_id);
+                    if (nh == evt->node_id) {
+                        printf("[EVENT] Rota directa para %d — a reconectar TCP...\n",
+                               evt->node_id);
+                        node_tcp_reconnect(node, evt->node_id);
+                    }
+                }
                 break;
             }
 
