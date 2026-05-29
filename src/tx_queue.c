@@ -79,3 +79,17 @@ int tx_queue_size(tx_queue_t *q) {
     pthread_mutex_unlock(&q->lock);
     return n;
 }
+
+void tx_queue_flush(tx_queue_t *q) {
+    if (!q) return;
+    pthread_mutex_lock(&q->lock);
+    tx_pkt_t *p = q->head;
+    int dropped = 0;
+    while (p) { tx_pkt_t *n = p->next; free(p); p = n; dropped++; }
+    q->head  = NULL;
+    q->tail  = NULL;
+    q->count = 0;
+    pthread_mutex_unlock(&q->lock);
+    if (dropped > 0)
+        printf("[TX_QUEUE] Flush: %d pacotes descartados (mudanca de rota)\n", dropped);
+}

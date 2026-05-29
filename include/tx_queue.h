@@ -53,4 +53,7 @@ tx_pkt_t* tx_queue_pop(tx_queue_t *q);
 /* Número de pacotes em espera */
 int tx_queue_size(tx_queue_t *q);
 
+/* Descarta todos os pacotes pendentes (chamado em mudança de topologia) */
+void tx_queue_flush(tx_queue_t *q);
+
 #endif /* TX_QUEUE_H */

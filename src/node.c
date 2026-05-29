@@ -120,7 +120,7 @@ static int tcp_connect_peer(const char *peer_ip, int peer_id) {
 
     /* Timeouts definidos aqui, no momento da criação — a thread RX
      * não precisa de os repetir e arriscar aplicá-los num fd já substituído */
-    struct timeval tv_snd = {1, 0};
+    struct timeval tv_snd = {0, 100000};  /* 100 ms — falha rápido em socket obsoleto */
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv_snd, sizeof(tv_snd));
     struct timeval tv_rcv = {2, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_rcv, sizeof(tv_rcv));
@@ -159,7 +159,7 @@ void* tcp_accept_loop(void *arg) {
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
         /* Timeouts definidos aqui (accept) — mesma lógica do connect */
-        struct timeval tv_snd = {1, 0};
+        struct timeval tv_snd = {0, 100000};  /* 100 ms */
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv_snd, sizeof(tv_snd));
         struct timeval tv_rcv = {2, 0};
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_rcv, sizeof(tv_rcv));
