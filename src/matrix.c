@@ -262,10 +262,14 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         if(myPos == -1 || myCreationTime < newCreationTime){
             memset(final->matrix[finalPos], 0, MAX_NODES);
             copyLine(final, newMat, i, finalPos);
-            /* BUG 4 FIX: para nós indirectos, usava o creationTime LOCAL
-             * (antigo) mesmo quando a info recebida era mais recente,
-             * causando expiração prematura. Agora usa sempre o mais recente. */
-            final->creationTime[finalPos] = newCreationTime;
+            /* Nós indirectos NÃO refrescam creationTime local — só directos.
+             * Garante que se Node 3 ficar inacessível directamente, expira
+             * no Node 1 após MAX_AGE mesmo que Node 2 o reporte como vivo. */
+            if(is_direct) {
+                final->creationTime[finalPos] = newCreationTime;
+            } else {
+                final->creationTime[finalPos] = (myPos != -1) ? g_myMatrix.creationTime[myPos] : newCreationTime;
+            }
             final->age[finalPos] = newMat->age[i];
         }
     }
