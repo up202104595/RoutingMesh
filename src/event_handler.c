@@ -118,14 +118,16 @@ void* event_handler_loop(void *arg) {
                 printf("[EVENT] Routing actualizado\n");
 
                 /* Reconecta TCP imediatamente para o nó que voltou a ser
-                 * alcançável. Sem isto, tcp_sockfd[peer]=-1 até o keepalive
-                 * acordar (até 5s), descartando pacotes mesmo com rota directa. */
+                 * alcançável directamente. Sem isto, uma ligação TCP obsoleta
+                 * (EVENT_NODE_TIMEOUT nunca é disparado) fica aberta mas morta,
+                 * e o keepalive demora até 5s a detectar a falha.
+                 * Forçamos sempre o fecho+reconexão para que a rota directa
+                 * seja usada imediatamente. */
                 if (evt->node_id >= 1 && evt->node_id <= node->num_nodes) {
-                    pthread_mutex_lock(&node->tcp_mutex);
-                    bool needs = (node->tcp_sockfd[evt->node_id] < 0);
-                    pthread_mutex_unlock(&node->tcp_mutex);
-                    if (needs) {
-                        printf("[EVENT] TCP peer %d desconectado — a reconectar...\n",
+                    uint8_t next_hop = routing_manager_lookup(node->routing, evt->node_id);
+                    if (next_hop == evt->node_id) {
+                        /* rota directa — fecha socket obsoleto e reconecta */
+                        printf("[EVENT] TCP peer %d rota directa — a reconectar...\n",
                                evt->node_id);
                         node_tcp_reconnect(node, evt->node_id);
                     }
