@@ -238,35 +238,37 @@ void routing_manager_recompute(routing_manager_t *rm,
         }
 
 #else
-        /* ── Metodo ip_forward (Miguel 2025) — versao original ──
+        /* ── Metodo TUN unificado ──
          *
-         * Rotas directas:   10.0.0.X via 172.20.10.X dev wlan0
-         * Rotas indirectas: 10.0.0.X via 10.0.0.Y   dev tunN
+         * Todas as rotas (directas e relay) passam pelo TUN:
+         *   10.0.0.X via 10.0.0.MY_ID dev tunN
          *
-         * O kernel com ip_forward resolve o relay via TUN.
-         */
-        if (dest_id == next_hop) {
-            char dest_tun_ip[32], gw_physical_ip[32];
-            snprintf(dest_tun_ip,    sizeof(dest_tun_ip),    "10.0.0.%u", dest_id);
-            snprintf(gw_physical_ip, sizeof(gw_physical_ip), "%s.%u", MESH_NET_PREFIX, dest_id);
-
-            if (ip_route_add(dest_tun_ip, gw_physical_ip, MESH_PHY_IFACE) == 0)
-                printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
-                       dest_tun_ip, gw_physical_ip, MESH_PHY_IFACE);
-            else
-                fprintf(stderr, "[ROUTING]   ERRO: ip route add %s via %s dev %s\n",
-                        dest_tun_ip, gw_physical_ip, MESH_PHY_IFACE);
-        } else {
+         * O meu próprio IP no TUN (10.0.0.MY_ID) é alcançável via tunN,
+         * portanto o kernel aceita-o como gateway e mete o pacote na fila
+         * do TUN. A thread tun_reader_loop lê o pacote, chama
+         * routing_manager_lookup(dst) → next_hop, e envia via tcp_sockfd.
+         * Para directos: next_hop == dest_id → tcp_sockfd[N3] usado.
+         * Para relay:    next_hop != dest_id → tcp_sockfd[N2] usado.
+         *
+         * A rota via interface física (172.20.10.X dev enp0s3) bypassava
+         * o TUN — a thread nunca via os pacotes e nada era enviado. */
+        {
             char dest_ip[32], gw_ip[32];
             snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE, dest_id);
-            snprintf(gw_ip,   sizeof(gw_ip),   "%s.%u", MESH_NET_BASE, next_hop);
+            snprintf(gw_ip,   sizeof(gw_ip),   "%s.%u", MESH_NET_BASE, rm->my_node_id);
 
-            if (ip_route_add(dest_ip, gw_ip, rm->mesh_iface) == 0)
-                printf("[ROUTING]   ip route add %s via %s  [quality=%u]\n",
-                       dest_ip, gw_ip, rm->routing_table[i].quality);
-            else
-                fprintf(stderr, "[ROUTING]   ERRO: ip route add %s via %s\n",
-                        dest_ip, gw_ip);
+            if (ip_route_add(dest_ip, gw_ip, rm->mesh_iface) == 0) {
+                if (dest_id == next_hop)
+                    printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
+                           dest_ip, gw_ip, rm->mesh_iface);
+                else
+                    printf("[ROUTING]   ip route add %s via %s dev %s  [relay via %d, quality=%u]\n",
+                           dest_ip, gw_ip, rm->mesh_iface, next_hop,
+                           rm->routing_table[i].quality);
+            } else {
+                fprintf(stderr, "[ROUTING]   ERRO: ip route add %s via %s dev %s\n",
+                        dest_ip, gw_ip, rm->mesh_iface);
+            }
         }
 #endif
     }
