@@ -1,0 +1,20 @@
+[Unit]
+Description=RA-TDMAs+ Mesh Node (meshnode C daemon)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# NODE_ID e NUM_NODES definidos no ficheiro de override:
+#   /etc/systemd/system/meshnode.service.d/override.conf
+EnvironmentFile=/etc/routingmesh/node.conf
+ExecStart=/usr/local/bin/meshnode ${NODE_ID} ${NUM_NODES}
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+# precisa de root para criar TUN e manipular rotas
+User=root
+
+[Install]
+WantedBy=multi-user.target
