@@ -1,0 +1,16 @@
+[Unit]
+Description=RA-TDMAs+ Metrics Collector
+After=meshnode.service
+Requires=meshnode.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'journalctl -u meshnode -f -n 0 --output=cat | python3 /usr/local/bin/metrics_collector.py'
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+User=root
+
+[Install]
+WantedBy=multi-user.target

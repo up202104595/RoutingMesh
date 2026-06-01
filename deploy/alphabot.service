@@ -1,0 +1,17 @@
+[Unit]
+Description=RA-TDMAs+ AlphaBot2 Node (Nó 1)
+After=meshnode.service
+Requires=meshnode.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/Documentos/RoutingMeshNet/RoutingMesh
+ExecStart=/usr/bin/python3 alphabot_node.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+User=root
+
+[Install]
+WantedBy=multi-user.target
