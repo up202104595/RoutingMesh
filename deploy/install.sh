@@ -45,33 +45,42 @@ NUM_NODES=$NUM_NODES
 EOF
 echo "      OK: NODE_ID=$NODE_ID NUM_NODES=$NUM_NODES"
 
-# ── 3. Serviço meshnode ───────────────────────────────────────────────────────
-echo "[3/5] A instalar meshnode.service..."
-cp "$SCRIPT_DIR/meshnode.service" /etc/systemd/system/meshnode.service
+# ── 3. Serviços meshnode + ad-hoc ────────────────────────────────────────────
+echo "[3/5] A instalar serviços..."
+cp "$SCRIPT_DIR/meshnode.service"         /etc/systemd/system/meshnode.service
 cp "$SCRIPT_DIR/meshnode-metrics.service" /etc/systemd/system/meshnode-metrics.service
+cp "$SCRIPT_DIR/adhoc.service"            /etc/systemd/system/adhoc.service
+cp "$SCRIPT_DIR/adhoc-start.sh"           /usr/local/bin/adhoc-start.sh
+cp "$SCRIPT_DIR/adhoc-stop.sh"            /usr/local/bin/adhoc-stop.sh
+chmod +x /usr/local/bin/adhoc-start.sh
+chmod +x /usr/local/bin/adhoc-stop.sh
+echo "      OK: adhoc.service, meshnode.service, meshnode-metrics.service"
+
+# Desativa wpa_supplicant e NetworkManager no boot (ad-hoc não os precisa)
+systemctl disable wpa_supplicant 2>/dev/null || true
+systemctl disable NetworkManager 2>/dev/null || true
+echo "      OK: wpa_supplicant e NetworkManager desativados no boot"
 
 # ── 4. Serviço específico do nó ───────────────────────────────────────────────
 if [[ "$NODE_ID" -eq 1 ]]; then
     echo "[4/5] A instalar alphabot.service (Nó 1)..."
-    # Ajusta o WorkingDirectory consoante o caminho real
     ALPHABOT_DIR="$PROJECT_DIR"
     sed "s|WorkingDirectory=.*|WorkingDirectory=$ALPHABOT_DIR|" \
         "$SCRIPT_DIR/alphabot.service" \
         > /etc/systemd/system/alphabot.service
     systemctl daemon-reload
-    systemctl enable meshnode meshnode-metrics alphabot
-    echo "      Serviços: meshnode, meshnode-metrics, alphabot"
+    systemctl enable adhoc meshnode meshnode-metrics alphabot
+    echo "      Serviços: adhoc, meshnode, meshnode-metrics, alphabot"
 elif [[ "$NODE_ID" -eq 2 ]]; then
-    echo "[4/5] Nó 2 (relay puro) — só meshnode + metrics"
+    echo "[4/5] Nó 2 (relay puro)"
     systemctl daemon-reload
-    systemctl enable meshnode meshnode-metrics
-    echo "      Serviços: meshnode, meshnode-metrics"
+    systemctl enable adhoc meshnode meshnode-metrics
+    echo "      Serviços: adhoc, meshnode, meshnode-metrics"
 elif [[ "$NODE_ID" -eq 3 ]]; then
-    echo "[4/5] Nó 3 (base station) — só meshnode + metrics"
-    echo "      (base_station.py corre manualmente)"
+    echo "[4/5] Nó 3 (base station) — base_station.py corre manualmente"
     systemctl daemon-reload
-    systemctl enable meshnode meshnode-metrics
-    echo "      Serviços: meshnode, meshnode-metrics"
+    systemctl enable adhoc meshnode meshnode-metrics
+    echo "      Serviços: adhoc, meshnode, meshnode-metrics"
 fi
 
 # ── 5. Diretório de logs ──────────────────────────────────────────────────────
@@ -82,11 +91,11 @@ chmod 755 /var/log/routingmesh
 echo ""
 echo "=== Instalação concluída ==="
 echo ""
-echo "Para iniciar agora:"
+echo "Para iniciar agora (ou reinicia a Raspberry — arranca automaticamente):"
 if [[ "$NODE_ID" -eq 1 ]]; then
-    echo "  sudo systemctl start meshnode meshnode-metrics alphabot"
+    echo "  sudo systemctl start adhoc meshnode meshnode-metrics alphabot"
 else
-    echo "  sudo systemctl start meshnode meshnode-metrics"
+    echo "  sudo systemctl start adhoc meshnode meshnode-metrics"
 fi
 echo ""
 echo "Para ver logs ao vivo:"

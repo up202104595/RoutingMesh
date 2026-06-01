@@ -1,0 +1,17 @@
+[Unit]
+Description=RA-TDMAs+ WiFi Ad-Hoc Mode (manet-mesh)
+# Corre antes do meshnode e antes do wpa_supplicant poder interferir
+Before=meshnode.service wpa_supplicant.service
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/routingmesh/node.conf
+
+ExecStart=/usr/local/bin/adhoc-start.sh
+ExecStop=/usr/local/bin/adhoc-stop.sh
+
+[Install]
+WantedBy=multi-user.target
