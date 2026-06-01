@@ -58,7 +58,6 @@ CMD_PORT           = 9000
 TEL_PORT           = 9001
 BASE_IP            = "10.0.0.3"
 TELEMETRY_INTERVAL = 0.2
-WATCHDOG_TIMEOUT   = 2.0
 
 # ── Parâmetros de vídeo ───────────────────────────────────────
 VIDEO_WIDTH   = 640
@@ -149,8 +148,9 @@ def hardware_init():
     if HAS_I2C:
         try:
             pca = PCA9685(0x40, 1)
-            pca.set_servo(0, 90)
-            print("[ALPHABOT] Servo centrado (90°)")
+            pca.set_servo(0, 90)   # pan centrado
+            pca.set_servo(1, 90)   # tilt centrado
+            print("[ALPHABOT] Servos centrados (90°)")
         except Exception as e:
             print(f"[ALPHABOT] ERRO PCA9685: {e}")
             pca = None
@@ -215,7 +215,14 @@ def servo_set_pan(degrees):
         try:
             pca.set_servo(0, max(0, min(180, degrees)))
         except Exception as e:
-            print(f"[SERVO] ERRO: {e}")
+            print(f"[SERVO] ERRO pan: {e}")
+
+def servo_set_tilt(degrees):
+    if pca:
+        try:
+            pca.set_servo(1, max(0, min(180, degrees)))
+        except Exception as e:
+            print(f"[SERVO] ERRO tilt: {e}")
 
 def read_distance_cm():
     if not HAS_GPIO:
@@ -266,7 +273,8 @@ def cmd_receiver():
             elif cmd == "stop":
                 motors_stop()
             elif cmd == "servo":
-                servo_set_pan(int(msg.get("pan", 90)))
+                if "pan"  in msg: servo_set_pan (int(msg["pan"]))
+                if "tilt" in msg: servo_set_tilt(int(msg["tilt"]))
             else:
                 print(f"[CMD] Comando desconhecido: {cmd!r} de {addr}")
         except socket.timeout:

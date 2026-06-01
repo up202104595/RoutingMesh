@@ -181,11 +181,13 @@ def main():
     print(f"[BASE] Comando: {joy.get_name()}")
     print("  Analógico Esq: Movimentação")
     print("  Botão 0 (X/A): STOP Emergência")
-    print("  L1/R1:         Servo esq/dir")
+    print("  L1/R1:         Servo pan esq/dir")
+    print("  L2/R2:         Servo tilt baixo/cima")
     print()
 
     sock         = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     servo_pan    = 90
+    servo_tilt   = 90
     last_move_t  = 0.0
     last_servo_t = 0.0
 
@@ -206,17 +208,24 @@ def main():
                 time.sleep(0.1)
                 continue
 
-            # Servo — L1 (botão 4) / R1 (botão 5)
+            # Servos — DS4 via USB:
+            #   Pan  : L1 (btn 4) vira esq  / R1 (btn 5) vira dir
+            #   Tilt : L2 (btn 6) desce     / R2 (btn 7) sobe
             if now - last_servo_t >= SERVO_INTERVAL_S:
                 changed = False
-                if joy.get_numbuttons() > 4 and joy.get_button(4):
-                    servo_pan = max(0, servo_pan - 5)
-                    changed   = True
-                if joy.get_numbuttons() > 5 and joy.get_button(5):
-                    servo_pan = min(180, servo_pan + 5)
-                    changed   = True
+                n = joy.get_numbuttons()
+                if n > 4 and joy.get_button(4):
+                    servo_pan  = max(0,   servo_pan  - 5); changed = True
+                if n > 5 and joy.get_button(5):
+                    servo_pan  = min(180, servo_pan  + 5); changed = True
+                if n > 6 and joy.get_button(6):
+                    servo_tilt = max(0,   servo_tilt - 5); changed = True
+                if n > 7 and joy.get_button(7):
+                    servo_tilt = min(180, servo_tilt + 5); changed = True
                 if changed:
-                    send_cmd(sock, {"cmd": "servo", "pan": servo_pan})
+                    send_cmd(sock, {"cmd": "servo",
+                                    "pan":  servo_pan,
+                                    "tilt": servo_tilt})
                     last_servo_t = now
 
             # Movimento
