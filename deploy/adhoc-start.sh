@@ -17,9 +17,23 @@ PHY_MASK="255.255.255.0"
 
 echo "[ADHOC] A configurar ${IFACE} em modo ad-hoc (Node ${NODE_ID})..."
 
+# Diz ao NetworkManager para nunca gerir esta interface
+NM_CONF=/etc/NetworkManager/conf.d/99-routingmesh-unmanaged.conf
+if [ ! -f "$NM_CONF" ]; then
+    mkdir -p /etc/NetworkManager/conf.d
+    cat > "$NM_CONF" <<EOF
+[keyfile]
+unmanaged-devices=interface-name:${IFACE}
+EOF
+    echo "[ADHOC] NetworkManager: ${IFACE} marcada como unmanaged"
+fi
+
 # Para serviços que possam interferir com a wlan
 systemctl stop wpa_supplicant   2>/dev/null || true
 systemctl stop NetworkManager   2>/dev/null || true
+# Mata qualquer processo wpa_supplicant a correr na interface
+pkill -f "wpa_supplicant.*${IFACE}" 2>/dev/null || true
+sleep 0.5
 
 # Coloca a interface down para poder mudar o modo
 ip link set ${IFACE} down

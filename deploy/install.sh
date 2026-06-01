@@ -56,6 +56,14 @@ chmod +x /usr/local/bin/adhoc-start.sh
 chmod +x /usr/local/bin/adhoc-stop.sh
 echo "      OK: adhoc.service, meshnode.service, meshnode-metrics.service"
 
+# Diz ao NetworkManager para nunca gerir a wlan0
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/99-routingmesh-unmanaged.conf <<EOF
+[keyfile]
+unmanaged-devices=interface-name:wlan0
+EOF
+echo "      OK: NetworkManager configurado para ignorar wlan0"
+
 # Desativa wpa_supplicant e NetworkManager no boot (ad-hoc não os precisa)
 systemctl disable wpa_supplicant 2>/dev/null || true
 systemctl disable NetworkManager 2>/dev/null || true
