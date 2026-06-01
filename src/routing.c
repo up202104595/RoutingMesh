@@ -181,6 +181,11 @@ void routing_manager_recompute(routing_manager_t *rm,
     printf("[ROUTING] Recalculando rotas (Metodo Ana + Link Quality)\n");
     printf("[ROUTING] =============================================\n");
 
+    /* Remove rotas /32 anteriores antes de recalcular */
+#ifndef RELAY_METHOD_ARP
+    ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
+#endif
+
     route_node_t *primary_list = build_routing_structure(
         rm->my_node_id, spanning_tree, link_quality, active_nodes, num_active);
 
@@ -230,16 +235,24 @@ void routing_manager_recompute(routing_manager_t *rm,
         }
 
 #else
-        /* tun.c já adicionou "ip route add 10.0.0.0/24 dev tunN src 10.0.0.MY_ID".
-         * Essa rota /24 cobre todo o tráfego mesh — não são necessárias rotas /32
-         * por destino. A tabela rm->routing_table é usada apenas por
-         * routing_manager_lookup() dentro da thread tun_reader_loop. */
-        if (dest_id == next_hop)
-            printf("[ROUTING]   %u -> %u  [directo, quality=%u]\n",
-                   dest_id, next_hop, rm->routing_table[i].quality);
-        else
-            printf("[ROUTING]   %u -> %u  [relay via %d, quality=%u]\n",
-                   dest_id, next_hop, next_hop, rm->routing_table[i].quality);
+        /* Rota /32 com gateway = IP TUN do next_hop.
+         * Com ip_forward=1, o kernel consulta esta rota quando o pacote
+         * é injectado na TUN via tun_write, e faz forwarding automático
+         * de volta para a TUN — o tun_reader apanha e envia via tcp_sockfd. */
+        {
+            char dest_ip[32], gw_ip[32];
+            snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE, dest_id);
+            snprintf(gw_ip,   sizeof(gw_ip),   "%s.%u", MESH_NET_BASE, next_hop);
+            ip_route_add(dest_ip, gw_ip, rm->mesh_iface);
+
+            if (dest_id == next_hop)
+                printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
+                       dest_ip, gw_ip, rm->mesh_iface);
+            else
+                printf("[ROUTING]   ip route add %s via %s dev %s  [relay via %d, quality=%u]\n",
+                       dest_ip, gw_ip, rm->mesh_iface,
+                       next_hop, rm->routing_table[i].quality);
+        }
 #endif
     }
 

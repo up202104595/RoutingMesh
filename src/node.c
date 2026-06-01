@@ -335,36 +335,14 @@ void* tcp_rx_peer_loop(void *arg) {
             if (node->tun_fd >= 0)
                 tun_write(node->tun_fd, ip_pkt, ip_len);
         } else {
-            /* Relay imediato — sem passar por tx_queue nem esperar slot.
-             * Reenvia o frame original directamente ao next_hop via TCP. */
-            uint8_t next_hop = routing_manager_lookup(node->routing, data->dst_id);
-            printf("[TCP-RX] RELAY src=%d dst=%d next_hop=%d\n",
-                   data->src_id, data->dst_id, next_hop);
-            if (next_hop > 0) {
-                uint32_t net_len = htonl((uint32_t)nr);
-                uint8_t  frame[4 + 4096];
-                memcpy(frame,     &net_len, 4);
-                memcpy(frame + 4, buffer,  nr);
-
-                pthread_mutex_lock(&node->tcp_mutex);
-                int fwd_fd = node->tcp_sockfd[next_hop];
-                pthread_mutex_unlock(&node->tcp_mutex);
-
-                if (fwd_fd >= 0) {
-                    ssize_t sent = send(fwd_fd, frame, 4 + nr, MSG_NOSIGNAL);
-                    if (sent < 0) {
-                        printf("[TCP-RX] RELAY falhou para peer %d — a fechar\n", next_hop);
-                        pthread_mutex_lock(&node->tcp_mutex);
-                        if (node->tcp_sockfd[next_hop] == fwd_fd) {
-                            close(fwd_fd);
-                            node->tcp_sockfd[next_hop] = -1;
-                        }
-                        pthread_mutex_unlock(&node->tcp_mutex);
-                    }
-                } else {
-                    printf("[TCP-RX] RELAY sem TCP para peer %d\n", next_hop);
-                }
-            }
+            /* Relay via kernel ip_forward:
+             * injector o pacote IP na TUN — o kernel consulta a rota /32
+             * adicionada pelo routing_manager (gateway = TUN IP do next_hop)
+             * e faz o forwarding automático de volta para a TUN.
+             * O tun_reader apanha e envia via tcp_sockfd[next_hop]. */
+            printf("[TCP-RX] RELAY src=%d dst=%d\n", data->src_id, data->dst_id);
+            if (node->tun_fd >= 0)
+                tun_write(node->tun_fd, ip_pkt, ip_len);
         }
     }
 
