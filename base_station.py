@@ -215,13 +215,13 @@ def main():
                 changed = False
                 n = joy.get_numbuttons()
                 if n > 4 and joy.get_button(4):
-                    servo_pan  = max(0,   servo_pan  - 5); changed = True
+                    servo_pan  = max(5,   servo_pan  - 2); changed = True
                 if n > 5 and joy.get_button(5):
-                    servo_pan  = min(180, servo_pan  + 5); changed = True
+                    servo_pan  = min(175, servo_pan  + 2); changed = True
                 if n > 6 and joy.get_button(6):
-                    servo_tilt = max(0,   servo_tilt - 5); changed = True
+                    servo_tilt = max(5,   servo_tilt - 2); changed = True
                 if n > 7 and joy.get_button(7):
-                    servo_tilt = min(180, servo_tilt + 5); changed = True
+                    servo_tilt = min(175, servo_tilt + 2); changed = True
                 if changed:
                     send_cmd(sock, {"cmd": "servo",
                                     "pan":  servo_pan,
