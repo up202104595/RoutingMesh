@@ -30,24 +30,48 @@ except ImportError:
 
 class PCA9685:
     def __init__(self, address=0x40, bus=1):
-        self.bus     = smbus2.SMBus(bus)
-        self.address = address
-        self.bus.write_byte_data(address, 0x00, 0x10)   # MODE1: sleep
-        time.sleep(0.005)
-        self.bus.write_byte_data(address, 0xFE, 0x79)   # prescaler → 50 Hz
-        time.sleep(0.005)
-        self.bus.write_byte_data(address, 0x00, 0x20)   # MODE1: auto-increment, wake
-        time.sleep(0.005)
+        self.address  = address
+        self.bus_num  = bus
+        self.bus      = None
+        self._init_bus()
+
+    def _init_bus(self):
+        try:
+            if self.bus:
+                try: self.bus.close()
+                except Exception: pass
+            self.bus = smbus2.SMBus(self.bus_num)
+            self.bus.write_byte_data(self.address, 0x00, 0x10)   # MODE1: sleep
+            time.sleep(0.005)
+            self.bus.write_byte_data(self.address, 0xFE, 0x79)   # prescaler → 50 Hz
+            time.sleep(0.005)
+            self.bus.write_byte_data(self.address, 0x00, 0x20)   # MODE1: auto-increment, wake
+            time.sleep(0.005)
+            print(f"[PCA9685] I2C bus {self.bus_num} addr=0x{self.address:02X} OK")
+        except Exception as e:
+            print(f"[PCA9685] ERRO init I2C: {e}")
+            self.bus = None
 
     def set_servo(self, channel, degrees):
         degrees = max(0, min(180, degrees))
         # 50 Hz, 12-bit: 0°=205 (1 ms), 90°=307 (1.5 ms), 180°=410 (2 ms)
         pulse = int(205 + (degrees / 180.0) * 205)
         reg   = 0x06 + 4 * channel
-        self.bus.write_byte_data(self.address, reg,     0x00)
-        self.bus.write_byte_data(self.address, reg + 1, 0x00)
-        self.bus.write_byte_data(self.address, reg + 2, pulse & 0xFF)
-        self.bus.write_byte_data(self.address, reg + 3, pulse >> 8)
+        for attempt in range(2):
+            try:
+                if self.bus is None:
+                    self._init_bus()
+                if self.bus is None:
+                    return
+                self.bus.write_byte_data(self.address, reg,     0x00)
+                self.bus.write_byte_data(self.address, reg + 1, 0x00)
+                self.bus.write_byte_data(self.address, reg + 2, pulse & 0xFF)
+                self.bus.write_byte_data(self.address, reg + 3, pulse >> 8)
+                return
+            except Exception as e:
+                print(f"[PCA9685] ERRO I2C ch{channel} tentativa {attempt+1}: {e}")
+                self.bus = None   # força reinit na próxima tentativa
+                time.sleep(0.05)
 
 # ── Pinos AlphaBot2-Pi (TB6612FNG) ────────────────────────────
 AIN1=12; AIN2=13; BIN1=20; BIN2=21; PWMA=6; PWMB=26
