@@ -45,7 +45,7 @@ class PCA9685:
             time.sleep(0.005)
             self.bus.write_byte_data(self.address, 0xFE, 0x79)   # prescaler → 50 Hz
             time.sleep(0.005)
-            self.bus.write_byte_data(self.address, 0x00, 0x20)   # MODE1: auto-increment, wake
+            self.bus.write_byte_data(self.address, 0x00, 0x00)   # MODE1: wake (igual ao script original que funcionava)
             time.sleep(0.005)
             print(f"[PCA9685] I2C bus {self.bus_num} addr=0x{self.address:02X} OK")
         except Exception as e:
