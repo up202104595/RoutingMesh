@@ -20,18 +20,38 @@ except ImportError:
     print("[ALPHABOT] AVISO: RPi.GPIO nao disponivel — modo simulacao")
     HAS_GPIO = False
 
-# ── Servo / PCA9685 via adafruit_servokit ─────────────────────
+# ── Servo / PCA9685 via smbus2 ────────────────────────────────
 try:
-    from adafruit_servokit import ServoKit
+    import smbus2
     HAS_I2C = True
 except ImportError:
-    print("[ALPHABOT] AVISO: adafruit_servokit nao instalado — servo desactivado")
-    print("[ALPHABOT]   instala com: pip3 install adafruit-circuitpython-servokit")
+    print("[ALPHABOT] AVISO: smbus2 nao instalado — servo desactivado")
+    print("[ALPHABOT]   instala com: sudo apt install python3-smbus2")
     HAS_I2C = False
 
-# Limites de ângulo do SG90 (igual ao script oficial RobotsGo)
 SERVO_MIN = 5
 SERVO_MAX = 175
+
+class PCA9685:
+    def __init__(self, address=0x40, bus=1):
+        self.address = address
+        self.bus     = smbus2.SMBus(bus)
+        self.bus.write_byte_data(address, 0x00, 0x10)  # sleep
+        time.sleep(0.005)
+        self.bus.write_byte_data(address, 0xFE, 0x79)  # prescaler 50Hz
+        time.sleep(0.005)
+        self.bus.write_byte_data(address, 0x00, 0x00)  # wake
+        time.sleep(0.005)
+        print(f"[PCA9685] OK addr=0x{address:02X} @ 50Hz")
+
+    def set_servo(self, channel, degrees):
+        degrees = max(SERVO_MIN, min(SERVO_MAX, degrees))
+        pulse = int(205 + (degrees / 180.0) * 205)
+        reg   = 0x06 + 4 * channel
+        self.bus.write_byte_data(self.address, reg,     0x00)
+        self.bus.write_byte_data(self.address, reg + 1, 0x00)
+        self.bus.write_byte_data(self.address, reg + 2, pulse & 0xFF)
+        self.bus.write_byte_data(self.address, reg + 3, pulse >> 8)
 
 # ── Pinos AlphaBot2-Pi (TB6612FNG) ────────────────────────────
 AIN1=12; AIN2=13; BIN1=20; BIN2=21; PWMA=6; PWMB=26
@@ -55,7 +75,7 @@ g_speed_r  = 0.0
 g_running  = True
 g_last_cmd = time.time()
 g_lock     = threading.Lock()
-pwm_a = None; pwm_b = None; kit = None
+pwm_a = None; pwm_b = None; pca = None
 
 # ═════════════════════════════════════════════════════════════
 # STREAM — inicia uma vez, watchdog reinicia se cair
@@ -131,13 +151,13 @@ def hardware_init():
         print("[ALPHABOT] GPIO inicializado")
     if HAS_I2C:
         try:
-            kit = ServoKit(channels=16)
-            kit.servo[0].angle = 90   # pan centrado
-            kit.servo[1].angle = 90   # tilt centrado
+            pca = PCA9685(0x40, 1)
+            pca.set_servo(0, 90)
+            pca.set_servo(1, 90)
             print("[ALPHABOT] Servos centrados (90°)")
         except Exception as e:
-            print(f"[ALPHABOT] ERRO ServoKit: {e}")
-            kit = None
+            print(f"[ALPHABOT] ERRO PCA9685: {e}")
+            pca = None
 
 def hardware_cleanup():
     if HAS_GPIO:
@@ -195,16 +215,16 @@ def motors_stop():
     motor_set(0.0, 0.0)
 
 def servo_set_pan(degrees):
-    if kit:
+    if pca:
         try:
-            kit.servo[0].angle = max(SERVO_MIN, min(SERVO_MAX, degrees))
+            pca.set_servo(0, degrees)
         except Exception as e:
             print(f"[SERVO] ERRO pan: {e}")
 
 def servo_set_tilt(degrees):
-    if kit:
+    if pca:
         try:
-            kit.servo[1].angle = max(SERVO_MIN, min(SERVO_MAX, degrees))
+            pca.set_servo(1, degrees)
         except Exception as e:
             print(f"[SERVO] ERRO tilt: {e}")
 
