@@ -7,7 +7,7 @@
 #include <sys/types.h>
 
 #define MAX_NODES 20
-#define MAX_AGE 5.0
+#define MAX_AGE 2.0
 #define MATRIX   1
 #define MSG_DATA 2
 
