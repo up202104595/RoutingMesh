@@ -152,9 +152,7 @@ def hardware_init():
     if HAS_I2C:
         try:
             pca = PCA9685(0x40, 1)
-            pca.set_servo(0, 90)
-            pca.set_servo(1, 90)
-            print("[ALPHABOT] Servos centrados (90°)")
+            print("[ALPHABOT] PCA9685 OK — servos prontos (sem movimento no arranque)")
         except Exception as e:
             print(f"[ALPHABOT] ERRO PCA9685: {e}")
             pca = None
