@@ -149,13 +149,8 @@ def hardware_init():
         GPIO.setup(IR_LEFT,  GPIO.IN)
         GPIO.setup(IR_RIGHT, GPIO.IN)
         print("[ALPHABOT] GPIO inicializado")
-    if HAS_I2C:
-        try:
-            pca = PCA9685(0x40, 1)
-            print("[ALPHABOT] PCA9685 OK — servos prontos (sem movimento no arranque)")
-        except Exception as e:
-            print(f"[ALPHABOT] ERRO PCA9685: {e}")
-            pca = None
+    # PCA9685 iniciado apenas no primeiro comando de servo
+    # para evitar brown-out ao arrancar com pilhas fracas
 
 def hardware_cleanup():
     if HAS_GPIO:
@@ -212,17 +207,29 @@ def motor_set(speed_l, speed_r):
 def motors_stop():
     motor_set(0.0, 0.0)
 
-def servo_set_pan(degrees):
-    if pca:
+def _get_pca():
+    global pca
+    if pca is None and HAS_I2C:
         try:
-            pca.set_servo(0, degrees)
+            pca = PCA9685(0x40, 1)
+            print("[SERVO] PCA9685 iniciado no primeiro comando")
+        except Exception as e:
+            print(f"[SERVO] ERRO init PCA9685: {e}")
+    return pca
+
+def servo_set_pan(degrees):
+    p = _get_pca()
+    if p:
+        try:
+            p.set_servo(0, degrees)
         except Exception as e:
             print(f"[SERVO] ERRO pan: {e}")
 
 def servo_set_tilt(degrees):
-    if pca:
+    p = _get_pca()
+    if p:
         try:
-            pca.set_servo(1, degrees)
+            p.set_servo(1, degrees)
         except Exception as e:
             print(f"[SERVO] ERRO tilt: {e}")
 
