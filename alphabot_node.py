@@ -29,8 +29,14 @@ except ImportError:
     print("[ALPHABOT]   instala com: sudo apt install python3-smbus2")
     HAS_I2C = False
 
-SERVO_MIN = 5
-SERVO_MAX = 175
+# Calibrado fisicamente: canal 0=pan centro=100, canal 1=tilt centro=420
+SERVO_PAN_MIN    = 0
+SERVO_PAN_MAX    = 200
+SERVO_PAN_CENTER = 100
+
+SERVO_TILT_MIN    = 300
+SERVO_TILT_MAX    = 500
+SERVO_TILT_CENTER = 420
 
 class PCA9685:
     def __init__(self, address=0x40, bus=1):
@@ -45,8 +51,7 @@ class PCA9685:
         print(f"[PCA9685] OK addr=0x{address:02X} @ 50Hz")
 
     def set_servo(self, channel, degrees):
-        degrees = max(SERVO_MIN, min(SERVO_MAX, degrees))
-        pulse = int(205 + (degrees / 180.0) * 205)
+        pulse = int(102 + (degrees / 270.0) * 410)  # 0.5ms→2.5ms
         reg   = 0x06 + 4 * channel
         self.bus.write_byte_data(self.address, reg,     0x00)
         self.bus.write_byte_data(self.address, reg + 1, 0x00)
@@ -221,7 +226,7 @@ def servo_set_pan(degrees):
     p = _get_pca()
     if p:
         try:
-            p.set_servo(0, degrees)
+            p.set_servo(0, max(SERVO_PAN_MIN, min(SERVO_PAN_MAX, degrees)))
         except Exception as e:
             print(f"[SERVO] ERRO pan: {e}")
 
@@ -229,7 +234,7 @@ def servo_set_tilt(degrees):
     p = _get_pca()
     if p:
         try:
-            p.set_servo(1, degrees)
+            p.set_servo(1, max(SERVO_TILT_MIN, min(SERVO_TILT_MAX, degrees)))
         except Exception as e:
             print(f"[SERVO] ERRO tilt: {e}")
 

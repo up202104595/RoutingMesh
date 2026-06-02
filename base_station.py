@@ -43,7 +43,11 @@ SERVO_INTERVAL   = 0.08    # ~12 Hz para servos
 # Modos de velocidade (D-Pad L/R)
 SPEED_MODES  = [0.3, 0.55, 0.8]
 SPEED_LABELS = ["LENTO", "MÉDIO", "RÁPIDO"]
-SERVO_STEP   = 4   # graus por press de botão
+SERVO_STEP   = 8   # graus por press de botão
+
+# Valores calibrados fisicamente (servo_debug.py)
+SERVO_PAN_CENTER  = 100;  SERVO_PAN_MIN  =   0; SERVO_PAN_MAX  = 200
+SERVO_TILT_CENTER = 420;  SERVO_TILT_MIN = 300; SERVO_TILT_MAX = 500
 
 # DS4 via USB — eixos
 AX_LEFT_X  = 0
@@ -221,8 +225,8 @@ def main():
     print()
 
     sock        = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    servo_pan   = 90
-    servo_tilt  = 90
+    servo_pan   = SERVO_PAN_CENTER
+    servo_tilt  = SERVO_TILT_CENTER
     speed_idx   = 1          # começa em MÉDIO
     last_move_t = 0.0
     last_srv_t  = 0.0
@@ -285,25 +289,25 @@ def main():
 
                 # Triangle → centrar
                 if btn(joy, BTN_TRIANGLE):
-                    servo_pan  = 90
-                    servo_tilt = 90
+                    servo_pan  = SERVO_PAN_CENTER
+                    servo_tilt = SERVO_TILT_CENTER
                     changed    = True
                     print("\n[BASE] Câmara centrada")
                 else:
                     # L1/R1 → pan esq/dir
                     if btn(joy, BTN_L1):
-                        servo_pan = max(5,   servo_pan - SERVO_STEP)
+                        servo_pan = max(SERVO_PAN_MIN,  servo_pan - SERVO_STEP)
                         changed   = True
                     if btn(joy, BTN_R1):
-                        servo_pan = min(175, servo_pan + SERVO_STEP)
+                        servo_pan = min(SERVO_PAN_MAX,  servo_pan + SERVO_STEP)
                         changed   = True
-                    # D-Pad ↑↓ → tilt
+                    # D-Pad ↑↓ → tilt (↑=mais alto=valor menor, ↓=mais baixo=valor maior)
                     dpad_y = axis(joy, AX_DPAD_Y)
                     if dpad_y < -0.5:
-                        servo_tilt = min(175, servo_tilt + SERVO_STEP)
+                        servo_tilt = max(SERVO_TILT_MIN, servo_tilt - SERVO_STEP)
                         changed    = True
                     elif dpad_y > 0.5:
-                        servo_tilt = max(5,   servo_tilt - SERVO_STEP)
+                        servo_tilt = min(SERVO_TILT_MAX, servo_tilt + SERVO_STEP)
                         changed    = True
 
                 if changed:
