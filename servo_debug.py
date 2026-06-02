@@ -43,8 +43,8 @@ except Exception as e:
     sys.exit(1)
 
 def set_servo(channel, degrees):
-    degrees = max(5, min(175, degrees))
-    pulse = int(205 + (degrees / 180.0) * 205)
+    degrees = max(0, min(500, degrees))  # range alargado para calibração
+    pulse = int(102 + (degrees / 270.0) * 410)  # 0.5ms→2.5ms range completo
     reg   = 0x06 + 4 * channel
     bus.write_byte_data(0x40, reg,     0x00)
     bus.write_byte_data(0x40, reg + 1, 0x00)
