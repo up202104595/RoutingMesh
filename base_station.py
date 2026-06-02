@@ -6,10 +6,13 @@ DS4 via USB — mapeamento:
   R2 (axis 5)        : Avançar
   L2 (axis 2)        : Recuar
   Right Stick X (ax3): Esterçar esq/dir
-  Left Stick (ax0/1) : Câmara pan/tilt
-  Triangle (btn 2)   : Centrar câmara
+  L1 (btn 4)         : Câmara pan ← esquerda
+  R1 (btn 5)         : Câmara pan → direita
+  D-Pad Up   (ax7<0) : Câmara tilt ↑ cima
+  D-Pad Down (ax7>0) : Câmara tilt ↓ baixo
+  Triangle (btn 2)   : Centrar câmara (90/90)
   Cross    (btn 0)   : STOP emergência
-  D-Pad Up/Down (ax7): Mudar modo velocidade (Lento/Médio/Rápido)
+  D-Pad L/R (ax6)    : Mudar modo velocidade (Lento/Médio/Rápido)
   PS       (btn 10)  : Sair
 """
 
@@ -35,11 +38,12 @@ TEL_PORT  = 9001
 # ── Controlo ─────────────────────────────────────────────────
 DEADZONE         = 0.1
 CMD_INTERVAL     = 0.05    # 20 Hz
-SERVO_INTERVAL   = 0.05    # 20 Hz
+SERVO_INTERVAL   = 0.08    # ~12 Hz para servos
 
-# Modos de velocidade (D-Pad Up = mais rápido, Down = mais lento)
+# Modos de velocidade (D-Pad L/R)
 SPEED_MODES  = [0.3, 0.55, 0.8]
 SPEED_LABELS = ["LENTO", "MÉDIO", "RÁPIDO"]
+SERVO_STEP   = 4   # graus por press de botão
 
 # DS4 via USB — eixos
 AX_LEFT_X  = 0
@@ -58,8 +62,8 @@ BTN_TRIANGLE  = 2
 BTN_SQUARE    = 3
 BTN_L1        = 4
 BTN_R1        = 5
-BTN_L2        = 6
-BTN_R2        = 7
+BTN_L2_BTN   = 6
+BTN_R2_BTN   = 7
 BTN_SHARE     = 8
 BTN_OPTIONS   = 9
 BTN_PS        = 10
@@ -139,11 +143,9 @@ def send_cmd(sock, cmd_dict):
         pass
 
 def axis(joy, idx):
-    """Lê eixo com proteção de índice."""
     return joy.get_axis(idx) if joy.get_numaxes() > idx else 0.0
 
 def btn(joy, idx):
-    """Lê botão com proteção de índice."""
     return joy.get_numbuttons() > idx and joy.get_button(idx)
 
 def trigger_to_speed(raw):
@@ -157,7 +159,7 @@ def print_telemetry(speed_label):
     with g_lock:
         tel = dict(g_telemetry)
     if not tel:
-        print(f"[BASE] Sem telemetria... [{speed_label}]", end='\r', flush=True)
+        print(f"\r[BASE] Sem telemetria... [{speed_label}]          ", end='', flush=True)
         return
     age  = time.time() - tel.get("timestamp", 0)
     dist = tel.get("distance_cm", -1.0)
@@ -210,10 +212,11 @@ def main():
     print("  R2               : Avançar")
     print("  L2               : Recuar")
     print("  Right Stick X    : Esterçar esq/dir")
-    print("  Left Stick       : Câmara pan/tilt")
+    print("  L1 / R1          : Câmara pan ← →")
+    print("  D-Pad ↑↓         : Câmara tilt ↑↓")
     print("  Triangle (btn 2) : Centrar câmara")
     print("  Cross    (btn 0) : STOP emergência")
-    print("  D-Pad Up/Down    : Velocidade +/-")
+    print("  D-Pad ←→         : Velocidade -/+")
     print("  PS       (btn 10): Sair")
     print()
 
@@ -224,7 +227,7 @@ def main():
     last_move_t = 0.0
     last_srv_t  = 0.0
     last_dpad_t = 0.0
-    dpad_prev   = 0.0        # evita repetição do D-Pad
+    dpad_x_prev = 0.0
 
     print(f"[BASE] Pronto. Velocidade: {SPEED_LABELS[speed_idx]}\n")
     try:
@@ -245,24 +248,24 @@ def main():
                 time.sleep(0.1)
                 continue
 
-            # ── D-Pad Up/Down → modo velocidade ───────────────
-            dpad_y = axis(joy, AX_DPAD_Y)
-            if now - last_dpad_t > 0.3 and dpad_y != dpad_prev:
-                if dpad_y < -0.5 and speed_idx < len(SPEED_MODES) - 1:
+            # ── D-Pad L/R → modo velocidade ───────────────────
+            dpad_x = axis(joy, AX_DPAD_X)
+            if now - last_dpad_t > 0.3 and dpad_x != dpad_x_prev:
+                if dpad_x > 0.5 and speed_idx < len(SPEED_MODES) - 1:
                     speed_idx += 1
                     print(f"\n[BASE] Velocidade: {SPEED_LABELS[speed_idx]}")
                     last_dpad_t = now
-                elif dpad_y > 0.5 and speed_idx > 0:
+                elif dpad_x < -0.5 and speed_idx > 0:
                     speed_idx -= 1
                     print(f"\n[BASE] Velocidade: {SPEED_LABELS[speed_idx]}")
                     last_dpad_t = now
-                dpad_prev = dpad_y
+                dpad_x_prev = dpad_x
 
             # ── Movimento: R2=avançar, L2=recuar, RStick=esterçar
             if now - last_move_t >= CMD_INTERVAL:
-                fwd  = trigger_to_speed(axis(joy, AX_R2))
-                bwd  = trigger_to_speed(axis(joy, AX_L2))
-                net  = fwd - bwd                         # -1..+1
+                fwd   = trigger_to_speed(axis(joy, AX_R2))
+                bwd   = trigger_to_speed(axis(joy, AX_L2))
+                net   = fwd - bwd
                 steer = apply_deadzone(axis(joy, AX_RIGHT_X))
 
                 left  = max(-1.0, min(1.0, net - steer)) * max_speed
@@ -276,23 +279,38 @@ def main():
                     send_cmd(sock, {"cmd": "stop"})
                 last_move_t = now
 
-            # ── Câmara: Triangle=centrar, Left Stick=mover ────
+            # ── Câmara ────────────────────────────────────────
             if now - last_srv_t >= SERVO_INTERVAL:
-                # Triangle → centrar câmara
+                changed = False
+
+                # Triangle → centrar
                 if btn(joy, BTN_TRIANGLE):
                     servo_pan  = 90
                     servo_tilt = 90
-                    send_cmd(sock, {"cmd": "servo", "pan": servo_pan, "tilt": servo_tilt})
+                    changed    = True
                     print("\n[BASE] Câmara centrada")
-                    last_srv_t = now
                 else:
-                    cam_x = apply_deadzone(axis(joy, AX_LEFT_X))
-                    cam_y = apply_deadzone(axis(joy, AX_LEFT_Y))
-                    if cam_x != 0.0 or cam_y != 0.0:
-                        servo_pan  = max(5,   min(175, servo_pan  + int(cam_x * 3)))
-                        servo_tilt = max(5,   min(175, servo_tilt + int(cam_y * 3)))
-                        send_cmd(sock, {"cmd": "servo", "pan": servo_pan, "tilt": servo_tilt})
-                        last_srv_t = now
+                    # L1/R1 → pan esq/dir
+                    if btn(joy, BTN_L1):
+                        servo_pan = max(5,   servo_pan - SERVO_STEP)
+                        changed   = True
+                    if btn(joy, BTN_R1):
+                        servo_pan = min(175, servo_pan + SERVO_STEP)
+                        changed   = True
+                    # D-Pad ↑↓ → tilt
+                    dpad_y = axis(joy, AX_DPAD_Y)
+                    if dpad_y < -0.5:
+                        servo_tilt = min(175, servo_tilt + SERVO_STEP)
+                        changed    = True
+                    elif dpad_y > 0.5:
+                        servo_tilt = max(5,   servo_tilt - SERVO_STEP)
+                        changed    = True
+
+                if changed:
+                    send_cmd(sock, {"cmd": "servo",
+                                    "pan":  servo_pan,
+                                    "tilt": servo_tilt})
+                    last_srv_t = now
 
             print_telemetry(SPEED_LABELS[speed_idx])
             time.sleep(0.01)
