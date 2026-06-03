@@ -10,7 +10,7 @@ DS4 via USB — mapeamento:
   R1 (btn 5)         : Câmara pan → direita
   D-Pad Up   (ax7<0) : Câmara tilt ↑ cima
   D-Pad Down (ax7>0) : Câmara tilt ↓ baixo
-  Triangle (btn 2)   : Centrar câmara (90/90)
+  Triangle (btn 2)   : Centrar câmara (100/90)
   Cross    (btn 0)   : STOP emergência
   D-Pad L/R (ax6)    : Mudar modo velocidade (Lento/Médio/Rápido)
   PS       (btn 10)  : Sair
@@ -43,11 +43,11 @@ SERVO_INTERVAL   = 0.08    # ~12 Hz para servos
 # Modos de velocidade (D-Pad L/R)
 SPEED_MODES  = [0.3, 0.55, 0.8]
 SPEED_LABELS = ["LENTO", "MÉDIO", "RÁPIDO"]
-SERVO_STEP   = 8   # graus por press de botão
+SERVO_STEP   = 4   # graus por press de botão
 
-# Valores calibrados fisicamente (servo_debug.py)
-SERVO_PAN_CENTER  = 100;  SERVO_PAN_MIN  =   0; SERVO_PAN_MAX  = 200
-SERVO_TILT_CENTER = 420;  SERVO_TILT_MIN = 300; SERVO_TILT_MAX = 500
+# Posições de centro calibradas fisicamente
+SERVO_PAN_CENTER  = 100   # pan: 100° = frente
+SERVO_TILT_CENTER = 90    # tilt: 90° = horizontal
 
 # DS4 via USB — eixos
 AX_LEFT_X  = 0
@@ -227,7 +227,7 @@ def main():
     sock        = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     servo_pan   = SERVO_PAN_CENTER
     servo_tilt  = SERVO_TILT_CENTER
-    speed_idx   = 1          # começa em MÉDIO
+    speed_idx   = 1
     last_move_t = 0.0
     last_srv_t  = 0.0
     last_dpad_t = 0.0
@@ -240,19 +240,16 @@ def main():
             now = time.time()
             max_speed = SPEED_MODES[speed_idx]
 
-            # ── PS → sair ─────────────────────────────────────
             if btn(joy, BTN_PS):
                 print("\n[BASE] PS premido — a sair...")
                 break
 
-            # ── Cross → paragem de emergência ─────────────────
             if btn(joy, BTN_CROSS):
                 send_cmd(sock, {"cmd": "stop"})
                 print("\n[BASE] PARAGEM DE EMERGÊNCIA!")
                 time.sleep(0.1)
                 continue
 
-            # ── D-Pad L/R → modo velocidade ───────────────────
             dpad_x = axis(joy, AX_DPAD_X)
             if now - last_dpad_t > 0.3 and dpad_x != dpad_x_prev:
                 if dpad_x > 0.5 and speed_idx < len(SPEED_MODES) - 1:
@@ -265,13 +262,14 @@ def main():
                     last_dpad_t = now
                 dpad_x_prev = dpad_x
 
-            # ── Movimento: Left Stick — tank drive
             if now - last_move_t >= CMD_INTERVAL:
-                x = apply_deadzone(axis(joy, AX_LEFT_X))
-                y = apply_deadzone(axis(joy, AX_LEFT_Y))
-                # y negativo = stick para cima = avançar
-                left  = max(-1.0, min(1.0, -y + x)) * max_speed
-                right = max(-1.0, min(1.0, -y - x)) * max_speed
+                fwd   = trigger_to_speed(axis(joy, AX_R2))
+                bwd   = trigger_to_speed(axis(joy, AX_L2))
+                net   = fwd - bwd
+                steer = apply_deadzone(axis(joy, AX_RIGHT_X))
+
+                left  = max(-1.0, min(1.0, net - steer)) * max_speed
+                right = max(-1.0, min(1.0, net + steer)) * max_speed
 
                 if abs(left) > 0.02 or abs(right) > 0.02:
                     send_cmd(sock, {"cmd": "move",
@@ -281,31 +279,27 @@ def main():
                     send_cmd(sock, {"cmd": "stop"})
                 last_move_t = now
 
-            # ── Câmara ────────────────────────────────────────
             if now - last_srv_t >= SERVO_INTERVAL:
                 changed = False
 
-                # Triangle → centrar
                 if btn(joy, BTN_TRIANGLE):
                     servo_pan  = SERVO_PAN_CENTER
                     servo_tilt = SERVO_TILT_CENTER
                     changed    = True
                     print("\n[BASE] Câmara centrada")
                 else:
-                    # L1/R1 → pan esq/dir
                     if btn(joy, BTN_L1):
-                        servo_pan = max(SERVO_PAN_MIN,  servo_pan - SERVO_STEP)
+                        servo_pan = max(5,   servo_pan - SERVO_STEP)
                         changed   = True
                     if btn(joy, BTN_R1):
-                        servo_pan = min(SERVO_PAN_MAX,  servo_pan + SERVO_STEP)
+                        servo_pan = min(175, servo_pan + SERVO_STEP)
                         changed   = True
-                    # D-Pad ↑↓ → tilt (↑=mais alto=valor menor, ↓=mais baixo=valor maior)
                     dpad_y = axis(joy, AX_DPAD_Y)
                     if dpad_y < -0.5:
-                        servo_tilt = max(SERVO_TILT_MIN, servo_tilt - SERVO_STEP)
+                        servo_tilt = min(175, servo_tilt + SERVO_STEP)
                         changed    = True
                     elif dpad_y > 0.5:
-                        servo_tilt = min(SERVO_TILT_MAX, servo_tilt + SERVO_STEP)
+                        servo_tilt = max(5,   servo_tilt - SERVO_STEP)
                         changed    = True
 
                 if changed:

@@ -20,46 +20,58 @@ except ImportError:
     print("[ALPHABOT] AVISO: RPi.GPIO nao disponivel — modo simulacao")
     HAS_GPIO = False
 
-# ── Servo / PCA9685 via smbus2 ────────────────────────────────
+# ── I2C / PCA9685 ────────────────────────────────────────────
 try:
     import smbus2
     HAS_I2C = True
 except ImportError:
     print("[ALPHABOT] AVISO: smbus2 nao instalado — servo desactivado")
-    print("[ALPHABOT]   instala com: sudo apt install python3-smbus2")
     HAS_I2C = False
-
-# Valores em pulsos PCA9685 (0-4095). Calibrados com servo_debug.py.
-# pan:  100=frente, 0=esquerda máx, 200=direita máx
-# tilt: 420=horizontal, 300=cima, 500=baixo
-SERVO_PAN_MIN    = 0
-SERVO_PAN_MAX    = 200
-SERVO_PAN_CENTER = 100
-
-SERVO_TILT_MIN    = 300
-SERVO_TILT_MAX    = 500
-SERVO_TILT_CENTER = 420
 
 class PCA9685:
     def __init__(self, address=0x40, bus=1):
-        self.address = address
-        self.bus     = smbus2.SMBus(bus)
-        self.bus.write_byte_data(address, 0x00, 0x10)  # sleep
-        time.sleep(0.005)
-        self.bus.write_byte_data(address, 0xFE, 0x79)  # prescaler 50Hz
-        time.sleep(0.005)
-        self.bus.write_byte_data(address, 0x00, 0x00)  # wake
-        time.sleep(0.005)
-        print(f"[PCA9685] OK addr=0x{address:02X} @ 50Hz")
+        self.address  = address
+        self.bus_num  = bus
+        self.bus      = None
+        self._init_bus()
 
-    def set_servo(self, channel, pulse):
-        """pulse: valor direto 0-4095 do PCA9685."""
-        pulse = max(0, min(4095, pulse))
+    def _init_bus(self):
+        try:
+            if self.bus:
+                try: self.bus.close()
+                except Exception: pass
+            self.bus = smbus2.SMBus(self.bus_num)
+            self.bus.write_byte_data(self.address, 0x00, 0x10)   # MODE1: sleep
+            time.sleep(0.005)
+            self.bus.write_byte_data(self.address, 0xFE, 0x79)   # prescaler → 50 Hz
+            time.sleep(0.005)
+            self.bus.write_byte_data(self.address, 0x00, 0x20)   # MODE1: auto-increment, wake
+            time.sleep(0.005)
+            print(f"[PCA9685] I2C bus {self.bus_num} addr=0x{self.address:02X} OK")
+        except Exception as e:
+            print(f"[PCA9685] ERRO init I2C: {e}")
+            self.bus = None
+
+    def set_servo(self, channel, degrees):
+        degrees = max(0, min(180, degrees))
+        # 50 Hz, 12-bit: 0°=205 (1 ms), 90°=307 (1.5 ms), 180°=410 (2 ms)
+        pulse = int(205 + (degrees / 180.0) * 205)
         reg   = 0x06 + 4 * channel
-        self.bus.write_byte_data(self.address, reg,     0x00)
-        self.bus.write_byte_data(self.address, reg + 1, 0x00)
-        self.bus.write_byte_data(self.address, reg + 2, pulse & 0xFF)
-        self.bus.write_byte_data(self.address, reg + 3, pulse >> 8)
+        for attempt in range(2):
+            try:
+                if self.bus is None:
+                    self._init_bus()
+                if self.bus is None:
+                    return
+                self.bus.write_byte_data(self.address, reg,     0x00)
+                self.bus.write_byte_data(self.address, reg + 1, 0x00)
+                self.bus.write_byte_data(self.address, reg + 2, pulse & 0xFF)
+                self.bus.write_byte_data(self.address, reg + 3, pulse >> 8)
+                return
+            except Exception as e:
+                print(f"[PCA9685] ERRO I2C ch{channel} tentativa {attempt+1}: {e}")
+                self.bus = None
+                time.sleep(0.05)
 
 # ── Pinos AlphaBot2-Pi (TB6612FNG) ────────────────────────────
 AIN1=12; AIN2=13; BIN1=20; BIN2=21; PWMA=6; PWMB=26
@@ -86,7 +98,7 @@ g_lock     = threading.Lock()
 pwm_a = None; pwm_b = None; pca = None
 
 # ═════════════════════════════════════════════════════════════
-# STREAM — inicia uma vez, watchdog reinicia se cair
+# STREAM
 # ═════════════════════════════════════════════════════════════
 
 def start_stream():
@@ -122,7 +134,6 @@ def stop_stream(proc):
     subprocess.run(["pkill", "-f", "ffmpeg"],     capture_output=True)
 
 def stream_watchdog(proc_ref):
-    """Reinicia o stream se rpicam-vid/ffmpeg terminarem inesperadamente."""
     while g_running:
         time.sleep(5)
         if not g_running:
@@ -157,8 +168,15 @@ def hardware_init():
         GPIO.setup(IR_LEFT,  GPIO.IN)
         GPIO.setup(IR_RIGHT, GPIO.IN)
         print("[ALPHABOT] GPIO inicializado")
-    # PCA9685 iniciado apenas no primeiro comando de servo
-    # para evitar brown-out ao arrancar com pilhas fracas
+    if HAS_I2C:
+        try:
+            pca = PCA9685(0x40, 1)
+            pca.set_servo(0, 100)  # pan centro calibrado
+            pca.set_servo(1, 90)   # tilt centro
+            print("[ALPHABOT] Servos centrados (pan=100° tilt=90°)")
+        except Exception as e:
+            print(f"[ALPHABOT] ERRO PCA9685: {e}")
+            pca = None
 
 def hardware_cleanup():
     if HAS_GPIO:
@@ -169,75 +187,45 @@ def hardware_cleanup():
 
 def motor_set(speed_l, speed_r):
     global g_speed_l, g_speed_r
-
-    # BUG FIX: clampagem ANTES de usar os valores — o código original
-    # clampava apenas g_speed_l/r (para telemetria) mas usava os valores
-    # originais não clampados para o PWM, podendo gerar duty_cycle > 100%
     speed_l = max(-1.0, min(1.0, speed_l))
     speed_r = max(-1.0, min(1.0, speed_r))
-
     with g_lock:
         g_speed_l = speed_l
         g_speed_r = speed_r
-
     if not HAS_GPIO:
         return
-
-    # Motor esquerdo (Motor A: AIN1/AIN2/PWMA)
     duty_a = abs(speed_l) * 100
     if speed_l > 0:
-        GPIO.output(AIN1, GPIO.HIGH)
-        GPIO.output(AIN2, GPIO.LOW)
+        GPIO.output(AIN1, GPIO.HIGH); GPIO.output(AIN2, GPIO.LOW)
     elif speed_l < 0:
-        GPIO.output(AIN1, GPIO.LOW)
-        GPIO.output(AIN2, GPIO.HIGH)
+        GPIO.output(AIN1, GPIO.LOW);  GPIO.output(AIN2, GPIO.HIGH)
     else:
-        # BUG FIX: brake (ambos HIGH) em vez de coast (ambos LOW)
-        # O TB6612FNG com AIN1=AIN2=HIGH activa travagem activa,
-        # evitando que o robot deslize ao parar
-        GPIO.output(AIN1, GPIO.HIGH)
-        GPIO.output(AIN2, GPIO.HIGH)
+        GPIO.output(AIN1, GPIO.HIGH); GPIO.output(AIN2, GPIO.HIGH)
     pwm_a.ChangeDutyCycle(duty_a)
 
-    # Motor direito (Motor B: BIN1/BIN2/PWMB)
     duty_b = abs(speed_r) * 100
     if speed_r > 0:
-        GPIO.output(BIN1, GPIO.HIGH)
-        GPIO.output(BIN2, GPIO.LOW)
+        GPIO.output(BIN1, GPIO.HIGH); GPIO.output(BIN2, GPIO.LOW)
     elif speed_r < 0:
-        GPIO.output(BIN1, GPIO.LOW)
-        GPIO.output(BIN2, GPIO.HIGH)
+        GPIO.output(BIN1, GPIO.LOW);  GPIO.output(BIN2, GPIO.HIGH)
     else:
-        GPIO.output(BIN1, GPIO.HIGH)
-        GPIO.output(BIN2, GPIO.HIGH)
+        GPIO.output(BIN1, GPIO.HIGH); GPIO.output(BIN2, GPIO.HIGH)
     pwm_b.ChangeDutyCycle(duty_b)
 
 def motors_stop():
     motor_set(0.0, 0.0)
 
-def _get_pca():
-    global pca
-    if pca is None and HAS_I2C:
-        try:
-            pca = PCA9685(0x40, 1)
-            print("[SERVO] PCA9685 iniciado no primeiro comando")
-        except Exception as e:
-            print(f"[SERVO] ERRO init PCA9685: {e}")
-    return pca
-
 def servo_set_pan(degrees):
-    p = _get_pca()
-    if p:
+    if pca:
         try:
-            p.set_servo(0, max(SERVO_PAN_MIN, min(SERVO_PAN_MAX, degrees)))
+            pca.set_servo(0, max(0, min(180, degrees)))
         except Exception as e:
             print(f"[SERVO] ERRO pan: {e}")
 
 def servo_set_tilt(degrees):
-    p = _get_pca()
-    if p:
+    if pca:
         try:
-            p.set_servo(1, max(SERVO_TILT_MIN, min(SERVO_TILT_MAX, degrees)))
+            pca.set_servo(1, max(0, min(180, degrees)))
         except Exception as e:
             print(f"[SERVO] ERRO tilt: {e}")
 
@@ -303,7 +291,6 @@ def cmd_receiver():
     sock.close()
     print("[CMD] Thread terminada")
 
-
 def telemetry_sender():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     while g_running:
@@ -346,10 +333,9 @@ def main():
 
     proc_ref = [start_stream()]
 
-    threading.Thread(target=cmd_receiver,               daemon=True).start()
-    threading.Thread(target=telemetry_sender,           daemon=True).start()
-    threading.Thread(target=stream_watchdog,
-                     args=(proc_ref,),                  daemon=True).start()
+    threading.Thread(target=cmd_receiver,     daemon=True).start()
+    threading.Thread(target=telemetry_sender, daemon=True).start()
+    threading.Thread(target=stream_watchdog, args=(proc_ref,), daemon=True).start()
 
     print("[ALPHABOT] Pronto. Ctrl+C para parar.\n")
     try:
