@@ -476,7 +476,9 @@ void* tx_loop(void *arg) {
 
     uint64_t last_round = 0;
 
-    /* usa variável global para ser atualizada pelo RX loop */
+    /* contador de misses consecutivos por nó */
+    uint8_t consecutive_miss[MAX_NODES + 1] = {0};
+    #define MISS_THRESHOLD 5   /* misses consecutivos antes de degradar qualidade */
 
     while (node->running && g_running) {
         uint64_t now           = get_time_us();
@@ -490,13 +492,19 @@ void* tx_loop(void *arg) {
                 last_round = cur_round;
                 sync_adjust_slot(rp_ms);
 
-                /* verifica slot misses: nós que não enviaram no frame anterior */
+                /* verifica slot misses consecutivos */
                 for (int s = 0; s < node->num_nodes; s++) {
                     uint8_t nid = (uint8_t)(s + 1);
                     if (nid == node->node_id) continue;
                     if (g_last_rx_frame[nid] < cur_round - 1) {
-                        /* nó não enviou no último frame — degrada qualidade */
-                        MATRIX_updateLinkQuality(nid, true);
+                        consecutive_miss[nid]++;
+                        if (consecutive_miss[nid] >= MISS_THRESHOLD) {
+                            MATRIX_updateLinkQuality(nid, true);
+                            printf("[SLOT] Node %d: %d misses consecutivos — degradar qualidade\n",
+                                   nid, consecutive_miss[nid]);
+                        }
+                    } else {
+                        consecutive_miss[nid] = 0;  /* reset ao receber */
                     }
                 }
             }
