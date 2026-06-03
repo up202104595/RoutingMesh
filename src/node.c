@@ -71,6 +71,9 @@ static inline void mesh_node_ip(char *buf, size_t buf_len, uint8_t node_id) {
 static volatile int g_running = 1;
 event_queue_t *g_event_queue = NULL;
 
+/* último frame em que recebemos pacote de cada nó (para slot miss detection) */
+static volatile uint64_t g_last_rx_frame[MAX_NODES + 1] = {0};
+
 void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
@@ -404,6 +407,13 @@ void* receiver_loop(void *arg) {
         tdma_header_t *hdr = (tdma_header_t *)buffer;
 
         if (hdr->type == MATRIX) {
+            /* regista frame atual para slot miss detection */
+            if (hdr->slot_id <= MAX_NODES) {
+                uint64_t now_us    = get_time_us();
+                uint64_t round_us  = (uint64_t)rp_ms * 1000;
+                g_last_rx_frame[hdr->slot_id] = now_us / round_us;
+            }
+
 #ifdef RELAY_METHOD_ARP
             mac_table_update(hdr->slot_id);
 #endif
@@ -466,6 +476,8 @@ void* tx_loop(void *arg) {
 
     uint64_t last_round = 0;
 
+    /* usa variável global para ser atualizada pelo RX loop */
+
     while (node->running && g_running) {
         uint64_t now           = get_time_us();
         uint64_t time_in_frame = now % node->frame_duration_us;
@@ -477,6 +489,16 @@ void* tx_loop(void *arg) {
             if (cur_round != last_round) {
                 last_round = cur_round;
                 sync_adjust_slot(rp_ms);
+
+                /* verifica slot misses: nós que não enviaram no frame anterior */
+                for (int s = 0; s < node->num_nodes; s++) {
+                    uint8_t nid = (uint8_t)(s + 1);
+                    if (nid == node->node_id) continue;
+                    if (g_last_rx_frame[nid] < cur_round - 1) {
+                        /* nó não enviou no último frame — degrada qualidade */
+                        MATRIX_updateLinkQuality(nid, true);
+                    }
+                }
             }
             usleep(2000);
             continue;

@@ -265,15 +265,13 @@ def main():
                     last_dpad_t = now
                 dpad_x_prev = dpad_x
 
-            # ── Movimento: R2=avançar, L2=recuar, RStick=esterçar
+            # ── Movimento: Left Stick — tank drive
             if now - last_move_t >= CMD_INTERVAL:
-                fwd   = trigger_to_speed(axis(joy, AX_R2))
-                bwd   = trigger_to_speed(axis(joy, AX_L2))
-                net   = fwd - bwd
-                steer = apply_deadzone(axis(joy, AX_RIGHT_X))
-
-                left  = max(-1.0, min(1.0, net - steer)) * max_speed
-                right = max(-1.0, min(1.0, net + steer)) * max_speed
+                x = apply_deadzone(axis(joy, AX_LEFT_X))
+                y = apply_deadzone(axis(joy, AX_LEFT_Y))
+                # y negativo = stick para cima = avançar
+                left  = max(-1.0, min(1.0, -y + x)) * max_speed
+                right = max(-1.0, min(1.0, -y - x)) * max_speed
 
                 if abs(left) > 0.02 or abs(right) > 0.02:
                     send_cmd(sock, {"cmd": "move",

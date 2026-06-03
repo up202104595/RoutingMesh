@@ -437,13 +437,15 @@ void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout) {
         return;
     }
     if(timeout) {
-        if(g_myMatrix.link_quality[my_idx][node_idx] > 20)
-            g_myMatrix.link_quality[my_idx][node_idx] -= 20;
+        /* Degradação agressiva: -40 por slot miss (relay em ~2-3 misses) */
+        if(g_myMatrix.link_quality[my_idx][node_idx] > 40)
+            g_myMatrix.link_quality[my_idx][node_idx] -= 40;
         else
             g_myMatrix.link_quality[my_idx][node_idx] = 0;
     } else {
-        if(g_myMatrix.link_quality[my_idx][node_idx] < 95)
-            g_myMatrix.link_quality[my_idx][node_idx] += 5;
+        /* Recuperação lenta: +3 por pacote recebido */
+        if(g_myMatrix.link_quality[my_idx][node_idx] < 97)
+            g_myMatrix.link_quality[my_idx][node_idx] += 3;
         else
             g_myMatrix.link_quality[my_idx][node_idx] = 100;
     }

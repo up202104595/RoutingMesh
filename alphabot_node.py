@@ -29,7 +29,9 @@ except ImportError:
     print("[ALPHABOT]   instala com: sudo apt install python3-smbus2")
     HAS_I2C = False
 
-# Calibrado fisicamente: canal 0=pan centro=100, canal 1=tilt centro=420
+# Valores em pulsos PCA9685 (0-4095). Calibrados com servo_debug.py.
+# pan:  100=frente, 0=esquerda máx, 200=direita máx
+# tilt: 420=horizontal, 300=cima, 500=baixo
 SERVO_PAN_MIN    = 0
 SERVO_PAN_MAX    = 200
 SERVO_PAN_CENTER = 100
@@ -50,8 +52,9 @@ class PCA9685:
         time.sleep(0.005)
         print(f"[PCA9685] OK addr=0x{address:02X} @ 50Hz")
 
-    def set_servo(self, channel, degrees):
-        pulse = int(102 + (degrees / 270.0) * 410)  # 0.5ms→2.5ms
+    def set_servo(self, channel, pulse):
+        """pulse: valor direto 0-4095 do PCA9685."""
+        pulse = max(0, min(4095, pulse))
         reg   = 0x06 + 4 * channel
         self.bus.write_byte_data(self.address, reg,     0x00)
         self.bus.write_byte_data(self.address, reg + 1, 0x00)

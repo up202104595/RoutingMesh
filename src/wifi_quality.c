@@ -22,11 +22,14 @@ static pthread_t       g_thread;
 
 /* ─────────────────────────────────────────────────────────────
  * wifi_rssi_to_quality()
+ *
+ * Threshold agressivo: abaixo de -70dBm a qualidade cai a zero,
+ * forçando o MST a preferir o relay mesmo com o nó ainda "vivo".
  * ───────────────────────────────────────────────────────────── */
 uint8_t wifi_rssi_to_quality(int rssi_dbm) {
-    if (rssi_dbm >= -30) return 100;
-    if (rssi_dbm <= -90) return 0;
-    return (uint8_t)((rssi_dbm + 90) * 100 / 60);
+    if (rssi_dbm >= -50) return 100;
+    if (rssi_dbm <= -70) return 0;    /* corte agressivo: relay obrigatório */
+    return (uint8_t)((rssi_dbm + 70) * 100 / 20);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -87,27 +90,45 @@ static int parse_iw_dump(mac_rssi_t *out, int max) {
  * Devolve o último octeto (node_id) ou 0 se não encontrado.
  * ───────────────────────────────────────────────────────────── */
 static uint8_t get_node_id_for_mac(const char *mac) {
+    /* Tenta primeiro via ARP cache */
     FILE *fp = popen("arp -n 2>/dev/null", "r");
+    if (fp) {
+        char line[256];
+        while (fgets(line, sizeof(line), fp)) {
+            char lip[64], hwtype[16], lmac[32], flags[16], iface[32];
+            if (sscanf(line, "%63s %15s %31s %15s %31s",
+                       lip, hwtype, lmac, flags, iface) == 5) {
+                if (strcasecmp(lmac, mac) == 0) {
+                    int a, b, c, d;
+                    if (sscanf(lip, "%d.%d.%d.%d", &a, &b, &c, &d) == 4) {
+                        pclose(fp);
+                        return (uint8_t)d;
+                    }
+                }
+            }
+        }
+        pclose(fp);
+    }
+
+    /* Fallback: tenta via ip neigh (mais atualizado que arp em ad-hoc) */
+    fp = popen("ip neigh 2>/dev/null", "r");
     if (!fp) return 0;
 
     char line[256];
     uint8_t node_id = 0;
-
     while (fgets(line, sizeof(line), fp)) {
-        char lip[64], hwtype[16], lmac[32], flags[16], iface[32];
-        if (sscanf(line, "%63s %15s %31s %15s %31s",
-                   lip, hwtype, lmac, flags, iface) == 5) {
-            if (strcasecmp(lmac, mac) == 0) {
-                /* extrai último octeto do IP */
+        char lip[64], lmac[32], rest[128];
+        if (sscanf(line, "%63s %127s", lip, rest) >= 1) {
+            /* procura o MAC na linha */
+            if (strcasestr(line, mac)) {
                 int a, b, c, d;
                 if (sscanf(lip, "%d.%d.%d.%d", &a, &b, &c, &d) == 4) {
                     node_id = (uint8_t)d;
+                    break;
                 }
-                break;
             }
         }
     }
-
     pclose(fp);
     return node_id;
 }
