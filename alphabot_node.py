@@ -328,8 +328,8 @@ def main():
 
     hardware_init()
 
-    print("[ALPHABOT] A aguardar 3s para o meshnode estabilizar...")
-    time.sleep(3)
+    print("[ALPHABOT] A aguardar 10s para o meshnode estabilizar...")
+    time.sleep(10)
 
     proc_ref = [start_stream()]
 

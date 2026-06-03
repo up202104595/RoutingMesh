@@ -474,7 +474,9 @@ void* tx_loop(void *arg) {
     printf("[TX] Thread iniciada, Slot %d  frame=%u ms  slot=%u ms  guard=%u ms\n",
            node->node_id, rp_ms, SLOT_DURATION_US/1000, GUARD_US/1000);
 
-    uint64_t last_round = 0;
+    uint64_t last_round  = 0;
+    uint64_t start_time  = get_time_us();
+    #define STARTUP_GRACE_US  10000000ULL  /* 10s sem slot miss detection */
 
     /* contador de misses consecutivos por nó */
     uint8_t consecutive_miss[MAX_NODES + 1] = {0};
@@ -492,10 +494,13 @@ void* tx_loop(void *arg) {
                 last_round = cur_round;
                 sync_adjust_slot(rp_ms);
 
-                /* verifica slot misses consecutivos */
+                /* verifica slot misses consecutivos (só após grace period) */
+                if (get_time_us() - start_time < STARTUP_GRACE_US) goto skip_miss;
                 for (int s = 0; s < node->num_nodes; s++) {
                     uint8_t nid = (uint8_t)(s + 1);
                     if (nid == node->node_id) continue;
+                    /* só conta miss se o nó já foi visto pelo menos uma vez */
+                    if (g_last_rx_frame[nid] == 0) continue;
                     if (g_last_rx_frame[nid] < cur_round - 1) {
                         consecutive_miss[nid]++;
                         if (consecutive_miss[nid] >= MISS_THRESHOLD) {
@@ -507,6 +512,7 @@ void* tx_loop(void *arg) {
                         consecutive_miss[nid] = 0;  /* reset ao receber */
                     }
                 }
+                skip_miss:;
             }
             usleep(2000);
             continue;
