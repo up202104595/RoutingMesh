@@ -480,7 +480,7 @@ void* tx_loop(void *arg) {
 
     /* contador de misses consecutivos por nó */
     uint8_t consecutive_miss[MAX_NODES + 1] = {0};
-    #define MISS_THRESHOLD 5   /* misses consecutivos antes de degradar qualidade */
+    #define MISS_THRESHOLD 2   /* misses consecutivos antes de degradar qualidade */
 
     while (node->running && g_running) {
         uint64_t now           = get_time_us();

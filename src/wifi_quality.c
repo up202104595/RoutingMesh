@@ -27,9 +27,9 @@ static pthread_t       g_thread;
  * forçando o MST a preferir o relay mesmo com o nó ainda "vivo".
  * ───────────────────────────────────────────────────────────── */
 uint8_t wifi_rssi_to_quality(int rssi_dbm) {
-    if (rssi_dbm >= -50) return 100;
-    if (rssi_dbm <= -70) return 0;    /* corte agressivo: relay obrigatório */
-    return (uint8_t)((rssi_dbm + 70) * 100 / 20);
+    if (rssi_dbm >= -40) return 100;
+    if (rssi_dbm <= -55) return 0;    /* relay obrigatório abaixo de -55 dBm */
+    return (uint8_t)((rssi_dbm + 55) * 100 / 15);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -142,13 +142,28 @@ static void* wifi_quality_loop(void *arg) {
     printf("[WIFI] Thread de qualidade iniciada (intervalo=%dms)\n",
            WIFI_QUALITY_INTERVAL_MS);
 
+    int no_station_count = 0;
     while (g_running) {
         mac_rssi_t stations[MAX_STATIONS];
         int n = parse_iw_dump(stations, MAX_STATIONS);
 
+        if (n == 0) {
+            no_station_count++;
+            if (no_station_count % 10 == 1)
+                printf("[WIFI] AVISO: iw station dump nao retornou peers "
+                       "(ad-hoc pode nao suportar — tentativa %d)\n",
+                       no_station_count);
+        } else {
+            no_station_count = 0;
+        }
+
         for (int i = 0; i < n; i++) {
             uint8_t node_id = get_node_id_for_mac(stations[i].mac);
-            if (node_id == 0 || node_id > MAX_NODES) continue;
+            if (node_id == 0 || node_id > MAX_NODES) {
+                printf("[WIFI] MAC=%s  RSSI=%d dBm — node_id nao mapeado (ARP?)\n",
+                       stations[i].mac, stations[i].rssi);
+                continue;
+            }
 
             uint8_t quality = wifi_rssi_to_quality(stations[i].rssi);
 
@@ -156,7 +171,6 @@ static void* wifi_quality_loop(void *arg) {
             g_quality[node_id] = quality;
             pthread_mutex_unlock(&g_mutex);
 
-            /* actualiza link_quality na matriz */
             MATRIX_setLinkQuality(node_id, quality);
 
             printf("[WIFI] Node %u  MAC=%s  RSSI=%d dBm  Quality=%u\n",
