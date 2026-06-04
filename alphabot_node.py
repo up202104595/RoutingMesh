@@ -56,6 +56,11 @@ class PCA9685:
         degrees = max(0, min(180, degrees))
         # 50 Hz, 12-bit: 0°=205 (1 ms), 90°=307 (1.5 ms), 180°=410 (2 ms)
         pulse = int(205 + (degrees / 180.0) * 205)
+        self.set_servo_pulse(channel, pulse)
+
+    def set_servo_pulse(self, channel, pulse):
+        """Escreve o valor de pulse directamente no PCA9685 (0–4095)."""
+        pulse = max(0, min(4095, pulse))
         reg   = 0x06 + 4 * channel
         for attempt in range(2):
             try:
@@ -171,9 +176,9 @@ def hardware_init():
     if HAS_I2C:
         try:
             pca = PCA9685(0x40, 1)
-            pca.set_servo(0, 100)  # pan centro calibrado
-            pca.set_servo(1, 90)   # tilt centro
-            print("[ALPHABOT] Servos centrados (pan=100° tilt=90°)")
+            pca.set_servo(0, 100)      # pan centro calibrado
+            pca.set_servo_pulse(1, 420) # tilt centro (de frente)
+            print("[ALPHABOT] Servos centrados (pan=100° tilt=pulse:420)")
         except Exception as e:
             print(f"[ALPHABOT] ERRO PCA9685: {e}")
             pca = None
@@ -225,7 +230,9 @@ def servo_set_pan(degrees):
 def servo_set_tilt(degrees):
     if pca:
         try:
-            pca.set_servo(1, max(0, min(180, degrees)))
+            # centro=90 → pulse=420; cada grau ≈ 2.28 pulses
+            pulse = int(420 + (degrees - 90) * 2.28)
+            pca.set_servo_pulse(1, max(205, min(625, pulse)))
         except Exception as e:
             print(f"[SERVO] ERRO tilt: {e}")
 
