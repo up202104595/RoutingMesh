@@ -83,6 +83,37 @@ static int parse_iw_dump(mac_rssi_t *out, int max) {
     return count;
 }
 
+/*
+ * parse_iwconfig_signal()
+ *
+ * Fallback para ad-hoc: iwconfig mostra "Signal level=-XX dBm" mesmo
+ * quando iw station dump nao lista peers (brcmfmac em IBSS).
+ * Devolve o RSSI geral da interface ou -100 se nao disponivel.
+ */
+static int parse_iwconfig_signal(void) {
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "iwconfig " MESH_PHY_IFACE " 2>/dev/null");
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return -100;
+
+    char line[256];
+    int rssi = -100;
+    while (fgets(line, sizeof(line), fp)) {
+        int val;
+        /* "Signal level=-65 dBm" ou "Signal level=165/255" */
+        if (strstr(line, "Signal level=")) {
+            if (sscanf(strstr(line, "Signal level=") + 13, "%d", &val) == 1) {
+                if (val < 0)       rssi = val;       /* já em dBm */
+                else if (val > 0)  rssi = val - 256; /* unsigned → signed */
+            }
+            break;
+        }
+    }
+    pclose(fp);
+    return rssi;
+}
+
 /* ─────────────────────────────────────────────────────────────
  * get_ip_for_mac()
  *
@@ -149,10 +180,25 @@ static void* wifi_quality_loop(void *arg) {
 
         if (n == 0) {
             no_station_count++;
-            if (no_station_count % 10 == 1)
-                printf("[WIFI] AVISO: iw station dump nao retornou peers "
-                       "(ad-hoc pode nao suportar — tentativa %d)\n",
+            /* Fallback: iwconfig dá sinal global da interface em ad-hoc */
+            int rssi = parse_iwconfig_signal();
+            if (rssi > -99) {
+                /* Aplica o RSSI a todos os nós que temos no ARP cache */
+                uint8_t quality = wifi_rssi_to_quality(rssi);
+                printf("[WIFI] iwconfig fallback  RSSI=%d dBm  Quality=%u"
+                       " (aplicado a todos os vizinhos)\n", rssi, quality);
+                for (uint8_t nid = 1; nid <= MAX_NODES; nid++) {
+                    pthread_mutex_lock(&g_mutex);
+                    if (g_quality[nid] > 0 || quality > 0)
+                        g_quality[nid] = quality;
+                    pthread_mutex_unlock(&g_mutex);
+                    if (quality > 0 || g_quality[nid] > 0)
+                        MATRIX_setLinkQuality(nid, quality);
+                }
+            } else if (no_station_count % 10 == 1) {
+                printf("[WIFI] AVISO: sem RSSI disponivel (tentativa %d)\n",
                        no_station_count);
+            }
         } else {
             no_station_count = 0;
         }
