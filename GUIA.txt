@@ -3,39 +3,66 @@
 ═══════════════════════════════════════════════════════════════
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-0. ATUALIZAR CODIGO (git pull + recompilar)
+0. ATUALIZAR CODIGO (git pull + recompilar + reinstalar)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Raspberry AlphaBot (No 1):
-  cd ~/Documents/RoutingMeshNet/RoutingMesh
-  git pull
-  make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
-  cp meshnode meshnode_ipforward
-  make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0 RELAY_METHOD=arp
-  cp meshnode meshnode_arp
-  sudo systemctl restart meshnode
-  sudo systemctl restart alphabot
+PRIMEIRA VEZ (instalacao completa de servicos systemd):
+  Usar o script install.sh — copia o binario, instala servicos,
+  activa adhoc + meshnode no boot.
 
-Raspberry Relay (No 2):
-  cd ~/Documents/RoutingMeshNet/RoutingMesh
-  git pull
-  make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
-  cp meshnode meshnode_ipforward
-  make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0 RELAY_METHOD=arp
-  cp meshnode meshnode_arp
-  sudo systemctl restart meshnode
+  Raspberry AlphaBot (No 1):
+    cd ~/Documents/RoutingMeshNet/RoutingMesh
+    git pull
+    sudo systemctl stop meshnode alphabot 2>/dev/null; true
+    sudo bash deploy/install.sh 1
 
-PC Base Station (No 3):
-  cd ~/Documents/RoutingMeshNet/RoutingMesh
-  git pull
-  make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
-  cp meshnode meshnode_ipforward
-  make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0 RELAY_METHOD=arp
-  cp meshnode meshnode_arp
+  Raspberry Relay (No 2):
+    cd ~/Documents/RoutingMeshNet/RoutingMesh
+    git pull
+    sudo systemctl stop meshnode 2>/dev/null; true
+    sudo bash deploy/install.sh 2
 
-NOTA: Apos recompilar, parar e rearrancar o meshnode manualmente
-      se nao estiver a usar os servicos systemd:
-  sudo killall meshnode 2>/dev/null; sudo ./meshnode_ipforward <ID> 3
+  PC Base Station (No 3):
+    cd ~/Documents/RoutingMeshNet/RoutingMesh
+    git pull
+    sudo systemctl stop meshnode 2>/dev/null; true
+    sudo bash deploy/install.sh 3
+
+  Apos o install.sh a maquina esta pronta. Reinicia ou corre:
+    No 1:  sudo systemctl start adhoc meshnode alphabot
+    No 2:  sudo systemctl start adhoc meshnode
+    No 3:  sudo systemctl start adhoc meshnode
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+ACTUALIZACOES SEGUINTES (so git pull + recompilar + copiar):
+
+  Raspberry AlphaBot (No 1):
+    cd ~/Documents/RoutingMeshNet/RoutingMesh
+    git pull
+    sudo systemctl stop meshnode alphabot
+    make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
+    sudo cp meshnode /usr/local/bin/meshnode
+    sudo systemctl start meshnode alphabot
+
+  Raspberry Relay (No 2):
+    cd ~/Documents/RoutingMeshNet/RoutingMesh
+    git pull
+    sudo systemctl stop meshnode
+    make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
+    sudo cp meshnode /usr/local/bin/meshnode
+    sudo systemctl start meshnode
+
+  PC Base Station (No 3):
+    cd ~/Documents/RoutingMeshNet/RoutingMesh
+    git pull
+    sudo systemctl stop meshnode
+    make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
+    sudo cp meshnode /usr/local/bin/meshnode
+    sudo systemctl start meshnode
+
+NOTA: O "sudo systemctl stop" antes do "cp" e obrigatorio —
+      o binario fica bloqueado enquanto o servico estiver activo.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. COMPILAR
