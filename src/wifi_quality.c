@@ -165,68 +165,14 @@ static uint8_t get_node_id_for_mac(const char *mac) {
 }
 
 /* ─────────────────────────────────────────────────────────────
- * wifi_quality_loop() — thread periódica
+ * wifi_quality_loop() — desactivado
+ * Qualidade gerida exclusivamente pela janela deslizante de
+ * beacons TDMA em node.c (MATRIX_updateLinkQuality).
  * ───────────────────────────────────────────────────────────── */
 static void* wifi_quality_loop(void *arg) {
     (void)arg;
-
-    printf("[WIFI] Thread de qualidade iniciada (intervalo=%dms)\n",
-           WIFI_QUALITY_INTERVAL_MS);
-
-    int no_station_count = 0;
-    while (g_running) {
-        mac_rssi_t stations[MAX_STATIONS];
-        int n = parse_iw_dump(stations, MAX_STATIONS);
-
-        if (n == 0) {
-            no_station_count++;
-            /* Fallback: iwconfig dá sinal global da interface em ad-hoc */
-            int rssi = parse_iwconfig_signal();
-            if (rssi > -99) {
-                /* Aplica o RSSI a todos os nós que temos no ARP cache */
-                uint8_t quality = wifi_rssi_to_quality(rssi);
-                printf("[WIFI] iwconfig fallback  RSSI=%d dBm  Quality=%u"
-                       " (aplicado a todos os vizinhos)\n", rssi, quality);
-                for (uint8_t nid = 1; nid <= MAX_NODES; nid++) {
-                    pthread_mutex_lock(&g_mutex);
-                    if (g_quality[nid] > 0 || quality > 0)
-                        g_quality[nid] = quality;
-                    pthread_mutex_unlock(&g_mutex);
-                    if (quality > 0 || g_quality[nid] > 0)
-                        MATRIX_setLinkQuality(nid, quality);
-                }
-            } else if (no_station_count % 10 == 1) {
-                printf("[WIFI] AVISO: sem RSSI disponivel (tentativa %d)\n",
-                       no_station_count);
-            }
-        } else {
-            no_station_count = 0;
-        }
-
-        for (int i = 0; i < n; i++) {
-            uint8_t node_id = get_node_id_for_mac(stations[i].mac);
-            if (node_id == 0 || node_id > MAX_NODES) {
-                printf("[WIFI] MAC=%s  RSSI=%d dBm — node_id nao mapeado (ARP?)\n",
-                       stations[i].mac, stations[i].rssi);
-                continue;
-            }
-
-            uint8_t quality = wifi_rssi_to_quality(stations[i].rssi);
-
-            pthread_mutex_lock(&g_mutex);
-            g_quality[node_id] = quality;
-            pthread_mutex_unlock(&g_mutex);
-
-            MATRIX_setLinkQuality(node_id, quality);
-
-            printf("[WIFI] Node %u  MAC=%s  RSSI=%d dBm  Quality=%u\n",
-                   node_id, stations[i].mac, stations[i].rssi, quality);
-        }
-
-        usleep(WIFI_QUALITY_INTERVAL_MS * 1000);
-    }
-
-    printf("[WIFI] Thread de qualidade terminada\n");
+    printf("[WIFI] Thread de qualidade desactivada (usando beacon loss)\n");
+    while (g_running) usleep(1000000);
     return NULL;
 }
 
