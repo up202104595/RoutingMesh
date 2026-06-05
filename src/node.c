@@ -764,6 +764,72 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
     return node;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+ * VIDEO FEEDBACK — Nó 1 escuta porta 9002
+ * Base Station envia "video_poor" quando video falha.
+ * Força qualidade do link para Nó 3 a zero imediatamente.
+ * ═══════════════════════════════════════════════════════════════ */
+#define VIDEO_FEEDBACK_PORT 9002
+#define VIDEO_FEEDBACK_PEER 3   /* Nó 3 = base station */
+
+void* video_feedback_loop(void *arg) {
+    node_t *node = (node_t *)arg;
+
+    /* só activo no Nó 1 */
+    if (node->node_id != 1) return NULL;
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) { perror("[VFEED] socket"); return NULL; }
+
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in addr = {0};
+    addr.sin_family      = AF_INET;
+    addr.sin_port        = htons(VIDEO_FEEDBACK_PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("[VFEED] bind"); close(sock); return NULL;
+    }
+
+    struct timeval tv = {1, 0};
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    printf("[VFEED] A escutar feedback de video na porta %d\n", VIDEO_FEEDBACK_PORT);
+
+    int      poor       = 0;
+    uint64_t poor_since = 0;
+
+    while (node->running && g_running) {
+        char buf[256];
+        ssize_t n = recv(sock, buf, sizeof(buf) - 1, 0);
+        if (n <= 0) {
+            /* timeout — se estava em modo poor e não recebe nada, recupera */
+            if (poor) {
+                poor = 0;
+                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 80);
+                printf("[VFEED] Sem feedback de video — a recuperar link para No %d\n",
+                       VIDEO_FEEDBACK_PEER);
+            }
+            continue;
+        }
+        buf[n] = '\0';
+
+        if (strstr(buf, "video_poor")) {
+            MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 0);
+            if (!poor) {
+                poor_since = get_time_us();
+                poor       = 1;
+                printf("[VFEED] Video falhou no No %d — qualidade forcada a 0\n",
+                       VIDEO_FEEDBACK_PEER);
+            }
+        }
+    }
+
+    close(sock);
+    return NULL;
+}
+
 void node_run(node_t *node) {
     signal(SIGINT, signal_handler);
     printf("[Node %d] Iniciando threads...\n\n", node->node_id);
@@ -782,6 +848,9 @@ void node_run(node_t *node) {
         pthread_create(&node->tun_thread, NULL, tun_reader_loop, node);
     else
         printf("[Node %d] AVISO: Thread TUN nao iniciada\n", node->node_id);
+
+    pthread_t video_fb_thread;
+    pthread_create(&video_fb_thread, NULL, video_feedback_loop, node);
 
     pthread_t tcp_rx_threads[MAX_NODES + 1];
     memset(tcp_rx_threads, 0, sizeof(tcp_rx_threads));

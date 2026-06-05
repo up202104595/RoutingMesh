@@ -31,9 +31,15 @@ except ImportError:
     HAS_PYGAME = False
 
 # ── Rede ─────────────────────────────────────────────────────
-ROBOT_IP  = "10.0.0.1"
-CMD_PORT  = 9000
-TEL_PORT  = 9001
+ROBOT_IP      = "10.0.0.1"
+CMD_PORT      = 9000
+TEL_PORT      = 9001
+FEEDBACK_PORT = 9002   # porta de feedback de qualidade de video no Nó 1
+
+# ── Video feedback ────────────────────────────────────────────
+VIDEO_PORT          = 5000
+VIDEO_LOSS_TIMEOUT  = 1.5   # segundos sem pacotes → link fraco
+FEEDBACK_INTERVAL   = 0.5   # envia feedback a cada 0.5s enquanto video falha
 
 # ── Controlo ─────────────────────────────────────────────────
 DEADZONE         = 0.1
@@ -122,6 +128,56 @@ def ffplay_watchdog(proc_ref):
                 proc_ref[0] = start_ffplay()
 
 # ═════════════════════════════════════════════════════════════
+# VIDEO FEEDBACK — monitoriza recepção de video e avisa Nó 1
+# ═════════════════════════════════════════════════════════════
+
+g_last_video_pkt = 0.0
+g_video_poor     = False
+
+def video_monitor():
+    """Escuta pacotes UDP de video na porta 5000 e regista o timestamp."""
+    global g_last_video_pkt
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("0.0.0.0", VIDEO_PORT))
+    sock.settimeout(0.5)
+    while g_running:
+        try:
+            sock.recv(2048)
+            g_last_video_pkt = time.time()
+        except socket.timeout:
+            pass
+        except Exception:
+            pass
+    sock.close()
+
+def video_feedback_sender():
+    """Envia feedback ao Nó 1 quando o video falha."""
+    global g_video_poor
+    fb_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    last_fb = 0.0
+    while g_running:
+        time.sleep(0.1)
+        now      = time.time()
+        age      = now - g_last_video_pkt if g_last_video_pkt > 0 else 0
+        is_poor  = g_last_video_pkt > 0 and age > VIDEO_LOSS_TIMEOUT
+
+        if is_poor and now - last_fb >= FEEDBACK_INTERVAL:
+            try:
+                msg = json.dumps({"cmd": "video_poor", "age": round(age, 2)}).encode()
+                fb_sock.sendto(msg, (ROBOT_IP, FEEDBACK_PORT))
+                if not g_video_poor:
+                    print(f"\n[FEEDBACK] Video perdido ({age:.1f}s) — a avisar Nó 1")
+                    g_video_poor = True
+                last_fb = now
+            except Exception:
+                pass
+        elif not is_poor and g_video_poor:
+            print("\n[FEEDBACK] Video recuperado")
+            g_video_poor = False
+    fb_sock.close()
+
+# ═════════════════════════════════════════════════════════════
 # TELEMETRIA
 # ═════════════════════════════════════════════════════════════
 
@@ -199,8 +255,10 @@ def main():
         sys.exit(1)
 
     proc_ref = [start_ffplay()]
-    threading.Thread(target=telemetry_receiver, daemon=True).start()
-    threading.Thread(target=ffplay_watchdog, args=(proc_ref,), daemon=True).start()
+    threading.Thread(target=telemetry_receiver,    daemon=True).start()
+    threading.Thread(target=ffplay_watchdog,        args=(proc_ref,), daemon=True).start()
+    threading.Thread(target=video_monitor,          daemon=True).start()
+    threading.Thread(target=video_feedback_sender,  daemon=True).start()
 
     pygame.init()
     pygame.joystick.init()
