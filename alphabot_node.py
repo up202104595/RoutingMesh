@@ -177,8 +177,8 @@ def hardware_init():
         try:
             pca = PCA9685(0x40, 1)
             pca.set_servo(0, 100)      # pan centro calibrado
-            pca.set_servo_pulse(1, 420) # tilt centro (de frente)
-            print("[ALPHABOT] Servos centrados (pan=100° tilt=pulse:420)")
+            pca.set_servo_pulse(1, 390) # tilt centro (de frente)
+            print("[ALPHABOT] Servos centrados (pan=100° tilt=pulse:390)")
         except Exception as e:
             print(f"[ALPHABOT] ERRO PCA9685: {e}")
             pca = None
@@ -231,8 +231,8 @@ def servo_set_tilt(degrees):
     if pca:
         try:
             # centro=90 → pulse=420; cada grau ≈ 2.28 pulses
-            pulse = int(420 + (degrees - 90) * 2.28)
-            pca.set_servo_pulse(1, max(205, min(625, pulse)))
+            pulse = int(390 + (degrees - 90) * 2.28)
+            pca.set_servo_pulse(1, max(205, min(600, pulse)))
         except Exception as e:
             print(f"[SERVO] ERRO tilt: {e}")
 

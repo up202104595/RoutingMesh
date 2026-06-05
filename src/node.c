@@ -519,10 +519,12 @@ void* tx_loop(void *arg) {
                     int pct      = (rx_count * 100) / LOSS_WINDOW;
 
                     if (pct < LOSS_THRESHOLD_PCT) {
-                        MATRIX_updateLinkQuality(nid, true);
+                        /* força qualidade a zero — setLinkQuality sobrepõe
+                         * os +3 que chegam com cada beacon recebido */
+                        MATRIX_setLinkQuality(nid, 0);
                         if (!degraded[nid]) {
                             printf("[SLOT] Node %d: taxa RX=%d%% (janela %d frames)"
-                                   " — degradar qualidade\n", nid, pct, LOSS_WINDOW);
+                                   " — qualidade forcada a 0\n", nid, pct, LOSS_WINDOW);
                             degraded[nid] = 1;
                         }
                     } else {
