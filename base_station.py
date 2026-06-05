@@ -353,10 +353,9 @@ def main():
                 changed = False
 
                 if btn(joy, BTN_TRIANGLE):
-                    servo_pan  = SERVO_PAN_CENTER
-                    servo_tilt = SERVO_TILT_CENTER
-                    changed    = True
-                    print("\n[BASE] Câmara centrada")
+                    servo_pan = SERVO_PAN_CENTER
+                    changed   = True
+                    print("\n[BASE] Câmara pan centrada")
                 else:
                     if btn(joy, BTN_L1):
                         servo_pan = max(5,   servo_pan - SERVO_STEP)
@@ -364,18 +363,9 @@ def main():
                     if btn(joy, BTN_R1):
                         servo_pan = min(175, servo_pan + SERVO_STEP)
                         changed   = True
-                    dpad_y = axis(joy, AX_DPAD_Y)
-                    if dpad_y < -0.5:
-                        servo_tilt = min(175, servo_tilt + SERVO_STEP)
-                        changed    = True
-                    elif dpad_y > 0.5:
-                        servo_tilt = max(5,   servo_tilt - SERVO_STEP)
-                        changed    = True
 
                 if changed:
-                    send_cmd(sock, {"cmd": "servo",
-                                    "pan":  servo_pan,
-                                    "tilt": servo_tilt})
+                    send_cmd(sock, {"cmd": "servo", "pan": servo_pan})
                     last_srv_t = now
 
             print_telemetry(SPEED_LABELS[speed_idx])

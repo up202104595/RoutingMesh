@@ -177,8 +177,7 @@ def hardware_init():
         try:
             pca = PCA9685(0x40, 1)
             pca.set_servo(0, 100)      # pan centro calibrado
-            pca.set_servo_pulse(1, 390) # tilt centro (de frente)
-            print("[ALPHABOT] Servos centrados (pan=100° tilt=pulse:390)")
+            print("[ALPHABOT] Servo pan centrado (pan=100°)")
         except Exception as e:
             print(f"[ALPHABOT] ERRO PCA9685: {e}")
             pca = None
@@ -285,8 +284,7 @@ def cmd_receiver():
             elif cmd == "stop":
                 motors_stop()
             elif cmd == "servo":
-                if "pan"  in msg: servo_set_pan (int(msg["pan"]))
-                if "tilt" in msg: servo_set_tilt(int(msg["tilt"]))
+                if "pan" in msg: servo_set_pan(int(msg["pan"]))
             else:
                 print(f"[CMD] Comando desconhecido: {cmd!r} de {addr}")
         except socket.timeout:
