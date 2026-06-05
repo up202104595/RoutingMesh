@@ -135,10 +135,15 @@ g_last_video_pkt = 0.0
 g_video_poor     = False
 
 def video_monitor():
-    """Escuta pacotes UDP de video na porta 5000 e regista o timestamp."""
+    """
+    Monitoriza recepção de video via SO_REUSEPORT — co-existe com ffplay
+    na mesma porta UDP. O kernel distribui pacotes entre ambos os sockets;
+    basta receber qualquer pacote para saber que o video está a chegar.
+    """
     global g_last_video_pkt
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 15)  # SO_REUSEPORT=15
     sock.bind(("0.0.0.0", VIDEO_PORT))
     sock.settimeout(0.5)
     while g_running:
