@@ -476,19 +476,11 @@ void* tx_loop(void *arg) {
 
     uint64_t last_round  = 0;
     uint64_t start_time  = get_time_us();
-    #define STARTUP_GRACE_US  10000000ULL  /* 10s sem detecção */
+    #define STARTUP_GRACE_US  10000000ULL  /* 10s sem slot miss detection */
 
-    /*
-     * Janela deslizante de perda de pacotes por nó.
-     * Cada bit representa um frame: 1=recebido, 0=perdido.
-     * Janela de 16 frames (16 × 150ms ≈ 2.4s).
-     * Se taxa de recepção < LOSS_THRESHOLD_PCT → degradar qualidade.
-     */
-    #define LOSS_WINDOW      16
-    #define LOSS_THRESHOLD_PCT 60   /* abaixo de 60% recebidos → link fraco */
-    uint16_t rx_window[MAX_NODES + 1] = {0};  /* bitmask circular */
-    uint8_t  seen[MAX_NODES + 1]      = {0};  /* nó já foi visto */
-    uint8_t  degraded[MAX_NODES + 1]  = {0};  /* link já degradado */
+    /* contador de misses consecutivos por nó */
+    uint8_t consecutive_miss[MAX_NODES + 1] = {0};
+    #define MISS_THRESHOLD 5   /* misses consecutivos antes de degradar qualidade */
 
     while (node->running && g_running) {
         uint64_t now           = get_time_us();
@@ -502,42 +494,25 @@ void* tx_loop(void *arg) {
                 last_round = cur_round;
                 sync_adjust_slot(rp_ms);
 
-                if (get_time_us() - start_time < STARTUP_GRACE_US) goto skip_loss;
-
+                /* verifica slot misses consecutivos (só após grace period) */
+                if (get_time_us() - start_time < STARTUP_GRACE_US) goto skip_miss;
                 for (int s = 0; s < node->num_nodes; s++) {
                     uint8_t nid = (uint8_t)(s + 1);
                     if (nid == node->node_id) continue;
-                    if (g_last_rx_frame[nid] == 0) continue;  /* nunca visto */
-                    seen[nid] = 1;
-
-                    /* desliza a janela: bit mais antigo sai, novo bit entra */
-                    int received = (g_last_rx_frame[nid] >= cur_round - 1);
-                    rx_window[nid] = (uint16_t)((rx_window[nid] << 1) | received);
-
-                    /* conta bits a 1 na janela */
-                    int rx_count = __builtin_popcount(rx_window[nid]);
-                    int pct      = (rx_count * 100) / LOSS_WINDOW;
-
-                    if (pct < LOSS_THRESHOLD_PCT) {
-                        /* força qualidade a zero — setLinkQuality sobrepõe
-                         * os +3 que chegam com cada beacon recebido */
-                        MATRIX_setLinkQuality(nid, 0);
-                        if (!degraded[nid]) {
-                            printf("[SLOT] Node %d: taxa RX=%d%% (janela %d frames)"
-                                   " — qualidade forcada a 0\n", nid, pct, LOSS_WINDOW);
-                            degraded[nid] = 1;
+                    /* só conta miss se o nó já foi visto pelo menos uma vez */
+                    if (g_last_rx_frame[nid] == 0) continue;
+                    if (g_last_rx_frame[nid] < cur_round - 1) {
+                        consecutive_miss[nid]++;
+                        if (consecutive_miss[nid] >= MISS_THRESHOLD) {
+                            MATRIX_updateLinkQuality(nid, true);
+                            printf("[SLOT] Node %d: %d misses consecutivos — degradar qualidade\n",
+                                   nid, consecutive_miss[nid]);
                         }
                     } else {
-                        if (degraded[nid]) {
-                            /* recuperação imediata — força qualidade alta */
-                            MATRIX_setLinkQuality(nid, (uint8_t)pct);
-                            printf("[SLOT] Node %d: taxa RX=%d%% — link recuperado\n",
-                                   nid, pct);
-                            degraded[nid] = 0;
-                        }
+                        consecutive_miss[nid] = 0;  /* reset ao receber */
                     }
                 }
-                skip_loss:;
+                skip_miss:;
             }
             usleep(2000);
             continue;
