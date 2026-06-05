@@ -89,6 +89,8 @@ g_lock      = threading.Lock()
 # FFPLAY
 # ═════════════════════════════════════════════════════════════
 
+VIDEO_LOCAL_PORT = 5001   # ffplay escuta aqui; Python faz proxy de 5000→5001
+
 def start_ffplay():
     cmd = [
         "ffplay",
@@ -99,10 +101,10 @@ def start_ffplay():
         "-vf", "setpts=0",
         "-probesize",       "32",
         "-analyzeduration", "0",
-        "-i", "udp://0.0.0.0:5000",
+        "-i", f"udp://127.0.0.1:{VIDEO_LOCAL_PORT}",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"[VIDEO] ffplay iniciado — udp://0.0.0.0:5000 (PID {proc.pid})")
+    print(f"[VIDEO] ffplay iniciado — udp://127.0.0.1:{VIDEO_LOCAL_PORT} (PID {proc.pid})")
     return proc
 
 def stop_ffplay(proc):
@@ -136,25 +138,30 @@ g_video_poor     = False
 
 def video_monitor():
     """
-    Monitoriza recepção de video via SO_REUSEPORT — co-existe com ffplay
-    na mesma porta UDP. O kernel distribui pacotes entre ambos os sockets;
-    basta receber qualquer pacote para saber que o video está a chegar.
+    Proxy UDP: recebe todos os pacotes de video na porta 5000,
+    reencaminha intactos para ffplay em 127.0.0.1:5001,
+    e regista o timestamp do último pacote recebido.
+    Sem SO_REUSEPORT — ffplay não toca na porta 5000.
     """
     global g_last_video_pkt
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 15)  # SO_REUSEPORT=15
-    sock.bind(("0.0.0.0", VIDEO_PORT))
-    sock.settimeout(0.5)
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    rx.bind(("0.0.0.0", VIDEO_PORT))
+    rx.settimeout(0.5)
+
+    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
     while g_running:
         try:
-            sock.recv(2048)
+            data = rx.recv(65536)
             g_last_video_pkt = time.time()
+            tx.sendto(data, ("127.0.0.1", VIDEO_LOCAL_PORT))
         except socket.timeout:
             pass
         except Exception:
             pass
-    sock.close()
+    rx.close()
+    tx.close()
 
 def video_feedback_sender():
     """Envia feedback ao Nó 1 quando o video falha."""
