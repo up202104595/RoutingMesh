@@ -529,6 +529,8 @@ void* tx_loop(void *arg) {
                         }
                     } else {
                         if (degraded[nid]) {
+                            /* recuperação imediata — força qualidade alta */
+                            MATRIX_setLinkQuality(nid, (uint8_t)pct);
                             printf("[SLOT] Node %d: taxa RX=%d%% — link recuperado\n",
                                    nid, pct);
                             degraded[nid] = 0;
