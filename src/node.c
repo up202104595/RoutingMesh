@@ -77,6 +77,11 @@ static volatile uint64_t g_last_rx_frame[MAX_NODES + 1] = {0};
 /* flag de link fraco — suprime +3 beacon e força relay */
 volatile int g_video_poor_active = 0;
 
+/* hysteresis de recuperação: tempo (us) em que TCP reconectou */
+#define RECOVERY_GRACE_US     8000000ULL   /* 8s em relay após TCP reconectar */
+#define RECOVERY_PDR_MIN      60.0f        /* PDR mínimo para libertar relay */
+static volatile uint64_t g_tcp_reconnect_time[MAX_NODES + 1] = {0};
+
 void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
@@ -218,14 +223,13 @@ void* tcp_keepalive_loop(void *arg) {
                     node->tcp_sockfd[i] = fd;
                     pthread_mutex_unlock(&node->tcp_mutex);
                     printf("[TCP] Peer %d ligado\n", i);
-                    /* TCP reconectou — restaura com PDR se disponível, senão 100 */
+                    /* TCP reconectou — entra em período de graça (hysteresis):
+                     * qualidade=20, mantém relay durante RECOVERY_GRACE_US
+                     * ou até PDR > RECOVERY_PDR_MIN, o que vier depois. */
                     if (g_video_poor_active) {
-                        g_video_poor_active = 0;
-                        float pdr = pdr_get(i);
-                        uint8_t q = (pdr >= 0) ? (uint8_t)pdr : 100;
-                        MATRIX_setLinkQuality(i, q);
-                        printf("[TCP] Peer %d reconectou — qualidade restaurada=%u (PDR=%.1f%%)\n",
-                               i, q, pdr);
+                        g_tcp_reconnect_time[i] = get_time_us();
+                        MATRIX_setLinkQuality(i, 20);
+                        printf("[TCP] Peer %d reconectou — hysteresis ON (qualidade=20, grace=8s)\n", i);
                     }
                 } else {
                     printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
@@ -249,6 +253,33 @@ void* tcp_keepalive_loop(void *arg) {
                 }
             }
         }
+        /* verifica hysteresis: liberta relay quando grace expirou E PDR ok */
+        for (int i = 1; i <= node->num_nodes; i++) {
+            if (i == node->node_id) continue;
+            if (!g_video_poor_active) continue;
+            if (g_tcp_reconnect_time[i] == 0) continue;
+
+            uint64_t elapsed = get_time_us() - g_tcp_reconnect_time[i];
+            float    pdr     = pdr_get((uint8_t)i);
+            bool     grace_ok = elapsed >= RECOVERY_GRACE_US;
+            bool     pdr_ok   = pdr >= RECOVERY_PDR_MIN;
+
+            if (grace_ok && pdr_ok) {
+                g_video_poor_active      = 0;
+                g_tcp_reconnect_time[i]  = 0;
+                uint8_t q = (uint8_t)pdr;
+                MATRIX_setLinkQuality(i, q);
+                printf("[TCP] Peer %d: grace=%.1fs PDR=%.1f%% — relay libertado, qualidade=%u\n",
+                       i, elapsed / 1e6, pdr, q);
+            } else {
+                /* mantém qualidade baixa durante hysteresis */
+                MATRIX_setLinkQuality(i, 20);
+                if ((elapsed % 2000000ULL) < 1000000ULL)   /* log a cada ~2s */
+                    printf("[TCP] Peer %d: hysteresis %.1fs/8s PDR=%.1f%%/%d%% — relay activo\n",
+                           i, elapsed / 1e6, pdr, (int)RECOVERY_PDR_MIN);
+            }
+        }
+
         sleep(1);
         if (!node->running || !g_running) break;
     }
