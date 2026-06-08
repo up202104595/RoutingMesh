@@ -218,11 +218,14 @@ void* tcp_keepalive_loop(void *arg) {
                     node->tcp_sockfd[i] = fd;
                     pthread_mutex_unlock(&node->tcp_mutex);
                     printf("[TCP] Peer %d ligado\n", i);
-                    /* TCP reconectou → link recuperado */
+                    /* TCP reconectou — restaura com PDR se disponível, senão 100 */
                     if (g_video_poor_active) {
                         g_video_poor_active = 0;
-                        MATRIX_setLinkQuality(i, 80);
-                        printf("[TCP] Peer %d reconectou — qualidade restaurada\n", i);
+                        float pdr = pdr_get(i);
+                        uint8_t q = (pdr >= 0) ? (uint8_t)pdr : 100;
+                        MATRIX_setLinkQuality(i, q);
+                        printf("[TCP] Peer %d reconectou — qualidade restaurada=%u (PDR=%.1f%%)\n",
+                               i, q, pdr);
                     }
                 } else {
                     printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
