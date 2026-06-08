@@ -31,8 +31,8 @@ set -euo pipefail
 NODE1_IP="10.0.0.1"
 RUNS=3
 DO_RELAY=true
-RESULTS_DIR="$(dirname "$0")/results_$(date +%Y%m%d_%H%M%S)"
-TESTS_DIR="$(dirname "$0")"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESULTS_DIR="${TESTS_DIR}/results_$(date +%Y%m%d_%H%M%S)"
 
 # ── parse args ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
