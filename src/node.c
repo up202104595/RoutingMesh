@@ -639,10 +639,18 @@ void* tx_loop(void *arg) {
                 sent = send(tcp_fd, frame, frame_len, MSG_NOSIGNAL);
                 if (sent < 0) {
                     printf("[TX] TCP peer %d falhou — a reconectar...\n", next_hop);
-                    /* TCP falhou → link fraco → degrada qualidade imediatamente */
                     MATRIX_setLinkQuality(next_hop, 0);
                     g_video_poor_active = 1;
                     printf("[TX] Qualidade No %d forcada a 0 (TCP falhou)\n", next_hop);
+                    /* força recálculo de routing imediatamente */
+                    if (g_event_queue) {
+                        event_t *evt = malloc(sizeof(event_t));
+                        evt->type      = EVENT_TOPOLOGY_CHANGED;
+                        evt->node_id   = (uint8_t)next_hop;
+                        evt->timestamp = 0.0;
+                        evt->next      = NULL;
+                        event_queue_push(g_event_queue, evt);
+                    }
                     pthread_mutex_lock(&node->tcp_mutex);
                     if (node->tcp_sockfd[next_hop] == tcp_fd) {
                         close(tcp_fd);

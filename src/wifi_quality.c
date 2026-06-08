@@ -138,35 +138,9 @@ static uint8_t get_node_id_for_mac(const char *mac) {
  * ───────────────────────────────────────────────────────────── */
 static void* wifi_quality_loop(void *arg) {
     (void)arg;
-
-    printf("[WIFI] Thread de qualidade iniciada (intervalo=%dms)\n",
-           WIFI_QUALITY_INTERVAL_MS);
-
-    while (g_running) {
-        mac_rssi_t stations[MAX_STATIONS];
-        int n = parse_iw_dump(stations, MAX_STATIONS);
-
-        for (int i = 0; i < n; i++) {
-            uint8_t node_id = get_node_id_for_mac(stations[i].mac);
-            if (node_id == 0 || node_id > MAX_NODES) continue;
-
-            uint8_t quality = wifi_rssi_to_quality(stations[i].rssi);
-
-            pthread_mutex_lock(&g_mutex);
-            g_quality[node_id] = quality;
-            pthread_mutex_unlock(&g_mutex);
-
-            /* actualiza link_quality na matriz */
-            MATRIX_setLinkQuality(node_id, quality);
-
-            printf("[WIFI] Node %u  MAC=%s  RSSI=%d dBm  Quality=%u\n",
-                   node_id, stations[i].mac, stations[i].rssi, quality);
-        }
-
-        usleep(WIFI_QUALITY_INTERVAL_MS * 1000);
-    }
-
-    printf("[WIFI] Thread de qualidade terminada\n");
+    /* WIFI quality desactivado — usa TCP failure + PDR em vez de RSSI */
+    printf("[WIFI] Thread desactivada (qualidade gerida por TCP+PDR)\n");
+    while (g_running) usleep(1000000);
     return NULL;
 }
 
