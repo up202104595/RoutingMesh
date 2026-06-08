@@ -80,7 +80,9 @@ def run_convergence_test(target, label, duration=120, interval=0.1):
             except socket.timeout:
                 t_now = time.perf_counter()
                 if was_alive:
-                    broke_at  = t_now
+                    # só actualiza broke_at se ainda não convergimos
+                    if converged_at is None:
+                        broke_at  = t_now
                     was_alive = False
                     print(f"\n[CONV] *** LINK BREAK detected at {t_now - start:.2f}s ***")
                     events.append({"event": "link_break", "elapsed_s": round(t_now - start, 3)})

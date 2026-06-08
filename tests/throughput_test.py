@@ -70,7 +70,7 @@ def server_mode(bind_ip="0.0.0.0"):
         else:
             print("[THRU-SERVER] No data received or timing error")
 
-def client_mode(target, duration, pkt_size, label, topology):
+def client_mode(target, duration, pkt_size, label, topology, rate_kbps=0):
     payload_size = max(HDR_SIZE, pkt_size)
     data_filler  = b"X" * (payload_size - HDR_SIZE)
 
@@ -79,18 +79,28 @@ def client_mode(target, duration, pkt_size, label, topology):
     sent       = 0
     sent_bytes = 0
     seq        = 0
-    interval_ns = 0   # send as fast as possible
+
+    # rate limiting: intervalo mínimo entre pacotes
+    # se rate_kbps=0 usa ~10 Mbps (realista para mesh WiFi ad-hoc)
+    target_kbps  = rate_kbps if rate_kbps > 0 else 10000
+    pkt_bits     = payload_size * 8
+    interval_s   = pkt_bits / (target_kbps * 1000)
 
     print(f"[THRU-CLIENT] Target={target}  PktSize={pkt_size}B  "
-          f"Duration={duration}s  Label={label}")
+          f"Duration={duration}s  Rate≈{target_kbps}kbps  Label={label}")
 
-    t_start = time.perf_counter()
-    t_end   = t_start + duration
+    t_start  = time.perf_counter()
+    t_end    = t_start + duration
+    t_next   = t_start
 
     while time.perf_counter() < t_end:
-        seq += 1
-        ts  = time.perf_counter()
-        pkt = struct.pack(">Id", seq, ts) + data_filler
+        now = time.perf_counter()
+        if now < t_next:
+            time.sleep(t_next - now)
+        seq   += 1
+        ts     = time.perf_counter()
+        pkt    = struct.pack(">Id", seq, ts) + data_filler
+        t_next = ts + interval_s
         try:
             sock.sendto(pkt, (target, THRU_PORT))
             sent += 1
@@ -138,9 +148,11 @@ if __name__ == "__main__":
     parser.add_argument("--label",    default="test")
     parser.add_argument("--topology", default="direct",
                         choices=["direct","relay","3hop"])
+    parser.add_argument("--rate",     type=int, default=0,
+                        help="Taxa de envio em kbps (0=auto 10Mbps)")
     args = parser.parse_args()
 
     if args.mode == "server":
         server_mode()
     else:
-        client_mode(args.target, args.duration, args.pktsize, args.label, args.topology)
+        client_mode(args.target, args.duration, args.pktsize, args.label, args.topology, args.rate)
