@@ -43,6 +43,7 @@ def server_mode(bind_ip, label, topology):
     t_end      = None
     last_seq   = -1
     out_of_order = 0
+    pkt_size   = 0
 
     try:
         while True:
@@ -58,8 +59,9 @@ def server_mode(bind_ip, label, topology):
                 break
 
             if t_start is None:
-                t_start = time.perf_counter()
-                print(f"[THRU-SERVER] Primeiro pacote de {addr[0]}  seq={seq}")
+                t_start  = time.perf_counter()
+                pkt_size = len(data)
+                print(f"[THRU-SERVER] Primeiro pacote de {addr[0]}  seq={seq}  pktsize={pkt_size}B")
 
             if seq <= last_seq:
                 out_of_order += 1
@@ -95,6 +97,7 @@ def server_mode(bind_ip, label, topology):
         "label":              label,
         "topology":           topology,
         "direction":          "N1_to_N3",
+        "pkt_size_bytes":     pkt_size,
         "elapsed_s":          round(elapsed, 3),
         "pkts_received":      rx_count,
         "bytes_received":     rx_bytes,
