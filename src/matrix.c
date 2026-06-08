@@ -8,6 +8,9 @@
 #include <math.h>
 #include <pthread.h>
 
+/* declarado em node.c — suprime +3 de beacon quando video está fraco */
+extern volatile int g_video_poor_active;
+
 tdma_matrix_t g_myMatrix;
 uint8_t **g_spanningTree;
 FILE *topologyLog = NULL;
@@ -227,7 +230,9 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
     for(int i = 0; i < MAX_NODES; i++)
         memcpy(old_mst[i], g_spanningTree[i], MAX_NODES * sizeof(uint8_t));
     
-    MATRIX_updateLinkQuality(other_IP, false);
+    /* suprime +3 quando video_poor_active — evita flapping */
+    if (!g_video_poor_active)
+        MATRIX_updateLinkQuality(other_IP, false);
     
     tdma_matrix_t *final = (tdma_matrix_t*) malloc(sizeof(tdma_matrix_t));
     memset(final, 0, sizeof(tdma_matrix_t));

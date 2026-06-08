@@ -769,13 +769,16 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
  * Base Station envia "video_poor" quando video falha.
  * Força qualidade do link para Nó 3 a zero imediatamente.
  * ═══════════════════════════════════════════════════════════════ */
-#define VIDEO_FEEDBACK_PORT 9002
-#define VIDEO_FEEDBACK_PEER 3   /* Nó 3 = base station */
+/* flag global: quando 1, suprime os +3 dos beacons para o peer em causa */
+volatile int g_video_poor_active = 0;
+
+#define VIDEO_FEEDBACK_PORT  9002
+#define VIDEO_FEEDBACK_PEER  3        /* Nó 3 = base station */
+#define POOR_RECOVERY_US     15000000ULL  /* 15s sem feedback antes de recuperar */
 
 void* video_feedback_loop(void *arg) {
     node_t *node = (node_t *)arg;
 
-    /* só activo no Nó 1 */
     if (node->node_id != 1) return NULL;
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -792,36 +795,40 @@ void* video_feedback_loop(void *arg) {
         perror("[VFEED] bind"); close(sock); return NULL;
     }
 
+    /* timeout curto para verificar POOR_RECOVERY_US com precisão */
     struct timeval tv = {1, 0};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     printf("[VFEED] A escutar feedback de video na porta %d\n", VIDEO_FEEDBACK_PORT);
 
-    int      poor       = 0;
-    uint64_t poor_since = 0;
+    uint64_t last_feedback_us = 0;
 
     while (node->running && g_running) {
         char buf[256];
         ssize_t n = recv(sock, buf, sizeof(buf) - 1, 0);
-        if (n <= 0) {
-            /* timeout — se estava em modo poor e não recebe nada, recupera */
-            if (poor) {
-                poor = 0;
-                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 80);
-                printf("[VFEED] Sem feedback de video — a recuperar link para No %d\n",
+
+        if (n > 0) {
+            buf[n] = '\0';
+            if (strstr(buf, "video_poor")) {
+                last_feedback_us = get_time_us();
+                g_video_poor_active = 1;
+                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 0);
+                printf("[VFEED] Video falhou — qualidade No %d = 0\n",
                        VIDEO_FEEDBACK_PEER);
             }
-            continue;
         }
-        buf[n] = '\0';
 
-        if (strstr(buf, "video_poor")) {
-            MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 0);
-            if (!poor) {
-                poor_since = get_time_us();
-                poor       = 1;
-                printf("[VFEED] Video falhou no No %d — qualidade forcada a 0\n",
-                       VIDEO_FEEDBACK_PEER);
+        /* recupera só após POOR_RECOVERY_US sem nenhum feedback */
+        if (g_video_poor_active && last_feedback_us > 0) {
+            uint64_t elapsed = get_time_us() - last_feedback_us;
+            if (elapsed >= POOR_RECOVERY_US) {
+                g_video_poor_active = 0;
+                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 80);
+                printf("[VFEED] %lus sem feedback — link No %d recuperado\n",
+                       (unsigned long)(elapsed / 1000000), VIDEO_FEEDBACK_PEER);
+            } else {
+                /* mantém qualidade a zero enquanto em modo poor */
+                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 0);
             }
         }
     }
