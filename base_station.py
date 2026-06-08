@@ -38,8 +38,9 @@ FEEDBACK_PORT = 9002   # porta de feedback de qualidade de video no Nó 1
 
 # ── Video feedback ────────────────────────────────────────────
 VIDEO_PORT          = 5000
-VIDEO_LOSS_TIMEOUT  = 1.5   # segundos sem pacotes → link fraco
-FEEDBACK_INTERVAL   = 0.5   # envia feedback a cada 0.5s enquanto video falha
+VIDEO_LOSS_TIMEOUT   = 1.5   # segundos sem pacotes → link fraco
+VIDEO_OK_STABLE      = 3.0   # segundos de video estável → link bom
+FEEDBACK_INTERVAL    = 0.5   # envia feedback a cada 0.5s enquanto video falha
 
 # ── Controlo ─────────────────────────────────────────────────
 DEADZONE         = 0.1
