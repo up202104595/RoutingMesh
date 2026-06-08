@@ -51,15 +51,11 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
 pause() {
-    local msg="$*"
     echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}  AÇÃO NECESSÁRIA:${NC}"
     echo ""
-    # imprime cada linha da mensagem indentada
-    while IFS= read -r line; do
-        echo -e "    ${line}"
-    done <<< "$msg"
+    echo -e "    $*"
     echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     read -r -p "  Prima ENTER quando pronto..."
@@ -70,7 +66,7 @@ check_reachable() { ping -c 1 -W 1 "$NODE1_IP" &>/dev/null; }
 
 wait_reachable() {
     info "A aguardar que $NODE1_IP fique acessível..."
-    for _ in $(seq 1 30); do
+    for i in $(seq 1 30); do
         if check_reachable; then info "Nó 1 acessível."; return 0; fi
         sleep 1
     done
