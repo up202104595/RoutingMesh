@@ -74,6 +74,9 @@ event_queue_t *g_event_queue = NULL;
 /* último frame em que recebemos pacote de cada nó (para slot miss detection) */
 static volatile uint64_t g_last_rx_frame[MAX_NODES + 1] = {0};
 
+/* flag de link fraco — suprime +3 beacon e força relay */
+volatile int g_video_poor_active = 0;
+
 void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
@@ -215,6 +218,12 @@ void* tcp_keepalive_loop(void *arg) {
                     node->tcp_sockfd[i] = fd;
                     pthread_mutex_unlock(&node->tcp_mutex);
                     printf("[TCP] Peer %d ligado\n", i);
+                    /* TCP reconectou → link recuperado */
+                    if (g_video_poor_active) {
+                        g_video_poor_active = 0;
+                        MATRIX_setLinkQuality(i, 80);
+                        printf("[TCP] Peer %d reconectou — qualidade restaurada\n", i);
+                    }
                 } else {
                     printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
                 }
@@ -627,13 +636,16 @@ void* tx_loop(void *arg) {
                 sent = send(tcp_fd, frame, frame_len, MSG_NOSIGNAL);
                 if (sent < 0) {
                     printf("[TX] TCP peer %d falhou — a reconectar...\n", next_hop);
+                    /* TCP falhou → link fraco → degrada qualidade imediatamente */
+                    MATRIX_setLinkQuality(next_hop, 0);
+                    g_video_poor_active = 1;
+                    printf("[TX] Qualidade No %d forcada a 0 (TCP falhou)\n", next_hop);
                     pthread_mutex_lock(&node->tcp_mutex);
                     if (node->tcp_sockfd[next_hop] == tcp_fd) {
                         close(tcp_fd);
                         node->tcp_sockfd[next_hop] = -1;
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
-                    /* Descarta pacote — keepalive vai reconectar */
                     printf("[TX] Pacote descartado — sem ligacao TCP para peer %d\n", next_hop);
                 }
             } else {
@@ -769,9 +781,6 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
  * Base Station envia "video_poor" quando video falha.
  * Força qualidade do link para Nó 3 a zero imediatamente.
  * ═══════════════════════════════════════════════════════════════ */
-/* flag global: quando 1, suprime os +3 dos beacons para o peer em causa */
-volatile int g_video_poor_active = 0;
-
 #define VIDEO_FEEDBACK_PORT  9002
 #define VIDEO_FEEDBACK_PEER  3        /* Nó 3 = base station */
 #define POOR_RECOVERY_US     15000000ULL  /* 15s sem feedback antes de recuperar */
