@@ -381,14 +381,22 @@ void* tcp_rx_peer_loop(void *arg) {
             if (node->tun_fd >= 0)
                 tun_write(node->tun_fd, ip_pkt, ip_len);
         } else {
-            /* Relay via kernel ip_forward:
-             * injector o pacote IP na TUN — o kernel consulta a rota /32
-             * adicionada pelo routing_manager (gateway = TUN IP do next_hop)
-             * e faz o forwarding automático de volta para a TUN.
-             * O tun_reader apanha e envia via tcp_sockfd[next_hop]. */
-            printf("[TCP-RX] RELAY src=%d dst=%d\n", data->src_id, data->dst_id);
-            if (node->tun_fd >= 0)
-                tun_write(node->tun_fd, ip_pkt, ip_len);
+            /* Relay directo via TCP — reencaminha MSG_DATA para next_hop */
+            uint8_t relay_hop = routing_manager_lookup(node->routing, data->dst_id);
+            printf("[TCP-RX] RELAY src=%d dst=%d next_hop=%d\n",
+                   data->src_id, data->dst_id, relay_hop);
+            if (relay_hop > 0 && relay_hop <= node->num_nodes) {
+                pthread_mutex_lock(&node->tcp_mutex);
+                int relay_fd = node->tcp_sockfd[relay_hop];
+                pthread_mutex_unlock(&node->tcp_mutex);
+                if (relay_fd >= 0) {
+                    uint32_t net_len = htonl(pkt_len);
+                    send(relay_fd, &net_len, 4, MSG_NOSIGNAL);
+                    send(relay_fd, buffer, pkt_len, MSG_NOSIGNAL);
+                } else {
+                    fprintf(stderr, "[TCP-RX] RELAY: sem ligacao TCP para %d\n", relay_hop);
+                }
+            }
         }
     }
 
