@@ -235,23 +235,32 @@ void routing_manager_recompute(routing_manager_t *rm,
         }
 
 #else
-        /* Rota /32 com gateway = IP TUN do next_hop.
-         * Com ip_forward=1, o kernel consulta esta rota quando o pacote
-         * é injectado na TUN via tun_write, e faz forwarding automático
-         * de volta para a TUN — o tun_reader apanha e envia via tcp_sockfd. */
+        /* Rotas /32 no kernel:
+         * - Direto: gateway = IP TUN do next_hop, dev = tun (tun_reader envia via TCP)
+         * - Relay:  gateway = IP FÍSICO do next_hop, dev = wlan0
+         *           O kernel faz ip_forward real — o pacote sai pela interface
+         *           física sem passar pelo tun_reader. Zero overhead de aplicação. */
         {
             char dest_ip[32], gw_ip[32];
+            const char *iface;
             snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE, dest_id);
-            snprintf(gw_ip,   sizeof(gw_ip),   "%s.%u", MESH_NET_BASE, next_hop);
-            ip_route_add(dest_ip, gw_ip, rm->mesh_iface);
 
-            if (dest_id == next_hop)
+            if (dest_id == next_hop) {
+                /* direto — via TUN, tun_reader encaminha por TCP */
+                snprintf(gw_ip, sizeof(gw_ip), "%s.%u", MESH_NET_BASE, next_hop);
+                iface = rm->mesh_iface;
+                ip_route_add(dest_ip, gw_ip, iface);
                 printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
-                       dest_ip, gw_ip, rm->mesh_iface);
-            else
+                       dest_ip, gw_ip, iface);
+            } else {
+                /* relay — via interface física, kernel ip_forward direto */
+                snprintf(gw_ip, sizeof(gw_ip), "%s.%u", MESH_NET_PREFIX, next_hop);
+                iface = MESH_PHY_IFACE;
+                ip_route_add(dest_ip, gw_ip, iface);
                 printf("[ROUTING]   ip route add %s via %s dev %s  [relay via %d, quality=%u]\n",
-                       dest_ip, gw_ip, rm->mesh_iface,
+                       dest_ip, gw_ip, iface,
                        next_hop, rm->routing_table[i].quality);
+            }
         }
 #endif
     }

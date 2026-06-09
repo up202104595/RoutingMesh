@@ -12,6 +12,7 @@
  */
 
 #include "ip_route_netlink.h"
+#include "routing.h"   /* MESH_PHY_IFACE */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -250,7 +251,8 @@ void ip_route_flush_mesh(const char *net_base, uint8_t num_nodes,
     char dest_ip[32];
     for (uint8_t i = 1; i <= num_nodes; i++) {
         snprintf(dest_ip, sizeof(dest_ip), "%s.%u", net_base, i);
-        ip_route_del(dest_ip, iface);   /* ignora erros — rota pode não existir */
+        ip_route_del(dest_ip, iface);          /* rota direta (tun) */
+        ip_route_del(dest_ip, MESH_PHY_IFACE); /* rota relay (wlan0) */
     }
     printf("[IP_ROUTE] Rotas mesh removidas do kernel\n");
 }
