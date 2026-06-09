@@ -161,9 +161,21 @@ int tun_open(uint8_t node_id) {
     system(cmd);
 
 #ifndef RELAY_METHOD_ARP
-    /* ip_forward — só necessário neste modo */
+    /* ip_forward + rp_filter */
     system("echo 1 > /proc/sys/net/ipv4/ip_forward");
-    printf("[TUN] ip_forward activado\n");
+    system("echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter");
+    system("echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter");
+    printf("[TUN] ip_forward activado, rp_filter desactivado\n");
+
+    /* ip rule: pacotes com src 10.0.0.0/24 mas NOT 10.0.0.{id}
+     * (i.e. pacotes de relay injectados via tun_write) usam tabela 200
+     * que tem rotas via wlan0 → kernel ip_forward directo para o destino */
+    snprintf(cmd, sizeof(cmd),
+        "ip rule del from 10.0.0.0/24 not from 10.0.0.%u/32 lookup 200 2>/dev/null; "
+        "ip rule add from 10.0.0.0/24 not from 10.0.0.%u/32 lookup 200 priority 100",
+        node_id, node_id);
+    system(cmd);
+    printf("[TUN] ip rule: relay src → tabela 200 (wlan0)\n");
 #endif
 
     /* iptables */
@@ -187,13 +199,15 @@ int tun_open(uint8_t node_id) {
 void tun_close(int tun_fd, uint8_t node_id) {
     if (tun_fd >= 0) {
         close(tun_fd);
-        char cmd[256];
+        char cmd[512];
         snprintf(cmd, sizeof(cmd),
                  "iptables -t mangle -F OUTPUT 2>/dev/null; "
                  "ip rule del fwmark 1 table 100 2>/dev/null; "
                  "ip route flush table 100 2>/dev/null; "
+                 "ip rule del from 10.0.0.0/24 not from 10.0.0.%u/32 lookup 200 2>/dev/null; "
+                 "ip route flush table 200 2>/dev/null; "
                  "ip route del 10.0.0.0/24 dev tun%u 2>/dev/null; "
-                 "ip link delete tun%u 2>/dev/null", node_id, node_id);
+                 "ip link delete tun%u 2>/dev/null", node_id, node_id, node_id);
         system(cmd);
         printf("[TUN] Interface tun%u removida\n", node_id);
     }

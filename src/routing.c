@@ -235,32 +235,37 @@ void routing_manager_recompute(routing_manager_t *rm,
         }
 
 #else
-        /* Rotas /32 no kernel:
-         * - Direto: gateway = IP TUN do next_hop, dev = tun (tun_reader envia via TCP)
-         * - Relay:  gateway = IP FÍSICO do next_hop, dev = wlan0
-         *           O kernel faz ip_forward real — o pacote sai pela interface
-         *           física sem passar pelo tun_reader. Zero overhead de aplicação. */
+        /* Rotas /32 no kernel — política dupla:
+         *
+         * Tabela MAIN (src = próprio nó):
+         *   10.0.0.X via 10.0.0.nhop dev tunY
+         *   → tun_reader interceta e envia via TCP na slot TDMA
+         *
+         * Tabela 200 (src = outro nó, pacote de relay injetado via tun_write):
+         *   10.0.0.X via 172.20.10.nhop dev wlan0
+         *   → ip rule redireciona aqui; kernel faz ip_forward direto para wlan0
+         *
+         * ip rule configurado em tun_open:
+         *   from 10.0.0.0/24 not from 10.0.0.{myID}/32 lookup 200
+         */
         {
-            char dest_ip[32], gw_ip[32];
-            const char *iface;
-            snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE, dest_id);
+            char dest_ip[32], tun_gw[32], phy_gw[32];
+            snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE,    dest_id);
+            snprintf(tun_gw,  sizeof(tun_gw),  "%s.%u", MESH_NET_BASE,    next_hop);
+            snprintf(phy_gw,  sizeof(phy_gw),  "%s.%u", MESH_NET_PREFIX,  next_hop);
 
-            if (dest_id == next_hop) {
-                /* direto — via TUN, tun_reader encaminha por TCP */
-                snprintf(gw_ip, sizeof(gw_ip), "%s.%u", MESH_NET_BASE, next_hop);
-                iface = rm->mesh_iface;
-                ip_route_add(dest_ip, gw_ip, iface);
-                printf("[ROUTING]   ip route add %s via %s dev %s  [directo]\n",
-                       dest_ip, gw_ip, iface);
-            } else {
-                /* relay — via interface física, kernel ip_forward direto */
-                snprintf(gw_ip, sizeof(gw_ip), "%s.%u", MESH_NET_PREFIX, next_hop);
-                iface = MESH_PHY_IFACE;
-                ip_route_add(dest_ip, gw_ip, iface);
-                printf("[ROUTING]   ip route add %s via %s dev %s  [relay via %d, quality=%u]\n",
-                       dest_ip, gw_ip, iface,
-                       next_hop, rm->routing_table[i].quality);
-            }
+            /* tabela main: trafego proprio via TUN → TDMA */
+            ip_route_add(dest_ip, tun_gw, rm->mesh_iface);
+
+            /* tabela 200: relay via wlan0 → ip_forward direto */
+            ip_route_add_t(dest_ip, phy_gw, MESH_PHY_IFACE, 200);
+
+            if (dest_id == next_hop)
+                printf("[ROUTING]   %s via %s dev %s (main) + via %s dev wlan0 (t200) [directo]\n",
+                       dest_ip, tun_gw, rm->mesh_iface, phy_gw);
+            else
+                printf("[ROUTING]   %s via %s dev %s (main) + via %s dev wlan0 (t200) [relay via %d]\n",
+                       dest_ip, tun_gw, rm->mesh_iface, phy_gw, next_hop);
         }
 #endif
     }
