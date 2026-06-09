@@ -177,6 +177,16 @@ int tun_open(uint8_t node_id) {
         node_id, node_id);
     system(cmd);
     printf("[TUN] ip rule: relay src → tabela 200 (wlan0)\n");
+
+    /* iptables FORWARD: permite relay entre tun e wlan0 */
+    snprintf(cmd, sizeof(cmd),
+        "iptables -D FORWARD -i tun%u -o " MESH_PHY_IFACE " -j ACCEPT 2>/dev/null; "
+        "iptables -D FORWARD -i " MESH_PHY_IFACE " -o tun%u -j ACCEPT 2>/dev/null; "
+        "iptables -I FORWARD -i tun%u -o " MESH_PHY_IFACE " -j ACCEPT; "
+        "iptables -I FORWARD -i " MESH_PHY_IFACE " -o tun%u -j ACCEPT",
+        node_id, node_id, node_id, node_id);
+    system(cmd);
+    printf("[TUN] iptables FORWARD: tun%u <-> " MESH_PHY_IFACE " ACCEPT\n", node_id);
 #endif
 
     /* iptables */
