@@ -46,9 +46,7 @@ def client_mode(target, count, interval, label, topology):
 
     for i in range(count):
         seq += 1
-        payload = PING_MAGIC + struct.pack(">HQ", seq, 0)
-        t_send = time.perf_counter()
-        # encode send timestamp into packet
+        t_send  = time.perf_counter()
         payload = PING_MAGIC + struct.pack(">Hd", seq, t_send)
         try:
             sock.sendto(payload, (target, PING_PORT))

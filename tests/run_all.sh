@@ -14,7 +14,7 @@
 #    bash tests/run_all.sh --node1 10.0.0.1
 # =============================================================================
 
-set -euo pipefail
+set -uo pipefail
 
 NODE1_IP="10.0.0.1"
 RUNS=3

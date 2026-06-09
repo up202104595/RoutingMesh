@@ -32,7 +32,7 @@ def server_mode(bind_ip, label, topology):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((bind_ip, THRU_PORT))
-    sock.settimeout(5.0)
+    sock.settimeout(25.0)  # duração teste (15s) + 10s margem para arranque do cliente
 
     print(f"[THRU-SERVER] A escutar em {bind_ip}:{THRU_PORT}  label={label}")
     print(f"[THRU-SERVER] Aguarda que o Nó 1 inicie o envio...")

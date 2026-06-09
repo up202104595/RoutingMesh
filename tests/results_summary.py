@@ -139,19 +139,19 @@ def comparison_table(rtt_results, out):
     if not direct_runs or not relay_runs:
         return
 
-    d_avg = avg([r["avg_ms"]    for r in direct_runs])
-    d_min = min(r["min_ms"]    for r in direct_runs)
-    d_max = max(r["max_ms"]    for r in direct_runs)
-    d_std = avg([r["std_ms"]   for r in direct_runs])
-    d_jit = avg([r["jitter_ms"] for r in direct_runs])
-    d_pdr = avg([r["pdr_pct"]  for r in direct_runs])
+    d_avg = avg([r.get("avg_ms",    0) for r in direct_runs])
+    d_min = min(r.get("min_ms",    0) for r in direct_runs)
+    d_max = max(r.get("max_ms",    0) for r in direct_runs)
+    d_std = avg([r.get("std_ms",   0) for r in direct_runs])
+    d_jit = avg([r.get("jitter_ms",0) for r in direct_runs])
+    d_pdr = avg([r.get("pdr_pct", 0)  for r in direct_runs])
 
-    r_avg = avg([r["avg_ms"]    for r in relay_runs])
-    r_min = min(r["min_ms"]    for r in relay_runs)
-    r_max = max(r["max_ms"]    for r in relay_runs)
-    r_std = avg([r["std_ms"]   for r in relay_runs])
-    r_jit = avg([r["jitter_ms"] for r in relay_runs])
-    r_pdr = avg([r["pdr_pct"]  for r in relay_runs])
+    r_avg = avg([r.get("avg_ms",    0) for r in relay_runs])
+    r_min = min(r.get("min_ms",    0) for r in relay_runs)
+    r_max = max(r.get("max_ms",    0) for r in relay_runs)
+    r_std = avg([r.get("std_ms",   0) for r in relay_runs])
+    r_jit = avg([r.get("jitter_ms",0) for r in relay_runs])
+    r_pdr = avg([r.get("pdr_pct",  0) for r in relay_runs])
 
     overhead = r_avg - d_avg
 
