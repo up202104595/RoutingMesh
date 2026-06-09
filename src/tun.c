@@ -165,6 +165,7 @@ int tun_open(uint8_t node_id) {
     system("echo 1 > /proc/sys/net/ipv4/ip_forward");
     system("echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter");
     system("echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter");
+    system("echo 0 > /proc/sys/net/ipv4/conf/" MESH_PHY_IFACE "/rp_filter");
     printf("[TUN] ip_forward activado, rp_filter desactivado\n");
 
     /* ip rule: pacotes com src 10.0.0.0/24 mas NOT 10.0.0.{id}
