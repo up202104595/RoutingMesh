@@ -150,13 +150,10 @@ for run in $(seq 1 "$RUNS"); do
     echo ""
     info "── Run $run/$RUNS ──────────────────────────────────"
 
-    action
-    echo "  BLOQUEAR LINK DIRETO — run $run/$RUNS"
-    echo "  No No 1, executa:"
-    echo "    sudo iptables -I INPUT  1 -s 172.20.10.3 -j DROP"
-    echo "    sudo iptables -I OUTPUT 1 -d 172.20.10.3 -j DROP"
-    sep
-    wait_enter
+    info "A bloquear link direto N1-N3 (no No 3)..."
+    sudo iptables -I INPUT  1 -s 172.20.10.1 -j DROP
+    sudo iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP
+    info "Link direto bloqueado — relay deve ativar automaticamente"
 
     info "A testar convergencia — aguarda relay ativar automaticamente..."
     python3 "$TESTS_DIR/convergence_test.py" \
@@ -194,12 +191,10 @@ for run in $(seq 1 "$RUNS"); do
     throughput_server "relay_thru_512_r${run}" "relay"
 
     echo ""
-    action
-    echo "  RESTAURAR LINK DIRETO — run $run/$RUNS"
-    echo "  No No 1, executa:"
-    echo "    sudo iptables -F"
-    sep
-    wait_enter
+    info "A restaurar link direto N1-N3..."
+    sudo iptables -D INPUT  -s 172.20.10.1 -j DROP 2>/dev/null || true
+    sudo iptables -D OUTPUT -d 172.20.10.1 -j DROP 2>/dev/null || true
+    info "Link direto restaurado"
 
     wait_reachable
     info "A aguardar hysteresis (10s)..."
