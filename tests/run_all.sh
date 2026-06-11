@@ -8,19 +8,21 @@
 #    python3 tests/rtt_test.py --mode server &
 #
 #  Uso:
-#    bash tests/run_all.sh                  # defaults (3 runs, com relay)
-#    bash tests/run_all.sh --runs 5
-#    bash tests/run_all.sh --no-relay
-#    bash tests/run_all.sh --node1 10.0.0.1
+#    sudo bash tests/run_all.sh                  # defaults (3 runs, com relay)
+#    sudo bash tests/run_all.sh --runs 5
+#    sudo bash tests/run_all.sh --no-relay
+#    sudo bash tests/run_all.sh --node1 10.0.0.1
 # =============================================================================
 
 set -uo pipefail
 
 NODE1_IP="10.0.0.1"
+NODE1_PHY="172.20.10.1"
 RUNS=3
 DO_RELAY=true
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR="${TESTS_DIR}/results_$(date +%Y%m%d_%H%M%S)"
+TDMA_DURATION=30   # segundos de análise de timing TDMA
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -40,13 +42,6 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 sep()   { echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 wait_enter() { read -r -p "  Prima ENTER quando pronto..."; echo ""; }
 
-action() {
-    echo ""
-    sep
-    echo -e "${YELLOW}  AÇÃO NECESSÁRIA:${NC}"
-    echo ""
-}
-
 check_reachable() { ping -c 1 -W 1 "$NODE1_IP" &>/dev/null; }
 
 wait_reachable() {
@@ -58,6 +53,17 @@ wait_reachable() {
     warn "Nó 1 não responde após 30s — a continuar"
 }
 
+block_link() {
+    iptables -I INPUT  1 -s "$NODE1_PHY" -j DROP 2>/dev/null || true
+    iptables -I OUTPUT 1 -d "$NODE1_PHY" -j DROP 2>/dev/null || true
+    info "Link direto bloqueado ($NODE1_PHY)"
+}
+
+restore_link() {
+    iptables -D INPUT  -s "$NODE1_PHY" -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -d "$NODE1_PHY" -j DROP 2>/dev/null || true
+    info "Link direto restaurado"
+}
 
 # ── banner ────────────────────────────────────────────────────────────────────
 echo ""
@@ -65,16 +71,14 @@ echo "╔═══════════════════════�
 echo "║  RA-TDMAs+ — Suite de Métricas para Tese                    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
-info "Nó 1 (robot): $NODE1_IP"
+info "Nó 1 (robot): $NODE1_IP / $NODE1_PHY"
 info "Repetições:   $RUNS"
 info "Relay:        $DO_RELAY"
 info "Resultados:   $RESULTS_DIR"
 echo ""
 
-action
 echo "  Confirma que no Nó 1 está a correr:"
 echo "    python3 tests/rtt_test.py --mode server &"
-echo "  (servidor de throughput NÃO é necessário no Nó 1)"
 sep
 wait_enter
 
@@ -90,14 +94,14 @@ info "Conectividade OK."
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  FASE 1 — LINK DIRETO  (N1->N3 throughput, N3->N1 RTT)"
+echo "  FASE 1 — LINK DIRETO"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 for run in $(seq 1 "$RUNS"); do
     echo ""
     info "── Run $run/$RUNS ──────────────────────────────────"
 
-    info "RTT direto (N3 -> N1)"
+    info "RTT direto (N3 -> N1)..."
     python3 "$TESTS_DIR/rtt_test.py" \
         --mode client --target "$NODE1_IP" \
         --count 100 --interval 0.1 \
@@ -109,6 +113,12 @@ for run in $(seq 1 "$RUNS"); do
     python3 "$TESTS_DIR/throughput_test.py" \
         --duration 15 --topology direct \
         --label "direct_thru_r${run}"
+
+    echo ""
+    info "Timing TDMA direto — a analisar inter-arrivals ${TDMA_DURATION}s..."
+    python3 "$TESTS_DIR/tdma_timing_test.py" \
+        --duration "$TDMA_DURATION" \
+        --label "direct_r${run}"
 
     sleep 2
 done
@@ -131,10 +141,16 @@ for run in $(seq 1 "$RUNS"); do
     echo ""
     info "── Run $run/$RUNS ──────────────────────────────────"
 
-    # convergence_test bloqueia e restaura o link internamente
-    info "Convergência + relay (bloqueia/restaura link automaticamente)..."
+    # convergence_test bloqueia o link internamente e restaura no fim
+    info "Convergência (bloqueia/restaura link automaticamente)..."
     python3 "$TESTS_DIR/convergence_test.py" \
         --label "conv_r${run}"
+
+    # após convergence_test o link já foi restaurado — bloquear de novo
+    # para medir throughput e timing em modo relay
+    info "A bloquear link para medições em relay..."
+    block_link
+    sleep 5   # aguarda relay estabilizar
 
     echo ""
     info "Throughput relay — a medir vídeo via relay 15s..."
@@ -142,9 +158,14 @@ for run in $(seq 1 "$RUNS"); do
         --duration 15 --topology relay \
         --label "relay_thru_r${run}"
 
+    echo ""
+    info "Timing TDMA relay — a analisar inter-arrivals ${TDMA_DURATION}s..."
+    python3 "$TESTS_DIR/tdma_timing_test.py" \
+        --duration "$TDMA_DURATION" \
+        --label "relay_r${run}"
+
     info "A restaurar link direto e aguardar hysteresis (10s)..."
-    sudo iptables -D INPUT  -s 172.20.10.1 -j DROP 2>/dev/null || true
-    sudo iptables -D OUTPUT -d 172.20.10.1 -j DROP 2>/dev/null || true
+    restore_link
     wait_reachable
     sleep 10
 done
