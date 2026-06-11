@@ -86,6 +86,16 @@ g_telemetry = {}
 g_running   = True
 g_lock      = threading.Lock()
 
+# throughput stats — actualizados por video_monitor()
+g_video_stats = {
+    "rx_pkts":  0,
+    "rx_bytes": 0,
+    "t_start":  0.0,
+    "window_pkts":  0,
+    "window_bytes": 0,
+    "window_start": 0.0,
+}
+
 # ═════════════════════════════════════════════════════════════
 # FFPLAY
 # ═════════════════════════════════════════════════════════════
@@ -152,11 +162,21 @@ def video_monitor():
 
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+    with g_lock:
+        g_video_stats["t_start"]      = time.time()
+        g_video_stats["window_start"] = time.time()
+
     while g_running:
         try:
             data = rx.recv(65536)
-            g_last_video_pkt = time.time()
+            now  = time.time()
+            g_last_video_pkt = now
             tx.sendto(data, ("127.0.0.1", VIDEO_LOCAL_PORT))
+            with g_lock:
+                g_video_stats["rx_pkts"]      += 1
+                g_video_stats["rx_bytes"]     += len(data)
+                g_video_stats["window_pkts"]  += 1
+                g_video_stats["window_bytes"] += len(data)
         except socket.timeout:
             pass
         except Exception:

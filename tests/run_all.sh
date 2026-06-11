@@ -58,11 +58,6 @@ wait_reachable() {
     warn "Nó 1 não responde após 30s — a continuar"
 }
 
-throughput_server() {
-    local label="$1" topo="$2"
-    python3 "$TESTS_DIR/throughput_test.py" \
-        --mode server --label "$label" --topology "$topo"
-}
 
 # ── banner ────────────────────────────────────────────────────────────────────
 echo ""
@@ -110,24 +105,10 @@ for run in $(seq 1 "$RUNS"); do
         --label "direct_rtt_r${run}"
 
     echo ""
-    action
-    echo "  THROUGHPUT DIRETO 1316B — run $run/$RUNS"
-    echo "  No No 1, executa AGORA:"
-    echo "    python3 tests/throughput_test.py --mode client --target 10.0.0.3 --pktsize 1316 --duration 15"
-    sep
-    wait_enter
-    info "Servidor de throughput 1316B a escutar (aguarda Nó 1)..."
-    throughput_server "direct_thru_1316_r${run}" "direct"
-
-    echo ""
-    action
-    echo "  THROUGHPUT DIRETO 512B — run $run/$RUNS"
-    echo "  No No 1, executa AGORA:"
-    echo "    python3 tests/throughput_test.py --mode client --target 10.0.0.3 --pktsize 512 --duration 15"
-    sep
-    wait_enter
-    info "Servidor de throughput 512B a escutar..."
-    throughput_server "direct_thru_512_r${run}" "direct"
+    info "Throughput direto — a medir vídeo existente 15s..."
+    python3 "$TESTS_DIR/throughput_test.py" \
+        --duration 15 --topology direct \
+        --label "direct_thru_r${run}"
 
     sleep 2
 done
@@ -171,24 +152,10 @@ for run in $(seq 1 "$RUNS"); do
         --label "relay_rtt_r${run}"
 
     echo ""
-    action
-    echo "  THROUGHPUT RELAY 1316B — run $run/$RUNS"
-    echo "  No No 1, executa AGORA:"
-    echo "    python3 tests/throughput_test.py --mode client --target 10.0.0.3 --pktsize 1316 --duration 15"
-    sep
-    wait_enter
-    info "Servidor de throughput relay 1316B a escutar..."
-    throughput_server "relay_thru_1316_r${run}" "relay"
-
-    echo ""
-    action
-    echo "  THROUGHPUT RELAY 512B — run $run/$RUNS"
-    echo "  No No 1, executa AGORA:"
-    echo "    python3 tests/throughput_test.py --mode client --target 10.0.0.3 --pktsize 512 --duration 15"
-    sep
-    wait_enter
-    info "Servidor de throughput relay 512B a escutar..."
-    throughput_server "relay_thru_512_r${run}" "relay"
+    info "Throughput relay — a medir vídeo existente 15s..."
+    python3 "$TESTS_DIR/throughput_test.py" \
+        --duration 15 --topology relay \
+        --label "relay_thru_r${run}"
 
     echo ""
     info "A restaurar link direto N1-N3..."
