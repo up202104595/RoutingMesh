@@ -153,8 +153,8 @@ for run in $(seq 1 "$RUNS"); do
     action
     echo "  BLOQUEAR LINK DIRETO — run $run/$RUNS"
     echo "  No No 1, executa:"
-    echo "    sudo iptables -A INPUT  -s 172.20.10.3 -j DROP"
-    echo "    sudo iptables -A OUTPUT -d 172.20.10.3 -j DROP"
+    echo "    sudo iptables -I INPUT  1 -s 172.20.10.3 -j DROP"
+    echo "    sudo iptables -I OUTPUT 1 -d 172.20.10.3 -j DROP"
     sep
     wait_enter
 
