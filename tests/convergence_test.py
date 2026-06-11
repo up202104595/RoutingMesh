@@ -14,6 +14,7 @@ Uso (no Nó 3, com vídeo a fluir e mesh ativa):
     python3 convergence_test.py --label "conv_1" --no-block  # só monitoriza
 """
 
+import os
 import socket
 import time
 import json
@@ -28,17 +29,13 @@ MAX_WAIT_S    = 30.0  # tempo máximo à espera de convergência
 
 
 def block_link():
-    subprocess.run(["sudo", "iptables", "-I", "INPUT",  "1",
-                    "-s", "172.20.10.1", "-j", "DROP"], check=True)
-    subprocess.run(["sudo", "iptables", "-I", "OUTPUT", "1",
-                    "-d", "172.20.10.1", "-j", "DROP"], check=True)
+    os.system("iptables -I INPUT  1 -s 172.20.10.1 -j DROP")
+    os.system("iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP")
 
 
 def restore_link():
-    subprocess.run(["sudo", "iptables", "-D", "INPUT",
-                    "-s", "172.20.10.1", "-j", "DROP"], capture_output=True)
-    subprocess.run(["sudo", "iptables", "-D", "OUTPUT",
-                    "-d", "172.20.10.1", "-j", "DROP"], capture_output=True)
+    os.system("iptables -D INPUT  -s 172.20.10.1 -j DROP 2>/dev/null")
+    os.system("iptables -D OUTPUT -d 172.20.10.1 -j DROP 2>/dev/null")
 
 
 def run(label, do_block=True):
