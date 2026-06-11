@@ -69,7 +69,7 @@ def load_wireshark_csv(path):
         '172.20.10.3': 3,
     }
 
-    with open(path, newline='', encoding='utf-8') as f:
+    with open(path, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         headers = reader.fieldnames
         if headers is None:
