@@ -53,11 +53,21 @@ SLOT_START  = {1: 0.0, 2: 50.0, 3: 100.0}
 def load_wireshark_csv(path):
     """
     Lê CSV exportado pelo Wireshark.
-    Colunas esperadas (pode variar com versão):
-      No., Time, Source, Destination, Protocol, Length, Info
-    Extrai timestamp (s) e porto de origem a partir da coluna Info ou de colunas dedicadas.
+    Colunas esperadas: No., Time, Source, Destination, Protocol, Length, Info
+    Identifica o nó pelo IP de origem:
+      172.20.10.1 = N1 (slot 0)
+      172.20.10.2 = N2 (slot 1)
+      172.20.10.3 = N3 (slot 2)
+    Filtra apenas pacotes do protocolo RX (TDMA custom) com length 107.
     """
-    packets = []  # lista de (timestamp_s, src_node)
+    import re
+    packets = []
+
+    IP_TO_NODE = {
+        '172.20.10.1': 1,
+        '172.20.10.2': 2,
+        '172.20.10.3': 3,
+    }
 
     with open(path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -66,46 +76,40 @@ def load_wireshark_csv(path):
             print("ERRO: CSV vazio ou mal formatado")
             sys.exit(1)
 
-        # Normaliza nomes de colunas (remove espaços, lowercase)
         norm = {h.strip().lower(): h for h in headers}
+
+        time_col   = norm.get('time')
+        src_col    = norm.get('source')
+        proto_col  = norm.get('protocol')
+        len_col    = norm.get('length')
+
+        if not time_col or not src_col:
+            print("ERRO: colunas Time/Source não encontradas")
+            print("Colunas disponíveis:", list(norm.keys()))
+            sys.exit(1)
 
         for row in reader:
             try:
-                # Timestamp — coluna "Time" (segundos relativos ao início da captura)
-                time_col = norm.get('time', None)
-                if time_col is None:
-                    continue
-                ts = float(row[time_col].strip())
+                ts  = float(row[time_col].strip())
+                src = row[src_col].strip()
 
-                # Porto de origem — tenta coluna "Src Port" ou extrai de "Info"
-                src_port = None
+                # Filtra só pacotes RX (TDMA) — ignora MDNS, SSDP, etc.
+                if proto_col:
+                    proto = row[proto_col].strip().upper()
+                    if proto not in ('RX', 'UDP'):
+                        continue
 
-                if 'src port' in norm:
-                    src_port = int(row[norm['src port']].strip())
-                elif 'source port' in norm:
-                    src_port = int(row[norm['source port']].strip())
-                else:
-                    # Extrai de "Info": formato "7001 → 7002  ..."
-                    info_col = norm.get('info', None)
-                    if info_col:
-                        info = row[info_col].strip()
-                        # Wireshark formata como "SrcPort → DstPort"
-                        import re
-                        m = re.match(r'(\d+)\s*[→>→]\s*(\d+)', info)
-                        if m:
-                            src_port = int(m.group(1))
+                # Filtra por length 107 (tamanho fixo dos beacons TDMA)
+                if len_col:
+                    try:
+                        pkt_len = int(row[len_col].strip())
+                        if pkt_len != 107:
+                            continue
+                    except ValueError:
+                        pass
 
-                if src_port is None:
-                    continue
-
-                # Mapeia porto → nó
-                if src_port == 7001:
-                    node = 1
-                elif src_port == 7002:
-                    node = 2
-                elif src_port == 7003:
-                    node = 3
-                else:
+                node = IP_TO_NODE.get(src)
+                if node is None:
                     continue
 
                 packets.append((ts, node))
