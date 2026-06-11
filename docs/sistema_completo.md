@@ -20,9 +20,171 @@ N1 (Robot / AlphaBot)   ←──── TDMA ────→   N2 (Relay)
 
 ---
 
-## 2. Protocolo TDMA
+## 2. Arquitetura de Threads
 
-### 2.1 Estrutura de Frame
+Cada nó corre o processo `meshnode` que arranca as seguintes threads em paralelo:
+
+```
+meshnode (processo principal)
+│
+├── Thread RX UDP          — recebe beacons MATRIX e atualiza topologia
+├── Thread TX              — controla slots TDMA, envia MATRIX + MSG_DATA
+├── Thread TUN Reader      — lê pacotes IP da interface TUN e mete na tx_queue
+├── Thread TCP Accept      — aceita ligações TCP de peers
+├── Thread TCP Keepalive   — mantém ligações TCP vivas, deteta peers mortos
+├── Thread TCP RX [peer i] — uma thread por peer, recebe MSG_DATA via TCP
+├── Thread Event Handler   — processa EVENT_TOPOLOGY_CHANGED → recomputa routing
+└── Thread Video Feedback  — (só N1) escuta porta 9002, reage a "video_poor"
+```
+
+### 2.1 Thread TX — Controlador de Slots TDMA
+
+É a thread central do protocolo. Corre em loop contínuo e verifica em que slot
+está o nó com base no tempo atual:
+
+```c
+time_in_frame = now % frame_duration_us   // posição dentro da frame
+current_slot  = time_in_frame / SLOT_DURATION_US
+```
+
+Só executa quando `current_slot == node_id - 1` (o slot deste nó).
+Em cada slot faz **duas tarefas** pela seguinte ordem:
+
+**1. Envia beacon MATRIX via UDP broadcast:**
+- Serializa a matriz de adjacência (`serializeMatrix()`)
+- Constrói pacote com `tdma_header_t` (type=MATRIX, timestamp, slot_begin/end)
+- Envia por UDP para todos os peers na porta `BASE_PORT + peer_id` (7001, 7002, 7003)
+
+**2. Drena a tx_queue e envia MSG_DATA via TCP:**
+- Enquanto houver pacotes na fila E tempo no slot (`get_time_us() < slot_end`):
+  - Consulta `routing_manager_lookup()` para o next_hop
+  - Constrói pacote `tdma_header_t + msg_data_hdr_t + payload IP`
+  - Envia via TCP com framing `[4 bytes tamanho][pacote]`
+  - Se TCP falhar: força `link_quality=0`, dispara EVENT_TOPOLOGY_CHANGED
+
+**Controlo de uso do slot:**
+```
+SLOT_DURATION_US = 50 000 μs
+GUARD_US         =  5 000 μs  (margem de segurança)
+SLOT_USEFUL_US   = 45 000 μs
+MAX_BYTES_SLOT   = 45000 / T_trans(1500B) × 1500 ≈ 84 KB  (WiFi 24 Mbps)
+```
+
+**Deteção de slot miss:**
+No início de cada frame verifica se cada peer enviou beacon nessa frame.
+Se `consecutive_miss >= 5` → `MATRIX_updateLinkQuality(nid, timeout=true)` → qualidade −40.
+
+### 2.2 Thread RX UDP — Receção de Beacons
+
+Escuta na porta `BASE_PORT + node_id` (UDP). Para cada pacote recebido:
+
+- **type=MATRIX:** atualiza topologia via `MATRIX_parsePkt()`, regista frame
+  de receção para slot miss detection, chama `sync_record_delay()` para
+  sincronização de slots, obtém RSSI via `wifi_quality_get()`
+- **type=MSG_DATA (legacy):** entrega via `tun_write()` se `dst_id == node_id`,
+  ou relay se `dst_id != node_id`
+
+### 2.3 Thread TUN Reader — Captura de Pacotes IP
+
+Lê continuamente da interface TUN (modo bloqueante). Quando o encoder de vídeo
+(N1) ou qualquer aplicação envia um pacote UDP para `10.0.0.3`:
+
+```
+Aplicação (ffmpeg) → socket UDP → kernel → TUN tunX → tun_read() → tx_queue
+```
+
+A thread extrai o `dst_id` do endereço IP de destino e insere na `tx_queue`
+para a Thread TX enviar no próximo slot.
+
+### 2.4 Thread TCP Accept + Thread TCP Keepalive
+
+**Accept:** aceita ligações TCP de peers na porta `BASE_TCP_PORT + node_id`
+(8001, 8002, 8003). Quando um peer liga, guarda o fd em `tcp_sockfd[peer_id]`.
+
+**Keepalive:** corre a cada 1s e para cada peer:
+- Se `tcp_sockfd[peer_id] < 0`: tenta `tcp_connect_peer()` (timeout 2s)
+- Se ligado: faz `recv(MSG_PEEK | MSG_DONTWAIT)` para detetar socket morto
+- Se morto: fecha e marca como `-1` para reconexão no próximo ciclo
+- Após reconexão com `g_video_poor_active`: entra em **hysteresis** de 8s
+  com `link_quality=20`, só liberta relay quando `elapsed >= 8s AND PDR >= 60%`
+
+Parâmetros TCP para minimizar latência de deteção de falha:
+```c
+TCP_KEEPIDLE  = 5s   // inicia keepalives após 5s inativo
+TCP_KEEPINTVL = 2s   // intervalo entre keepalives
+TCP_KEEPCNT   = 3    // 3 falhas → RST
+SO_SNDTIMEO   = 1s
+SO_RCVTIMEO   = 2s
+```
+
+### 2.5 Thread TCP RX [por peer]
+
+Uma thread por peer. Lê pacotes TCP com framing `[4B tamanho][pacote]`:
+
+```
+recv(4 bytes) → tamanho do pacote
+recv(pkt_len bytes, MSG_WAITALL) → pacote completo
+→ pdr_update(src_id, msg_id)     // atualiza PDR
+→ tun_write(ip_pkt)              // entrega ou relay
+```
+
+Se `dst_id == node_id`: entrega direta via `tun_write()` → kernel → aplicação.
+Se `dst_id != node_id`: relay via `tun_write()` → kernel ip_forward → wlan0.
+
+### 2.6 Thread Event Handler
+
+Processa eventos da fila `g_event_queue` em loop bloqueante.
+Evento `EVENT_TOPOLOGY_CHANGED`:
+1. Tira snapshot thread-safe da matriz (`MATRIX_get_snapshot()`)
+2. Chama `routing_manager_recompute()` — reconstrói listas MST e instala rotas kernel
+3. Imprime tabela de routing atualizada
+
+### 2.7 Thread Video Feedback (só N1)
+
+Escuta porta UDP 9002. Quando recebe `{"cmd": "video_poor"}` do N3:
+- `MATRIX_setLinkQuality(N3, 0)` — qualidade do link para N3 = 0
+- `g_video_poor_active = 1` — suprime boost +3 nos beacons
+- Dispara recálculo da MST → Prim escolhe rota via N2
+
+Recupera automaticamente após `POOR_RECOVERY_US = 15s` sem feedback.
+
+---
+
+## 3. Fluxo Completo de um Pacote de Vídeo
+
+```
+N1 — encoder ffmpeg
+  │  UDP dst=10.0.0.3:5000
+  ↓
+  kernel (tabela MAIN: 10.0.0.3 via 10.0.0.3 dev tun1)
+  ↓
+  TUN tun1 → tun_read() → Thread TUN Reader
+  ↓
+  tx_queue.push(ip_pkt, dst=3)
+  ↓
+  Thread TX (no slot de N1, t ∈ [0, 50ms])
+  ↓
+  routing_lookup(dst=3) → next_hop=3 (direto) ou next_hop=2 (relay)
+  ↓
+  [direto]                          [relay via N2]
+  TCP → N3:8003                     TCP → N2:8002
+  ↓                                 ↓
+  Thread TCP-RX[N1] em N3           Thread TCP-RX[N1] em N2
+  tun_write(ip_pkt)                 tun_write(ip_pkt)
+  ↓                                 ↓
+  kernel → 10.0.0.3:5000            kernel ip_forward
+  ↓                                 (ip rule iif tun2 lookup 200)
+  base_station.py / ffplay           ↓
+                                    wlan0 → N3 UDP:5000
+                                    ↓
+                                    base_station.py / ffplay
+```
+
+---
+
+## 4. Protocolo TDMA
+
+### 4.1 Estrutura de Frame
 
 O tempo é dividido em frames de **150ms**, cada uma com 3 slots de **50ms**
 (um por nó). Cada nó transmite exclusivamente no seu slot, eliminando colisões
@@ -36,7 +198,7 @@ Frame 150ms:
 └──────────────┴──────────────┴──────────────┘
 ```
 
-### 2.2 Conteúdo dos Slots
+### 4.2 Conteúdo dos Slots
 
 Em cada slot o nó emissor envia:
 1. **Pacote MATRIX** (beacon) — contém a matriz de adjacência e link quality
@@ -49,7 +211,7 @@ O cabeçalho TDMA (`tdma_header_t`) inclui:
 - `timestamp` — instante de envio
 - `slot_begin_ms` / `slot_end_ms` — limites do slot para sincronização
 
-### 2.3 Sincronização
+### 4.3 Sincronização
 
 Os nós sincronizam os slots pelo timestamp dos beacons recebidos dos vizinhos.
 A sincronização é mantida continuamente — se um beacon chegar com desvio,
@@ -57,7 +219,7 @@ o receptor ajusta o início do próximo frame.
 
 ---
 
-## 3. Matriz de Adjacência e Descoberta de Topologia
+## 5. Matriz de Adjacência e Descoberta de Topologia
 
 ### 3.1 Estrutura da Matriz (`tdma_matrix_t`)
 
@@ -115,7 +277,7 @@ Isto evita que um relay mantenha nós mortos artificialmente vivos.
 
 ---
 
-## 4. Link Quality e Algoritmo de Prim Ponderado
+## 6. Link Quality e Algoritmo de Prim Ponderado
 
 ### 4.1 Métrica de Link Quality (0–100)
 
@@ -152,7 +314,7 @@ ligações bidirecionalmente confirmadas quando existem alternativas.
 
 ---
 
-## 5. Encaminhamento — Método Ana Morais + Contribuição Miguel
+## 7. Encaminhamento — Método Ana Morais + Contribuição Miguel
 
 ### 5.1 Construção da Tabela de Routing
 
@@ -204,7 +366,7 @@ viessem diretamente de N1 (src=10.0.0.1, dst=10.0.0.3).
 
 ---
 
-## 6. Vídeo — Configuração do Encoder
+## 8. Vídeo — Configuração do Encoder
 
 O robot (N1) captura vídeo com `rpicam-vid` e codifica com `ffmpeg`:
 
@@ -232,7 +394,7 @@ devido ao overhead do MPEG-TS e aos keyframes em todos os frames (`-g 1`).
 
 ---
 
-## 7. Feedback de Qualidade de Vídeo
+## 9. Feedback de Qualidade de Vídeo
 
 O `base_station.py` monitoriza a receção de vídeo continuamente. Se não
 receber pacotes durante `VIDEO_LOSS_TIMEOUT = 1.5s`, envia um pacote UDP
@@ -244,7 +406,7 @@ flapping da topologia durante a convergência.
 
 ---
 
-## 8. Metodologia de Medição
+## 10. Metodologia de Medição
 
 ### 8.1 RTT do Canal de Controlo (`rtt_test.py`)
 
@@ -374,7 +536,7 @@ ip_forward no N2 é instantâneo (~0ms) e não introduz agendamento adicional.
 
 ---
 
-## 9. Problema de Convergência em Campo — Trabalho Futuro
+## 11. Problema de Convergência em Campo — Trabalho Futuro
 
 ### 9.1 Descrição do Problema
 
@@ -454,7 +616,7 @@ em que o sistema convergiu corretamente.
 
 ---
 
-## 10. Sumário Consolidado
+## 12. Sumário Consolidado
 
 | Métrica | Valor | Condições |
 |---------|-------|-----------|
