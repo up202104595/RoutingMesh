@@ -87,23 +87,23 @@ def table_convergence(results, out):
 
     groups = group_by_base(results)
     header = (
-        "\n┌──────────────────────┬────────┬─────────────┬────────────┬────────────┐\n"
-        "│  Cenário             │  Runs  │  Conv.(ms)  │ RTT_antes  │ RTT_depois │\n"
-        "├──────────────────────┼────────┼─────────────┼────────────┼────────────┤"
+        "\n┌──────────────────────┬────────┬─────────────┬──────────────┬──────────────┐\n"
+        "│  Cenário             │  Runs  │  Conv.(ms)  │IA_antes(ms)  │IA_depois(ms) │\n"
+        "├──────────────────────┼────────┼─────────────┼──────────────┼──────────────┤"
     )
     out.append(header)
     for base, runs in sorted(groups.items()):
-        n       = len(runs)
-        convs   = [r["convergence_ms"] for r in runs if r.get("convergence_ms") is not None]
-        befs    = [r["rtt_before"]["avg_ms"] for r in runs if r.get("rtt_before")]
-        afts    = [r["rtt_after"]["avg_ms"]  for r in runs if r.get("rtt_after")]
-        conv_s  = f"{avg(convs):.0f} ± {stdev(convs):.0f}" if convs else "N/A"
-        bef_s   = fmt(avg(befs)) if befs else "N/A"
-        aft_s   = fmt(avg(afts)) if afts else "N/A"
-        label   = base[:22]
-        line = (f"\n│  {label:<20}  │ {n:>6} │ {conv_s:>11} │ {bef_s:>10} │ {aft_s:>10} │")
+        n      = len(runs)
+        convs  = [r["convergence_ms"] for r in runs if r.get("convergence_ms") is not None]
+        befs   = [r["inter_arrival_before_ms"]["avg"] for r in runs if r.get("inter_arrival_before_ms")]
+        afts   = [r["inter_arrival_after_ms"]["avg"]  for r in runs if r.get("inter_arrival_after_ms")]
+        conv_s = f"{avg(convs):.0f} ± {stdev(convs):.0f}" if convs else "N/A"
+        bef_s  = f"{avg(befs):.1f}" if befs else "N/A"
+        aft_s  = f"{avg(afts):.1f}" if afts else "N/A"
+        label  = base[:22]
+        line   = (f"\n│  {label:<20}  │ {n:>6} │ {conv_s:>11} │ {bef_s:>12} │ {aft_s:>12} │")
         out.append(line)
-    out.append("\n└──────────────────────┴────────┴─────────────┴────────────┴────────────┘")
+    out.append("\n└──────────────────────┴────────┴─────────────┴──────────────┴──────────────┘")
 
 
 def table_throughput(results, out):
