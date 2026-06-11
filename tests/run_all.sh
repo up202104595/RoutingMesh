@@ -131,40 +131,21 @@ for run in $(seq 1 "$RUNS"); do
     echo ""
     info "── Run $run/$RUNS ──────────────────────────────────"
 
-    info "A bloquear link direto N1-N3 (no No 3)..."
-    sudo iptables -I INPUT  1 -s 172.20.10.1 -j DROP
-    sudo iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP
-    info "Link direto bloqueado — relay deve ativar automaticamente"
-
-    info "A testar convergencia — aguarda relay ativar automaticamente..."
+    # convergence_test bloqueia e restaura o link internamente
+    info "Convergência + relay (bloqueia/restaura link automaticamente)..."
     python3 "$TESTS_DIR/convergence_test.py" \
-        --target "$NODE1_IP" \
-        --label "conv_r${run}" \
-        --duration 60 \
-        --interval 0.1
+        --label "conv_r${run}"
 
     echo ""
-    info "RTT relay (N3 -> N1 via N2)"
-    python3 "$TESTS_DIR/rtt_test.py" \
-        --mode client --target "$NODE1_IP" \
-        --count 100 --interval 0.15 \
-        --topology relay \
-        --label "relay_rtt_r${run}"
-
-    echo ""
-    info "Throughput relay — a medir vídeo existente 15s..."
+    info "Throughput relay — a medir vídeo via relay 15s..."
     python3 "$TESTS_DIR/throughput_test.py" \
         --duration 15 --topology relay \
         --label "relay_thru_r${run}"
 
-    echo ""
-    info "A restaurar link direto N1-N3..."
+    info "A restaurar link direto e aguardar hysteresis (10s)..."
     sudo iptables -D INPUT  -s 172.20.10.1 -j DROP 2>/dev/null || true
     sudo iptables -D OUTPUT -d 172.20.10.1 -j DROP 2>/dev/null || true
-    info "Link direto restaurado"
-
     wait_reachable
-    info "A aguardar hysteresis (10s)..."
     sleep 10
 done
 
