@@ -374,91 +374,83 @@ ip_forward no N2 é instantâneo (~0ms) e não introduz agendamento adicional.
 
 ---
 
-## 9. Problema de Reprodutibilidade do Routing
+## 9. Problema de Convergência em Campo — Trabalho Futuro
 
 ### 9.1 Descrição do Problema
 
-Em alguns runs de convergência (3 em 6), o relay não convergiu ou demorou
-mais do esperado. O sintoma é:
+Em testes de campo (robot a afastar-se fisicamente), observou-se que após a
+perda do link direto N1↔N3, o vídeo **demorava muito a retomar via relay**
+ou nunca retomava. O sintoma característico:
+
+- **Beacons MATRIX chegam a N3** — N2 reporta N1 como ativo na matriz
+- **Vídeo não retoma** — MSG_DATA (TCP) de N1 não chegam a N3 via relay
+
+### 9.2 Causa Raiz — Dissociação entre Beacons UDP e Dados TCP
+
+Os beacons MATRIX são enviados via **UDP** — leves, chegam mesmo com RSSI
+fraco ou canal degradado. Os dados (vídeo, comandos) vão via **TCP** dentro
+do TDMA — requerem canal estável para entregar.
+
+Quando o robot se afasta até ao limiar de cobertura:
 
 ```
-[CONV] t=39.90s  DIRETO   ← link bloqueado mas vídeo continua a chegar
-[CONV] Timeout — relay não convergiu em 30.0s
+Sinal fraco:
+  Beacons UDP  → ainda passam ocasionalmente (pequenos, tolerantes a perdas)
+  Dados TCP    → falham (retransmissões exponenciais: 1s, 2s, 4s, 8s...)
 ```
 
-Observa-se que **os beacons MATRIX passam** (N2 reporta N1 como ativo),
-mas **os pacotes de dados (MSG_DATA) não chegam a N3**.
+Como `creationTime` de N3 na matriz de N1 é refrescado pelos **beacons**
+(não pelos dados), N1 mantém N3 como "ativo" na MST e não instala rota
+via N2. O TCP fica em retransmissão silenciosa enquanto a matriz diz que
+a ligação existe.
 
-### 9.2 Causa Raiz
+### 9.3 Problema do PDR vs Beacons
 
-O problema ocorre quando há **inconsistência entre a vista de topologia de N1
-e N2**:
+O módulo `pdr.c` já mede a taxa de entrega dos **MSG_DATA** (dados reais),
+calculando o PDR com base nos `seq_num` recebidos e atualizando o
+`link_quality` na matriz. No entanto, o `creationTime` — que controla o
+`MAX_AGE` e a expiração do nó — é atualizado pelos beacons MATRIX,
+não pelo PDR.
 
-1. N3 bloqueia o link com N1 via iptables
-2. N1 continua a ouvir N3 (canal pode ser assimétrico momentaneamente)
-3. Na MST de N1, o caminho direto N1→N3 continua válido
-4. N1 não instala rota via N2 porque acha que N3 ainda é alcançável diretamente
-5. Beacons de N2 chegam a N3 (canal N2↔N3 está livre) — daí "beacons passam"
-6. MSG_DATA de N1 vai direto para N3 pelo TUN → bloqueado pelo iptables
+Resultado: mesmo com PDR=0% (zero dados a chegar), se um beacon UDP
+ocasional passar, o nó não expira e o relay não é ativado.
 
-O MAX_AGE de **2 segundos** é o tempo que N1 demora a expirar a entrada de N3
-após deixar de receber beacons diretos — **mas se N1 ainda ouvir N3 (mesmo
-que N3 não ouça N1), a entrada não expira**.
+### 9.4 Soluções Propostas (Trabalho Futuro)
 
-### 9.3 Condição de Race
+**Solução 1 — Usar PDR para controlar creationTime:**
+Quando `PDR < threshold` (ex: PDR < 30%) durante N frames consecutivos,
+tratar o nó como se não tivesse enviado beacon — não refrescar
+`creationTime`. O nó expiraria em MAX_AGE mesmo com beacons a chegar.
 
-```
-N3 bloqueia iptables (INPUT + OUTPUT para 172.20.10.1)
-    │
-    ├── N3 não envia mais beacons para N1 → N1 expira N3 em 2s
-    │
-    └── N3 pode ainda receber beacons de N1 por ~1 frame
-        (pacotes já em trânsito antes do bloqueio)
-```
+**Solução 2 — Dual timeout: beacon + dados:**
+Manter dois contadores por nó:
+- `t_last_beacon` — última vez que chegou um beacon
+- `t_last_data` — última vez que chegou um MSG_DATA
 
-Se N1 ouvir N3 nos primeiros milissegundos após o bloqueio do iptables,
-o `creationTime` de N3 na matriz de N1 é refrescado — e o timeout de 2s
-recomeça. Neste caso a convergência demora 2s + tempo de routing, não os
-esperados ~0.4s de gap.
+A expiração do nó ocorre quando `t_last_data > MAX_AGE_DATA (ex: 1s)`,
+independentemente dos beacons. Mais agressivo mas mais fiel ao estado real.
 
-### 9.4 Soluções Possíveis
-
-**Solução 1 — Reduzir MAX_AGE (rápida, mas menos robusta):**
-Reduzir `MAX_AGE` de 2.0s para 0.8s em `matrix.h`:
-```c
-#define MAX_AGE 0.8
-```
-Vantagem: convergência mais rápida.
-Desvantagem: maior risco de falsos positivos — nós temporariamente lentos
-podem ser removidos prematuramente da matriz.
-
-**Solução 2 — Feedback explícito de N3 para N1 (recomendada):**
+**Solução 3 — Feedback de qualidade de vídeo (parcialmente implementado):**
 O `video_feedback_sender()` em N3 já envia `{"cmd": "video_poor"}` ao N1
-quando o vídeo falha. N1 poderia ao receber este feedback **forçar**
+quando o vídeo falha. N1 poderia ao receber este feedback forçar
 `link_quality[N1][N3] = 0` e `matrix[N1][N3] = 0`, desencadeando
-imediatamente o recálculo da MST com rota via N2.
-Não implementado — requereria modificação no `alphabot_node.py`.
+imediatamente recálculo da MST. Requer modificação no `alphabot_node.py`.
 
-**Solução 3 — PDR no TDMA para detetar perda de slot (robusta):**
-O módulo `pdr.c` já existe no sistema. Integrar a contagem de slots perdidos
-consecutivos no `MATRIX_updateLinkQuality()` com penalidade imediata
-(já parcialmente implementado com `-40` por timeout). Garantir que N1
-decrementa quality de N3 quando não recebe ACK ou beacons de N3 durante
-1-2 frames consecutivos.
-
-**Solução 4 — Bloqueio simétrico (para testes apenas):**
-Para garantir reprodutibilidade nos testes, bloquear também o envio de
-beacons do lado de N1 usando iptables em N1 simultaneamente com N3.
-Não prático em produção mas garante convergência determinística nos testes.
+**Solução 4 — Degradar link_quality por ausência de dados (não de beacons):**
+Em vez de `+3` por beacon recebido, usar `+3` apenas quando há MSG_DATA
+recebidos. Beacons sem dados associados não melhoram nem mantêm a qualidade.
+O Prim ponderado acabaria por preferir o relay quando a qualidade direta
+caísse abaixo do limiar.
 
 ### 9.5 Impacto nos Resultados
 
-Os runs com timeout foram descartados da análise estatística. Com 4 runs
-válidos (de 6 tentativas), a convergência média de **~2.76s ± 110ms** é
-representativa do comportamento típico do sistema. A variabilidade dos
-runs inválidos é atribuída à condição de race descrita — não a uma
-falha de design, mas a uma janela temporal de ~1 frame onde a
-simetria do bloqueio não é garantida.
+Nos testes controlados com iptables, 4 de 6 runs convergiam corretamente
+(~67%). Em campo, a reprodutibilidade é menor devido à natureza gradual
+da degradação do canal — o robot pode estar numa zona de cobertura marginal
+onde beacons passam mas dados não. Estes runs foram descartados da análise.
+
+A convergência média de **~2.76s ± 110ms** é representativa dos casos
+em que o sistema convergiu corretamente.
 
 ---
 
