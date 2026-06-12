@@ -6,6 +6,7 @@ Analisa QUANDO os pacotes de vídeo são transmitidos/recebidos
 em relação ao frame TDMA de 150ms.
 
 Lê .pcap/.pcapng diretamente (sem dependências externas).
+Suporta link types: Ethernet (1), Linux SLL (113), Linux SLL2 (276).
 
 Uso:
   python3 tdma_relay_analysis.py <ficheiro.pcap>   [--port PORT]
@@ -16,7 +17,7 @@ Uso:
   --port P  filtra por porto de destino (default: qualquer)
 """
 
-import sys, os, csv, json, re, struct
+import sys, os, csv, json, struct
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -24,10 +25,10 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 # ── Configuração TDMA ──────────────────────────────────────────────────────────
-FRAME_MS   = 150.0
-SLOT_MS    = 50.0
-NUM_NODES  = 3
-BEACON_LEN = 107   # beacons TDMA — excluídos (não são vídeo)
+FRAME_MS        = 150.0
+SLOT_MS         = 50.0
+NUM_NODES       = 3
+MIN_UDP_PAYLOAD = 100   # beacons têm ~65 B UDP payload; vídeo tem 1316 B
 
 # IPs conhecidos → nó
 IP_TO_NODE = {
@@ -35,12 +36,31 @@ IP_TO_NODE = {
     '10.0.0.1':    1, '10.0.0.2':    2, '10.0.0.3':    3,
 }
 NODE_COLORS = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
-NODE_NAMES  = {1: 'N1', 2: 'N2', 3: 'N3'}
 SLOT_START  = {1: 0.0, 2: 50.0, 3: 100.0}
-TDMA_PORTS  = {7001, 7002, 7003}   # beacons — ignorados na análise de vídeo
+TDMA_PORTS  = {7001, 7002, 7003}
+
+
+# ── Stripping L2 ───────────────────────────────────────────────────────────────
+def _strip_l2(data, link_type):
+    """Remove cabeçalho L2 e devolve bytes IP (IPv4) ou None."""
+    if link_type == 1:      # Ethernet
+        if len(data) < 14: return None
+        if struct.unpack('>H', data[12:14])[0] != 0x0800: return None
+        return data[14:]
+    elif link_type == 113:  # Linux cooked v1 (SLL)
+        if len(data) < 16: return None
+        if struct.unpack('>H', data[14:16])[0] != 0x0800: return None
+        return data[16:]
+    elif link_type == 276:  # Linux cooked v2 (SLL2) — gerado por tcpdump -i any
+        if len(data) < 20: return None
+        if struct.unpack('>H', data[0:2])[0] != 0x0800: return None
+        return data[20:]
+    return None
 
 
 # ── Iteradores pcap / pcapng ───────────────────────────────────────────────────
+SUPPORTED_LINKTYPES = {1, 113, 276}
+
 def _iter_classic_pcap(f):
     raw = f.read(4)
     if len(raw) < 4:
@@ -58,8 +78,10 @@ def _iter_classic_pcap(f):
     if len(gh) < 20:
         return
     network = struct.unpack(f'{endian}I', gh[16:20])[0]
-    if network != 1:
-        print(f"ERRO: link type {network} (esperado Ethernet=1)"); return
+    if network not in SUPPORTED_LINKTYPES:
+        print(f"ERRO: link type {network} não suportado "
+              f"(suportados: 1=Ethernet, 113=Linux SLL, 276=Linux SLL2)")
+        return
     div = 1_000_000_000 if ns else 1_000_000
     while True:
         hdr = f.read(16)
@@ -67,7 +89,7 @@ def _iter_classic_pcap(f):
         ts_sec, ts_frac, incl_len, _ = struct.unpack(f'{endian}IIII', hdr)
         data = f.read(incl_len)
         if len(data) < incl_len: break
-        yield ts_sec + ts_frac / div, data
+        yield ts_sec + ts_frac / div, data, network
 
 
 def _iter_pcapng(f):
@@ -87,15 +109,15 @@ def _iter_pcapng(f):
         body = f.read(blen - 12)
         f.read(4)
         if btype == 0x00000001 and len(body) >= 2:
-            ifaces[len(ifaces)] = (struct.unpack(f'{endian}H', body[0:2])[0], 1_000_000)
+            ltype = struct.unpack(f'{endian}H', body[0:2])[0]
+            ifaces[len(ifaces)] = (ltype, 1_000_000)
         elif btype == 0x00000006 and len(body) >= 20:
             iface_id = struct.unpack(f'{endian}I', body[0:4])[0]
             ts_hi = struct.unpack(f'{endian}I', body[4:8])[0]
             ts_lo = struct.unpack(f'{endian}I', body[8:12])[0]
             cap_len = struct.unpack(f'{endian}I', body[12:16])[0]
             ltype, div = ifaces.get(iface_id, (1, 1_000_000))
-            if ltype == 1:
-                yield ((ts_hi << 32) | ts_lo) / div, body[20:20 + cap_len]
+            yield ((ts_hi << 32) | ts_lo) / div, body[20:20 + cap_len], ltype
 
 
 def _open_pcap(path):
@@ -105,21 +127,20 @@ def _open_pcap(path):
     return (_iter_pcapng(f) if magic == 0x0A0D0D0A else _iter_classic_pcap(f)), f
 
 
-def _udp_fields(frame):
-    """Devolve (ip_src, sport, dport, pkt_len) ou None. Só IPv4/UDP."""
-    if len(frame) < 42:
+def _udp_fields(ip_bytes):
+    """Devolve (ip_src, sport, dport, udp_payload_len) ou None. Só IPv4/UDP."""
+    if len(ip_bytes) < 20:
         return None
-    if struct.unpack('>H', frame[12:14])[0] != 0x0800:
+    ip_ihl = (ip_bytes[0] & 0x0F) * 4
+    if ip_bytes[9] != 17:   # UDP
         return None
-    ip_ihl = (frame[14] & 0x0F) * 4
-    if frame[23] != 17:   # UDP
+    ip_src = f'{ip_bytes[12]}.{ip_bytes[13]}.{ip_bytes[14]}.{ip_bytes[15]}'
+    udp_off = ip_ihl
+    if len(ip_bytes) < udp_off + 8:
         return None
-    ip_src = f'{frame[26]}.{frame[27]}.{frame[28]}.{frame[29]}'
-    udp_off = 14 + ip_ihl
-    if len(frame) < udp_off + 8:
-        return None
-    sport, dport = struct.unpack('>HH', frame[udp_off:udp_off + 4])
-    return ip_src, sport, dport, len(frame)
+    sport, dport = struct.unpack('>HH', ip_bytes[udp_off:udp_off + 4])
+    udp_len = struct.unpack('>H', ip_bytes[udp_off + 4:udp_off + 6])[0]
+    return ip_src, sport, dport, max(0, udp_len - 8)
 
 
 # ── Scan diagnóstico ──────────────────────────────────────────────────────────
@@ -129,8 +150,10 @@ def scan_pcap(path):
 
     pkt_iter, f = _open_pcap(path)
     with f:
-        for _, frame in pkt_iter:
-            r = _udp_fields(frame)
+        for _, frame, ltype in pkt_iter:
+            ip_bytes = _strip_l2(frame, ltype)
+            if ip_bytes is None: continue
+            r = _udp_fields(ip_bytes)
             if not r: continue
             ip_src, sport, dport, plen = r
             key = (ip_src, f'{sport}→{dport}')
@@ -138,11 +161,11 @@ def scan_pcap(path):
             stats[key]['min'] = min(stats[key]['min'], plen)
             stats[key]['max'] = max(stats[key]['max'], plen)
 
-    print(f"  {'IP origem':>16}  {'Portos UDP':>16}  {'Pkts':>6}  {'Bytes':>18}  Nó")
-    print("  " + "─" * 65)
+    print(f"  {'IP origem':>16}  {'Portos UDP':>16}  {'Pkts':>6}  {'UDP payload (B)':>18}  Nó")
+    print("  " + "─" * 70)
     for (src, ports), info in sorted(stats.items(), key=lambda x: -x[1]['n']):
         node = IP_TO_NODE.get(src, '?')
-        beacon = ' ← beacons' if info['max'] == BEACON_LEN else ''
+        beacon = ' ← beacons' if info['max'] < MIN_UDP_PAYLOAD else ''
         print(f"  {src:>16}  {ports:>16}  {info['n']:>6}"
               f"  {info['min']}–{info['max']} B  N{node}{beacon}")
     print()
@@ -150,10 +173,6 @@ def scan_pcap(path):
 
 # ── Carregamento pcap ─────────────────────────────────────────────────────────
 def load_pcap(path, video_port=None):
-    """
-    Carrega pacotes UDP de vídeo (exclui beacons TDMA de 107 bytes).
-    video_port: se definido, filtra pelo porto de destino.
-    """
     print(f"[INFO] A ler: {path}")
     records = []
     t0 = None
@@ -162,23 +181,23 @@ def load_pcap(path, video_port=None):
 
     pkt_iter, f = _open_pcap(path)
     with f:
-        for ts, frame in pkt_iter:
-            r = _udp_fields(frame)
+        for ts, frame, ltype in pkt_iter:
+            ip_bytes = _strip_l2(frame, ltype)
+            if ip_bytes is None:
+                continue
+            r = _udp_fields(ip_bytes)
             if not r:
                 continue
             ip_src, sport, dport, plen = r
 
-            # Ignora beacons TDMA (portos 7001-7003, tamanho fixo 107)
             if sport in TDMA_PORTS or dport in TDMA_PORTS:
                 n_skip_beacon += 1
                 continue
 
-            # Ignora pacotes pequenos (não são vídeo)
-            if plen <= BEACON_LEN:
+            if plen < MIN_UDP_PAYLOAD:
                 n_skip_beacon += 1
                 continue
 
-            # Filtra por porto de destino se especificado
             if video_port is not None and dport != video_port:
                 continue
 
@@ -233,9 +252,8 @@ def load_csv(path):
                 continue
             if pc and row[pc].strip().upper() not in ('UDP', 'RX', 'MPEG TS'):
                 continue
-            # Ignora beacons
             try:
-                if lc and int(row[lc].strip()) == BEACON_LEN:
+                if lc and int(row[lc].strip()) <= 107:
                     skip += 1; continue
             except ValueError:
                 pass
@@ -263,7 +281,6 @@ def compute_stats(records):
           f"{'μ (ms)':>8}  {'σ (ms)':>7}  {'% no slot':>10}")
     print("  " + "─" * 60)
 
-    # IP por nó
     ip_by_node = defaultdict(set)
     for r in records:
         ip_by_node[r['node']].add(r['ip_src'])
@@ -361,7 +378,6 @@ def main():
         scan_pcap(path)
         return
 
-    # Porto de destino opcional
     video_port = None
     if '--port' in sys.argv:
         idx = sys.argv.index('--port')
