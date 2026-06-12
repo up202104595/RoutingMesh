@@ -2,23 +2,18 @@
 """
 tdma_relay_analysis.py — Análise de cenário relay TDMA
 
-Identifica o emissor ORIGINAL via src_id no payload MSG_DATA,
-independentemente do IP/nó que fez o relay.
+Identifica o emissor original e analisa a sincronização TDMA no relay.
+
+Estratégia de detecção (por ordem de prioridade):
+  1. UDP 7001-7003 com payload MSG_DATA (type=2) → src_id exacto
+  2. TCP 7001-7003 com payload MSG_DATA (type=2) → src_id exacto
+  3. Qualquer UDP de IPs conhecidos com tamanho > beacon → source IP como nó
 
 Sem dependências externas — lê pcap/pcapng em Python puro.
 
-Formatos suportados:
-  .pcap / .pcapng  — leitura directa (sem scapy)
-  .csv             — exportado do Wireshark (srcport da coluna Info como proxy;
-                     menos preciso que pcap)
-
-Wire format esperado (MSG_DATA, type=2):
-  [ tdma_header_t (18 B) ][ msg_data_hdr_t header (6 B) ][ IP payload ]
-
 Uso:
-  python3 tdma_relay_analysis.py <ficheiro.pcap>
-  python3 tdma_relay_analysis.py <ficheiro.pcapng>
-  python3 tdma_relay_analysis.py <ficheiro.csv>
+  python3 tdma_relay_analysis.py <ficheiro.pcap|pcapng|csv>
+  python3 tdma_relay_analysis.py <ficheiro.pcap> --scan   (diagnóstico)
 """
 
 import sys
@@ -38,94 +33,42 @@ FRAME_MS  = 150.0
 SLOT_MS   = 50.0
 NUM_NODES = 3
 MSG_DATA  = 2
+BEACON_LEN = 107    # tamanho fixo dos beacons MATRIX — excluídos da análise de vídeo
 
-# tdma_header_t (packed, little-endian):
-#   uint8_t  type          1
-#   uint8_t  slot_id       1
-#   uint32_t seq_num       4
-#   double   timestamp     8
-#   uint16_t slot_begin_ms 2
-#   uint16_t slot_end_ms   2   → 18 bytes total
+# tdma_header_t (packed LE): type(1)+slot_id(1)+seq(4)+timestamp(8)+begin(2)+end(2) = 18 B
 TDMA_HDR_FMT  = '<BBIdHH'
 TDMA_HDR_SIZE = struct.calcsize(TDMA_HDR_FMT)   # 18
+MSG_HDR_SIZE  = 6    # src_id(1)+dst_id(1)+msg_id(2)+data_len(2)
+MIN_MSG_SIZE  = TDMA_HDR_SIZE + MSG_HDR_SIZE     # 24
 
-# msg_data_hdr_t (packed, little-endian):
-#   uint8_t  src_id   1
-#   uint8_t  dst_id   1
-#   uint16_t msg_id   2
-#   uint16_t data_len 2   → 6 bytes total
-MSG_HDR_SIZE = 6
-MIN_PKT_SIZE = TDMA_HDR_SIZE + MSG_HDR_SIZE  # 24
-
-RELAY_IP_TO_NODE = {'172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3}
+RELAY_IP_TO_NODE = {'172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3,
+                    '10.0.0.1':    1, '10.0.0.2':    2, '10.0.0.3':    3}
+TDMA_PORTS       = {7001, 7002, 7003}
 SRCPORT_TO_NODE  = {7001: 1, 7002: 2, 7003: 3}
 NODE_COLORS      = {0: '#888888', 1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
 SLOT_START       = {1: 0.0, 2: 50.0, 3: 100.0}
 
 
-# ── Parse Ethernet → IPv4 → UDP ───────────────────────────────────────────────
-def _parse_eth_udp(data):
-    """Devolve (ip_src_str, sport, dport, udp_payload) ou None."""
-    if len(data) < 34:
-        return None
-    if struct.unpack('>H', data[12:14])[0] != 0x0800:  # só IPv4
-        return None
-    ip_ihl   = (data[14] & 0x0F) * 4
-    ip_proto = data[23]            # IP header offset 9 = offset 14+9 = 23
-    if ip_proto != 17:             # só UDP
-        return None
-    ip_src  = f'{data[26]}.{data[27]}.{data[28]}.{data[29]}'
-    udp_off = 14 + ip_ihl
-    if len(data) < udp_off + 8:
-        return None
-    sport, dport = struct.unpack('>HH', data[udp_off:udp_off + 4])
-    return ip_src, sport, dport, data[udp_off + 8:]
-
-
-# ── Parse payload TDMA MSG_DATA ───────────────────────────────────────────────
-def _parse_tdma_msg(payload):
-    """Devolve (src_id, dst_id, slot_begin, slot_end, seq_num) ou None."""
-    if len(payload) < MIN_PKT_SIZE:
-        return None
-    try:
-        pkt_type, _slot_id, seq_num, _ts, slot_begin, slot_end = \
-            struct.unpack_from(TDMA_HDR_FMT, payload, 0)
-    except struct.error:
-        return None
-    if pkt_type != MSG_DATA:
-        return None
-    src_id = payload[TDMA_HDR_SIZE]
-    dst_id = payload[TDMA_HDR_SIZE + 1]
-    if src_id == 0 or src_id > 20:
-        return None
-    return src_id, dst_id, slot_begin, slot_end, seq_num
-
-
-# ── Iterador pcap clássico ────────────────────────────────────────────────────
+# ── Iteradores pcap / pcapng ───────────────────────────────────────────────────
 def _iter_classic_pcap(f):
-    """Yields (ts_float, frame_bytes) de um pcap clássico."""
     raw = f.read(4)
     if len(raw) < 4:
         return
-    le_magic = struct.unpack('<I', raw)[0]
-    if le_magic in (0xa1b2c3d4, 0xa1b23c4d):
-        endian  = '<'
-        nanosec = (le_magic == 0xa1b23c4d)
+    le = struct.unpack('<I', raw)[0]
+    if le in (0xa1b2c3d4, 0xa1b23c4d):
+        endian, nanosec = '<', (le == 0xa1b23c4d)
     else:
-        be_magic = struct.unpack('>I', raw)[0]
-        if be_magic in (0xa1b2c3d4, 0xa1b23c4d):
-            endian  = '>'
-            nanosec = (be_magic == 0xa1b23c4d)
+        be = struct.unpack('>I', raw)[0]
+        if be in (0xa1b2c3d4, 0xa1b23c4d):
+            endian, nanosec = '>', (be == 0xa1b23c4d)
         else:
-            print("ERRO: magic pcap inválido — não é um ficheiro pcap clássico")
-            return
+            print("ERRO: magic pcap inválido"); return
     gh = f.read(20)
     if len(gh) < 20:
         return
     network = struct.unpack(f'{endian}I', gh[16:20])[0]
     if network != 1:
-        print(f"ERRO: link type {network} não suportado (esperado Ethernet=1)")
-        return
+        print(f"ERRO: link type {network} não suportado (esperado Ethernet=1)"); return
     div = 1_000_000_000 if nanosec else 1_000_000
     while True:
         hdr = f.read(16)
@@ -138,100 +81,222 @@ def _iter_classic_pcap(f):
         yield ts_sec + ts_frac / div, data
 
 
-# ── Iterador pcapng ───────────────────────────────────────────────────────────
 def _iter_pcapng(f):
-    """Yields (ts_float, frame_bytes) de um ficheiro pcapng."""
-    # Section Header Block
     raw12 = f.read(12)
     if len(raw12) < 12 or struct.unpack('<I', raw12[0:4])[0] != 0x0A0D0D0A:
         return
     bom = struct.unpack('<I', raw12[8:12])[0]
-    if bom == 0x1A2B3C4D:
-        endian = '<'
-    elif bom == 0x4D3C2B1A:
-        endian = '>'
-    else:
+    endian = '<' if bom == 0x1A2B3C4D else ('>' if bom == 0x4D3C2B1A else None)
+    if endian is None:
         return
     shb_len = struct.unpack(f'{endian}I', raw12[4:8])[0]
-    f.seek(shb_len - 12, 1)   # salta resto do SHB (já lemos 12 bytes)
-
-    ifaces = {}   # iface_id → (link_type, ts_divisor)
-
+    f.seek(shb_len - 12, 1)
+    ifaces = {}
     while True:
         hdr = f.read(8)
         if len(hdr) < 8:
             break
         btype, blen = struct.unpack(f'{endian}II', hdr)
-        body = f.read(blen - 12)   # body = total - type(4) - len(4) - trailing_len(4)
-        f.read(4)                  # trailing block_len
-
-        if btype == 0x00000001:    # Interface Description Block
-            if len(body) >= 2:
-                ltype = struct.unpack(f'{endian}H', body[0:2])[0]
-                ifaces[len(ifaces)] = (ltype, 1_000_000)   # default: microsegundos
-
-        elif btype == 0x00000006:  # Enhanced Packet Block
-            if len(body) < 20:
-                continue
+        body = f.read(blen - 12)
+        f.read(4)
+        if btype == 0x00000001 and len(body) >= 2:   # IDB
+            ltype = struct.unpack(f'{endian}H', body[0:2])[0]
+            ifaces[len(ifaces)] = (ltype, 1_000_000)
+        elif btype == 0x00000006 and len(body) >= 20:  # EPB
             iface_id = struct.unpack(f'{endian}I', body[0:4])[0]
             ts_hi    = struct.unpack(f'{endian}I', body[4:8])[0]
             ts_lo    = struct.unpack(f'{endian}I', body[8:12])[0]
             cap_len  = struct.unpack(f'{endian}I', body[12:16])[0]
             ltype, div = ifaces.get(iface_id, (1, 1_000_000))
-            if ltype != 1:   # só Ethernet
+            if ltype == 1:
+                yield ((ts_hi << 32) | ts_lo) / div, body[20:20 + cap_len]
+
+
+def _open_pcap(path):
+    f = open(path, 'rb')
+    magic = struct.unpack('<I', f.read(4))[0]
+    f.seek(0)
+    return _iter_pcapng(f) if magic == 0x0A0D0D0A else _iter_classic_pcap(f), f
+
+
+# ── Extracção Ethernet → IP → UDP/TCP ─────────────────────────────────────────
+def _ip_fields(frame):
+    """Devolve (ip_src, ip_proto, transport_offset) ou None."""
+    if len(frame) < 34:
+        return None
+    if struct.unpack('>H', frame[12:14])[0] != 0x0800:
+        return None
+    ip_ihl   = (frame[14] & 0x0F) * 4
+    ip_proto = frame[23]
+    ip_src   = f'{frame[26]}.{frame[27]}.{frame[28]}.{frame[29]}'
+    return ip_src, ip_proto, 14 + ip_ihl
+
+
+def _udp_fields(frame, trans_off):
+    if len(frame) < trans_off + 8:
+        return None
+    sport, dport = struct.unpack('>HH', frame[trans_off:trans_off + 4])
+    return sport, dport, frame[trans_off + 8:]
+
+
+def _tcp_payload(frame, trans_off):
+    if len(frame) < trans_off + 20:
+        return None
+    sport, dport = struct.unpack('>HH', frame[trans_off:trans_off + 4])
+    data_off = ((frame[trans_off + 12] >> 4) & 0xF) * 4
+    payload  = frame[trans_off + data_off:]
+    return sport, dport, payload
+
+
+# ── Tentativa de parse MSG_DATA no payload ────────────────────────────────────
+def _try_msg_data(payload, tcp=False):
+    """Devolve (src_id, dst_id, slot_begin, slot_end) ou None."""
+    offset = 4 if tcp else 0   # TCP tem prefixo de 4 bytes de comprimento
+    if len(payload) < offset + MIN_MSG_SIZE:
+        return None
+    try:
+        pkt_type, _, _, _, slot_begin, slot_end = \
+            struct.unpack_from(TDMA_HDR_FMT, payload, offset)
+    except struct.error:
+        return None
+    if pkt_type != MSG_DATA:
+        return None
+    src_id = payload[offset + TDMA_HDR_SIZE]
+    dst_id = payload[offset + TDMA_HDR_SIZE + 1]
+    if src_id == 0 or src_id > 20:
+        return None
+    return src_id, dst_id, slot_begin, slot_end
+
+
+# ── Scan diagnóstico ──────────────────────────────────────────────────────────
+def scan_pcap(path):
+    """Mostra o que existe no pcap: IPs, portos, protocolos, tamanhos."""
+    print(f"\n[SCAN] A analisar conteúdo de: {path}")
+    stats = defaultdict(lambda: {'n': 0, 'min': 9999, 'max': 0})
+
+    pkt_iter, f = _open_pcap(path)
+    with f:
+        for _, frame in pkt_iter:
+            r = _ip_fields(frame)
+            if r is None:
                 continue
-            yield ((ts_hi << 32) | ts_lo) / div, body[20:20 + cap_len]
+            ip_src, ip_proto, trans_off = r
+            plen = len(frame)
+            if ip_proto == 17:
+                t = _udp_fields(frame, trans_off)
+                if t:
+                    sport, dport, _ = t
+                    key = (ip_src, 'UDP', f'{sport}→{dport}')
+                    stats[key]['n'] += 1
+                    stats[key]['min'] = min(stats[key]['min'], plen)
+                    stats[key]['max'] = max(stats[key]['max'], plen)
+            elif ip_proto == 6:
+                t = _tcp_payload(frame, trans_off)
+                if t:
+                    sport, dport, _ = t
+                    key = (ip_src, 'TCP', f'{sport}→{dport}')
+                    stats[key]['n'] += 1
+                    stats[key]['min'] = min(stats[key]['min'], plen)
+                    stats[key]['max'] = max(stats[key]['max'], plen)
+
+    print(f"\n  {'IP origem':>16}  {'Proto':>5}  {'Portos':>18}  {'Pkts':>6}  {'Bytes min-max':>18}")
+    print("  " + "─" * 70)
+    for (ip_src, proto, ports), info in sorted(stats.items(), key=lambda x: -x[1]['n']):
+        print(f"  {ip_src:>16}  {proto:>5}  {ports:>18}  {info['n']:>6}"
+              f"  {info['min']}–{info['max']} B")
+    print()
 
 
-# ── Carregamento pcap/pcapng ──────────────────────────────────────────────────
+# ── Carregamento pcap ─────────────────────────────────────────────────────────
 def load_pcap(path):
     print(f"[INFO] A ler pcap: {path}")
-    records = []
-    t0      = None
-    skipped = 0
 
-    with open(path, 'rb') as f:
-        magic = struct.unpack('<I', f.read(4))[0]
-        f.seek(0)
-        pkt_iter = _iter_pcapng(f) if magic == 0x0A0D0D0A else _iter_classic_pcap(f)
+    # Primeira passagem: tenta encontrar MSG_DATA (UDP ou TCP, portos 7001-7003)
+    records_msg  = []
+    records_video = []
+    t0 = None
 
+    pkt_iter, f = _open_pcap(path)
+    with f:
         for ts, frame in pkt_iter:
-            eth = _parse_eth_udp(frame)
-            if eth is None:
+            r = _ip_fields(frame)
+            if r is None:
                 continue
-            ip_src, sport, dport, payload = eth
+            ip_src, ip_proto, trans_off = r
+            node_by_ip = RELAY_IP_TO_NODE.get(ip_src, 0)
 
-            if sport not in SRCPORT_TO_NODE and dport not in SRCPORT_TO_NODE:
-                continue
-
-            tdma = _parse_tdma_msg(payload)
-            if tdma is None:
-                skipped += 1
-                continue
-            src_id, dst_id, slot_begin, slot_end, seq_num = tdma
+            if t0 is None and node_by_ip != 0:
+                t0 = ts
 
             if t0 is None:
-                t0 = ts
+                continue
             ts_ms = (ts - t0) * 1000.0
+            fpos  = ts_ms % FRAME_MS
 
-            records.append({
-                'ts_ms':         ts_ms,
-                'frame_pos':     ts_ms % FRAME_MS,
-                'original_node': src_id,
-                'dst_node':      dst_id,
-                'relay_node':    RELAY_IP_TO_NODE.get(ip_src, 0),
-                'relay_ip':      ip_src,
-                'slot_begin':    slot_begin,
-                'slot_end':      slot_end,
-                'seq_num':       seq_num,
-            })
+            # Tenta UDP com portos TDMA
+            if ip_proto == 17:
+                t = _udp_fields(frame, trans_off)
+                if t:
+                    sport, dport, payload = t
+                    if sport in TDMA_PORTS or dport in TDMA_PORTS:
+                        msg = _try_msg_data(payload, tcp=False)
+                        if msg:
+                            src_id, dst_id, slot_begin, slot_end = msg
+                            records_msg.append({
+                                'ts_ms': ts_ms, 'frame_pos': fpos,
+                                'original_node': src_id, 'dst_node': dst_id,
+                                'relay_node': node_by_ip, 'relay_ip': ip_src,
+                                'slot_begin': slot_begin, 'slot_end': slot_end,
+                                'source': 'MSG_DATA/UDP',
+                            })
+                            continue
 
-    if skipped:
-        print(f"[WARN] {skipped} pacotes ignorados (tamanho insuficiente ou não MSG_DATA)")
-    return records
+                    # Fallback: pacote UDP de IP conhecido, tamanho > beacon (vídeo)
+                    if node_by_ip != 0 and len(frame) > BEACON_LEN + 10:
+                        records_video.append({
+                            'ts_ms': ts_ms, 'frame_pos': fpos,
+                            'original_node': node_by_ip,
+                            'dst_node': 0,
+                            'relay_node': node_by_ip,
+                            'relay_ip': ip_src,
+                            'slot_begin': None, 'slot_end': None,
+                            'source': 'UDP/video',
+                        })
+
+            # Tenta TCP com portos TDMA
+            elif ip_proto == 6:
+                t = _tcp_payload(frame, trans_off)
+                if t:
+                    sport, dport, payload = t
+                    if sport in TDMA_PORTS or dport in TDMA_PORTS:
+                        msg = _try_msg_data(payload, tcp=True)
+                        if msg:
+                            src_id, dst_id, slot_begin, slot_end = msg
+                            records_msg.append({
+                                'ts_ms': ts_ms, 'frame_pos': fpos,
+                                'original_node': src_id, 'dst_node': dst_id,
+                                'relay_node': node_by_ip, 'relay_ip': ip_src,
+                                'slot_begin': slot_begin, 'slot_end': slot_end,
+                                'source': 'MSG_DATA/TCP',
+                            })
+
+    if records_msg:
+        src_types = set(r['source'] for r in records_msg)
+        print(f"[INFO] Encontrados {len(records_msg)} pacotes MSG_DATA ({', '.join(src_types)})")
+        print("[INFO] Modo: identificação por src_id (exacto)")
+        return records_msg
+
+    if records_video:
+        print(f"[INFO] MSG_DATA não encontrado — usando {len(records_video)} pacotes UDP/vídeo")
+        print("[INFO] Modo: identificação por IP de origem (relay indistinguível de directo)")
+        print("[WARN] Para relay exacto, o tráfego de vídeo precisa de estar nos portos 7001-7003")
+        print("       OU exportar com --scan para ver que portos/IPs estão no pcap")
+        return records_video
+
+    return []
 
 
-# ── Carregamento CSV (srcport como proxy do emissor) ──────────────────────────
+# ── Carregamento CSV ──────────────────────────────────────────────────────────
 def _srcport_from_info(info):
     m = re.search(r'(\d{4,5})\s*[→>-]+\s*\d{4,5}', info)
     return int(m.group(1)) if m else None
@@ -239,10 +304,9 @@ def _srcport_from_info(info):
 
 def load_csv(path):
     print(f"[INFO] A ler CSV Wireshark: {path}")
-    print("[WARN] Modo CSV: usa srcport como proxy do emissor original.")
-    print("       Para análise exacta usa .pcap (sem dependências).")
+    print("[WARN] Modo CSV — usa srcport ou source IP. Para análise exacta usa .pcap")
     records = []
-    t0      = None
+    t0 = None
     skipped = 0
 
     with open(path, newline='', encoding='utf-8-sig') as f:
@@ -263,13 +327,12 @@ def load_csv(path):
                 src = row[src_col].strip()
             except (ValueError, KeyError):
                 continue
-            if proto_col and row[proto_col].strip().upper() not in ('UDP', 'RX'):
+            if proto_col and row[proto_col].strip().upper() not in ('UDP', 'RX', 'MPEG TS'):
                 continue
             relay_node = RELAY_IP_TO_NODE.get(src, 0)
             if relay_node == 0:
                 skipped += 1
                 continue
-
             original_node = 0
             if info_col:
                 sp = _srcport_from_info(row[info_col].strip())
@@ -277,7 +340,6 @@ def load_csv(path):
                     original_node = SRCPORT_TO_NODE[sp]
             if original_node == 0:
                 original_node = relay_node
-
             if t0 is None:
                 t0 = ts
             ts_ms = (ts - t0) * 1000.0
@@ -285,9 +347,8 @@ def load_csv(path):
                 'ts_ms': ts_ms, 'frame_pos': ts_ms % FRAME_MS,
                 'original_node': original_node, 'dst_node': 0,
                 'relay_node': relay_node, 'relay_ip': src,
-                'slot_begin': None, 'slot_end': None, 'seq_num': None,
+                'slot_begin': None, 'slot_end': None, 'source': 'CSV',
             })
-
     if skipped:
         print(f"[WARN] {skipped} pacotes ignorados (IP desconhecido)")
     return records
@@ -320,7 +381,6 @@ def compute_stats(records):
             'mean_ms': round(mu, 2), 'std_ms': round(sig, 2),
             'pct_in_orig_slot': round(pct, 1),
         }
-
     print("─" * 74)
     return results, groups
 
@@ -359,16 +419,14 @@ def plot_histogram(groups, out_path):
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
-    print(f"[PLOT] Histograma por emissor original: {out_path}")
+    print(f"[PLOT] Histograma: {out_path}")
 
 
-# ── Plot 2: Scatter — emissor original no eixo Y ─────────────────────────────
+# ── Plot 2: Scatter ────────────────────────────────────────────────────────────
 def plot_scatter(groups, out_path):
     markers = {0: 'x', 1: 'o', 2: 's', 3: '^'}
     fig, ax = plt.subplots(figsize=(12, 4))
-    ax.set_title(
-        'Relay TDMA — scatter por emissor original  (forma = nó que fez relay)',
-        fontsize=11, fontweight='bold')
+    ax.set_title('Relay TDMA — scatter  (forma = nó que fez relay)', fontsize=11)
 
     for (orig, relay), positions in sorted(groups.items()):
         pos   = positions[-500:] if len(positions) > 500 else positions
@@ -392,7 +450,7 @@ def plot_scatter(groups, out_path):
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
-    print(f"[PLOT] Scatter relay: {out_path}")
+    print(f"[PLOT] Scatter: {out_path}")
 
 
 # ── Plot 3: Mapa de relay ─────────────────────────────────────────────────────
@@ -405,7 +463,6 @@ def plot_relay_map(records, out_path):
     nodes = sorted({r['original_node'] for r in records} |
                    {r['relay_node'] for r in records if r['relay_node'] != 0})
     n = len(nodes)
-
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.set_title('Mapa de relay: quem encaminha pacotes de quem', fontsize=11)
     ax.set_aspect('equal')
@@ -413,11 +470,11 @@ def plot_relay_map(records, out_path):
     ax.set_xlim(-1.1, 1.1)
     ax.set_ylim(-1.1, 1.1)
 
-    pos = {nd: (math.cos(math.pi/2 + i * 2*math.pi/n) * 0.65,
-                math.sin(math.pi/2 + i * 2*math.pi/n) * 0.65)
+    pos = {nd: (math.cos(math.pi/2 + i*2*math.pi/n)*0.65,
+                math.sin(math.pi/2 + i*2*math.pi/n)*0.65)
            for i, nd in enumerate(nodes)}
-
     max_cnt = max(counts.values()) if counts else 1
+
     for (orig, relay), cnt in sorted(counts.items()):
         if orig not in pos or (relay != 0 and relay not in pos):
             continue
@@ -426,7 +483,7 @@ def plot_relay_map(records, out_path):
         lw  = 1.5 + 3.5 * cnt / max_cnt
         col = NODE_COLORS.get(orig, '#888')
         if orig == relay:
-            ax.annotate('direto', xy=(x0, y0 + 0.18), xytext=(x0, y0 + 0.35),
+            ax.annotate('direto', xy=(x0, y0+0.18), xytext=(x0, y0+0.35),
                         ha='center', fontsize=7, color=col,
                         arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
         else:
@@ -434,10 +491,9 @@ def plot_relay_map(records, out_path):
             ax.annotate('', xy=(x1, y1), xytext=(x0, y0),
                         arrowprops=dict(arrowstyle='->', color=col, lw=lw,
                                         connectionstyle=f'arc3,rad={rad}'))
-            mid_x = (x0 + x1) / 2 + (0.12 if rad else 0)
-            mid_y = (y0 + y1) / 2 + (0.08 if rad else 0)
-            ax.text(mid_x, mid_y, f'{cnt} pkts', fontsize=7,
-                    ha='center', color=col, fontweight='bold')
+            mx, my = (x0+x1)/2 + (0.12 if rad else 0), (y0+y1)/2 + (0.08 if rad else 0)
+            ax.text(mx, my, f'{cnt} pkts', fontsize=7, ha='center',
+                    color=col, fontweight='bold')
 
     for nd, (x, y) in pos.items():
         ax.add_patch(plt.Circle((x, y), 0.13, color=NODE_COLORS.get(nd, '#888'), zorder=5))
@@ -461,6 +517,11 @@ def main():
         print(f"ERRO: ficheiro não encontrado: {path}")
         sys.exit(1)
 
+    # Modo --scan: só diagnóstico
+    if '--scan' in sys.argv:
+        scan_pcap(path)
+        return
+
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.pcap', '.pcapng'):
         records = load_pcap(path)
@@ -468,20 +529,18 @@ def main():
         records = load_csv(path)
 
     if not records:
-        print("ERRO: nenhum pacote MSG_DATA encontrado.")
-        print("  .pcap/pcapng: confirma tráfego UDP 7001-7003 com cabeçalho MSG_DATA (type=2)")
-        print("  .csv: exporta sem filtro de length (MSG_DATA tem tamanho variável)")
+        print("\nNenhum pacote encontrado. A correr diagnóstico automático...")
+        scan_pcap(path)
+        print("\nUsa os dados acima para ajustar RELAY_IP_TO_NODE ou TDMA_PORTS no script.")
         sys.exit(1)
 
     print(f"[INFO] {len(records)} pacotes carregados")
-    orig_nodes  = sorted({r['original_node'] for r in records})
-    relay_nodes = sorted({r['relay_node'] for r in records
-                          if r['relay_node'] not in (0, r['original_node'])})
-    print(f"[INFO] Emissores originais detectados: {orig_nodes}")
-    if relay_nodes:
-        print(f"[INFO] Nós relay detectados: {relay_nodes}")
-    else:
-        print("[INFO] Sem relay detectado — tudo tráfego directo")
+    orig  = sorted({r['original_node'] for r in records})
+    relay = sorted({r['relay_node'] for r in records
+                    if r['relay_node'] not in (0, r['original_node'])})
+    print(f"[INFO] Emissores detectados: {orig}")
+    if relay:
+        print(f"[INFO] Nós relay: {relay}")
 
     stats, groups = compute_stats(records)
 
@@ -490,10 +549,9 @@ def main():
     plot_scatter(groups,   base + '_relay_scatter.png')
     plot_relay_map(records, base + '_relay_map.png')
 
-    json_path = base + '_relay_stats.json'
-    with open(json_path, 'w') as f:
+    with open(base + '_relay_stats.json', 'w') as f:
         json.dump(stats, f, indent=2)
-    print(f"[INFO] Estatísticas JSON: {json_path}")
+    print(f"[INFO] JSON: {base}_relay_stats.json")
 
 
 if __name__ == '__main__':
