@@ -43,8 +43,10 @@ MIN_MSG_SIZE  = TDMA_HDR_SIZE + MSG_HDR_SIZE     # 24
 
 RELAY_IP_TO_NODE = {'172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3,
                     '10.0.0.1':    1, '10.0.0.2':    2, '10.0.0.3':    3}
-TDMA_PORTS       = {7001, 7002, 7003}
-SRCPORT_TO_NODE  = {7001: 1, 7002: 2, 7003: 3}
+TDMA_PORTS       = {7001, 7002, 7003}           # UDP beacons + UDP MSG_DATA
+TCP_SERVER_PORTS = {8001, 8002, 8003}           # TCP MSG_DATA: 8000 + node_id
+SRCPORT_TO_NODE  = {7001: 1, 7002: 2, 7003: 3,
+                    8001: 1, 8002: 2, 8003: 3}
 NODE_COLORS      = {0: '#888888', 1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
 SLOT_START       = {1: 0.0, 2: 50.0, 3: 100.0}
 
@@ -263,18 +265,23 @@ def load_pcap(path):
                             'source': 'UDP/video',
                         })
 
-            # Tenta TCP com portos TDMA
+            # Tenta TCP com portos TDMA (7001-7003) ou TCP server (8001-8003)
             elif ip_proto == 6:
                 t = _tcp_payload(frame, trans_off)
                 if t:
                     sport, dport, payload = t
-                    if sport in TDMA_PORTS or dport in TDMA_PORTS:
-                        msg = _try_msg_data(payload, tcp=True)
+                    all_tcp_ports = TDMA_PORTS | TCP_SERVER_PORTS
+                    if sport in all_tcp_ports or dport in all_tcp_ports:
+                        # Tenta parsear com e sem prefixo de 4 bytes (ambos os casos)
+                        msg = _try_msg_data(payload, tcp=True) or \
+                              _try_msg_data(payload, tcp=False)
                         if msg:
                             src_id, dst_id, slot_begin, slot_end = msg
+                            # original_node: src_id do payload > IP de origem
+                            orig = src_id if src_id != 0 else node_by_ip
                             records_msg.append({
                                 'ts_ms': ts_ms, 'frame_pos': fpos,
-                                'original_node': src_id, 'dst_node': dst_id,
+                                'original_node': orig, 'dst_node': dst_id,
                                 'relay_node': node_by_ip, 'relay_ip': ip_src,
                                 'slot_begin': slot_begin, 'slot_end': slot_end,
                                 'source': 'MSG_DATA/TCP',
