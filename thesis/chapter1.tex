@@ -86,6 +86,21 @@ within the TDMA context, since classical metrics such as hop count or received
 signal strength do not capture the slot-level packet delivery behaviour that is
 most relevant here.
 
+A previous attempt to address the routing problem in RA-TDMAs+ was carried
+out by Morais~\cite{morais2024synchronization}, who implemented a routing
+mechanism at the data link layer using ARP table manipulation on AlphaBot
+robotic platforms. Her work demonstrated the feasibility of multi-hop
+communication and adopted a Minimum Spanning Tree (MST) algorithm to derive
+forwarding paths from the connectivity matrix distributed by RA-TDMAs+.
+However, the Layer~2 approach presented several limitations in practice:
+the manipulation of ARP tables caused instability and runtime failures in
+certain topology transitions, standard diagnostic tools such as traceroute
+and ping did not reflect the actual forwarding path, and integration with
+operating system networking features was limited. These shortcomings motivated
+the investigation of an alternative architecture that retains the MST routing
+strategy proven effective by Morais while addressing the observed robustness
+and observability deficiencies.
+
 This dissertation addresses these problems through the design and experimental
 validation of a routing mechanism for RA-TDMAs+ networks, evaluated across
 multiple network configurations and topology conditions to assess routing
