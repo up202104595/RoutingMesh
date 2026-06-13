@@ -1,0 +1,69 @@
+%% chapter5.tex: Conclusions and Future Work
+
+\chapter{Conclusions and Future Work}
+\label{chap:conclusion}
+
+\section{Conclusions}
+
+This dissertation presented the design, implementation, and experimental
+evaluation of a routing mechanism for a mobile ad-hoc network built on top
+of the RA-TDMAs+ TDMA protocol. The work was motivated by the need to provide
+reliable multi-hop IP communication for a teleoperated mobile robot streaming
+video to a base station in environments without fixed network infrastructure.
+
+The main technical contributions were: (1) a link quality metric derived from
+TDMA beacon reception statistics; (2) an MST-based routing algorithm that
+derives per-destination next-hop decisions from the quality-weighted topology
+graph; (3) a dual routing table architecture that uses the Linux kernel's
+native IP forwarding for relay traffic, eliminating the need for a user-space
+relay plane; and (4) a video quality feedback loop that enables relay
+activation independently of the TDMA topology convergence cycle.
+
+Experimental evaluation on physical hardware demonstrated successful relay
+activation after link failure in 67\% of the tested cases, with a mean
+convergence time of 2.76\,s. The dominant bottleneck was identified as the
+video loss detection timeout at the base station (1.5\,s), not the routing
+computation or kernel route installation, which are completed in microseconds.
+Under relay conditions, round-trip latency approximately doubled (from 48\,ms
+to 97\,ms) as expected from the two-hop path, and the video stream delivery
+rhythm was fully preserved without additional jitter at the frame level.
+
+The results confirm the viability of kernel-level IP routing as an alternative
+to data-link-layer forwarding for RA-TDMAs+ networks. The approach provides
+standard-tool observability (tcpdump, traceroute, netstat), compatibility
+with any IP protocol, and integration with the Linux networking stack's
+production features, while meeting the timing constraints imposed by the
+50\,ms TDMA slot.
+
+\section{Future Work}
+\label{sec:future}
+
+Several directions for future work are identified:
+
+\begin{itemize}
+
+  \item \textbf{Reduced convergence time}: The 1.5\,s video loss timeout
+  was chosen conservatively. Adaptive timeout mechanisms that distinguish
+  between transient packet loss and link failure could reduce the detection
+  time to 300--500\,ms without increasing the false-positive rate.
+
+  \item \textbf{Proactive relay pre-positioning}: When the link quality metric
+  for the direct link falls below a configurable threshold (but has not yet
+  reached zero), the system could pre-install relay routes in parallel with
+  the direct route, reducing convergence to a single TDMA frame.
+
+  \item \textbf{Larger networks}: The current implementation was validated
+  with three nodes. Extension to larger networks requires addressing the MST
+  recomputation overhead (currently $O(N^2)$, negligible for $N \leq 10$) and
+  the TCP connection management overhead ($O(N^2)$ connections per node).
+
+  \item \textbf{Multi-path relay}: When multiple relay nodes are available,
+  the system currently uses a single relay path. Load balancing across
+  multiple paths could increase throughput and resilience.
+
+  \item \textbf{Energy-aware routing}: Incorporating battery state into the
+  link quality metric would allow the MST computation to prefer paths through
+  nodes with higher remaining energy, extending network lifetime in
+  battery-constrained deployments.
+
+\end{itemize}

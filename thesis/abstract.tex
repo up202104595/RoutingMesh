@@ -2,25 +2,39 @@
 
 \chapter*{Abstract}
 
-This dissertation presents the design, implementation, and evaluation of a
-routing mechanism for a Mobile Ad-hoc Network (MANET) built on top of the
-RA-TDMAs+ Time Division Multiple Access protocol. The work targets a practical
-scenario in which a mobile robot streams video to a remote base station via an
-intermediate relay node, operating without fixed network infrastructure.
+The increasing deployment of autonomous mobile robots in complex missions ---
+from search and rescue operations to remote industrial inspections --- requires
+these systems to maintain reliable wireless communication in environments where
+no network infrastructure exists. In such scenarios, robots must organise
+themselves into mobile ad-hoc networks where each node acts simultaneously as
+information source, data destination, and packet relay, enabling distant nodes
+to communicate through multi-hop paths.
+
+This dissertation presents the design, implementation, and experimental
+evaluation of a routing mechanism for a mobile ad-hoc network built on top of
+the RA-TDMAs+ Time Division Multiple Access protocol. The work targets a
+three-node scenario representative of practical robotic missions: a mobile
+robot streaming video to a remote base station, with an intermediate node
+serving as relay when the direct link fails.
 
 The proposed system introduces a link quality metric derived from TDMA beacon
 reception statistics and uses it to compute a Minimum Spanning Tree over the
 network topology, from which per-destination next-hop decisions are derived.
-Routes are installed directly into the Linux kernel routing table via Netlink,
-and relay forwarding is implemented through a dual routing table architecture
-that leverages the kernel's built-in IP forwarding without requiring a
-user-space forwarding plane. A video quality feedback loop allows the base
-station to signal stream loss to the robot node, triggering immediate relay
-activation independently of the TDMA topology convergence cycle.
+Routes are installed into the Linux kernel routing table via Netlink, and relay
+forwarding is implemented through a dual routing table architecture that
+leverages the kernel's built-in IP forwarding without requiring a user-space
+forwarding plane. A video quality feedback loop allows the base station to
+signal stream loss to the robot, triggering immediate relay activation
+independently of the TDMA topology convergence cycle.
 
-Experimental evaluation in a three-node hardware setup demonstrates routing
-convergence after link failure, measures end-to-end round-trip latency under
-direct and relay conditions, and characterises video stream delivery regularity
-and throughput. Results confirm that the relay mechanism is transparent to the
-video stream in terms of delivery rhythm, with the dominant convergence
-bottleneck being the video loss detection timeout at the base station.
+Experimental evaluation on physical hardware demonstrated successful relay
+activation after link failure, with a mean convergence time of approximately
+2.76 seconds. The dominant bottleneck was identified as the video loss
+detection timeout at the base station rather than the routing recomputation
+itself. End-to-end round-trip latency was consistent with the 150\,ms TDMA
+frame period, and the relay mechanism was shown to preserve the video stream
+delivery rhythm without degrading inter-arrival regularity.
+
+\vspace{1em}
+\noindent\textbf{Keywords:} mobile ad-hoc networks, TDMA, routing, relay
+forwarding, Linux kernel, video streaming, autonomous robots

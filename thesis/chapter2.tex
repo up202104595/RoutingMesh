@@ -3,5 +3,385 @@
 \chapter{Background and State of the Art}
 \label{chap:background}
 
-% TODO: write Chapter 2
-This chapter is a placeholder.
+\section{Introduction}
+
+This chapter presents the theoretical foundations essential to understanding
+the routing system developed in this work. The chapter covers
+MANETs~\cite{conti2014mobile}, TDMA synchronization protocols with emphasis on
+RA-TDMAs+~\cite{oliveira2018clockless}, and graph-based routing algorithms.
+The goal is to establish the necessary background for the dynamic routing
+implementation described in subsequent chapters.
+
+Mobile Ad-hoc Networks differ fundamentally from infrastructure-based wireless
+networks. Instead of relying on fixed Access Points, MANETs form
+self-organizing networks where each device acts both as endpoint and router.
+This dual role enables communication beyond direct wireless range through
+multi-hop relaying, extending coverage without infrastructure deployment.
+
+The challenge in MANETs is coordinating medium access without centralized
+control. Time Division Multiple Access (TDMA) provides collision-free
+communication by dividing time into slots assigned to different nodes.
+However, traditional TDMA requires centralized slot allocation, incompatible
+with ad-hoc operation. This motivated the development of distributed TDMA
+protocols~\cite{sousa2012ra,almeida2023synchronization}, culminating in
+RA-TDMAs+~\cite{oliveira2018clockless}, the framework used in this work.
+
+
+\section{Mobile Ad-hoc Networks}
+\label{sec:manet}
+
+Mobile Ad-hoc Networks~\cite{conti2014mobile} enable autonomous devices to
+communicate without infrastructure. Each device acts as both endpoint and
+router, forming a self-organizing mesh network.
+
+\subsection{Definition and Characteristics}
+
+A Mobile Ad-hoc Network (MANET) is formally defined as a time-varying graph
+$G(t) = (V(t), E(t))$ where:
+
+\begin{itemize}
+\item $V(t) = \{v_1(t), v_2(t), \ldots, v_n(t)\}$ is the set of mobile nodes at time $t$
+\item $E(t) \subseteq V(t) \times V(t)$ is the set of bidirectional wireless links at time $t$
+\item Both $V(t)$ and $E(t)$ vary with time due to node mobility
+\end{itemize}
+
+This formalization captures the essential MANET property: topology dynamism.
+As nodes move, links $(v_i, v_j) \in E(t)$ appear and disappear, requiring
+routing protocols to continuously adapt.
+
+\subsection{Key Challenges}
+
+\textbf{Dynamic Topology:} Node mobility causes continuous topology changes.
+Routes valid at time $t$ may be invalid at $t + \Delta t$ as nodes move beyond
+wireless range. Routing protocols must detect failures and recompute routes
+faster than topology changes occur.
+
+\vspace{0.3cm}
+
+\textbf{Hidden Terminal Problem:} Consider three nodes A, B, C where A and C
+are within range of B but cannot hear each other. When A transmits to B, C
+does not detect the transmission. If C simultaneously transmits to B, collision
+occurs at B. This problem degrades throughput in contention-based protocols
+like CSMA/CA.
+
+\vspace{0.3cm}
+
+\textbf{Limited Resources:} Battery-powered mobile nodes face energy
+constraints. Transmission consumes significant power, especially at longer
+ranges. Routing protocols must minimize overhead while maintaining route
+quality.
+
+\subsection{Application Scenarios}
+
+MANETs prove essential in operational contexts where traditional communication
+infrastructure is unavailable, destroyed, or impractical to deploy. Disaster
+response operations exemplify this need, as emergency teams require reliable
+communication channels when earthquakes, floods, or other catastrophes have
+destroyed cellular towers and network infrastructure. Military operations
+similarly depend on MANETs for tactical communications in hostile environments.
+Industrial monitoring scenarios deploy mobile robots coordinating autonomously
+in warehouses or factories, forming dynamic networks as they navigate complex
+environments.
+
+This work focuses specifically on a teleoperated mobile robot that must
+maintain a video stream to a base station despite link degradation, using an
+intermediate relay node to extend communication range.
+
+
+\section{Medium Access Control: TDMA vs CSMA/CA}
+\label{sec:mac}
+
+\subsection{CSMA/CA Overview}
+
+Carrier Sense Multiple Access with Collision Avoidance (CSMA/CA), the medium
+access protocol used in WiFi networks, allows nodes to compete for channel
+access through a contention-based mechanism. Nodes sense the carrier channel
+to determine if it is idle; when the channel appears free, they transmit after
+waiting for a randomly selected backoff period. While this approach offers
+simplicity and requires no centralized coordination, it introduces several
+fundamental challenges for time-sensitive robotic applications.
+
+Despite carrier sensing mechanisms, collisions remain unavoidable when multiple
+nodes independently select the same backoff interval. The protocol provides no
+latency guarantees, as nodes experiencing repeated collisions may face
+arbitrary delays before successfully transmitting, making CSMA/CA unsuitable
+for real-time applications requiring predictable timing. The hidden terminal
+problem cannot be fully solved even with RTS/CTS handshaking in many practical
+scenarios. Furthermore, continuous channel monitoring prevents nodes from
+entering low-power sleep states, significantly impacting energy efficiency in
+battery-powered mobile robots.
+
+\subsection{TDMA Fundamentals}
+
+Time Division Multiple Access (TDMA) divides time into frames, with each frame
+containing $N$ slots for $N$ nodes. Each node transmits exclusively in its
+assigned slot, achieving collision-free communication.
+
+\vspace{0.3cm}
+
+\textbf{Frame Structure:}
+
+Let $T_{slot}$ denote slot duration and $N$ the number of nodes. Then:
+
+\begin{equation}
+T_{frame} = N \times T_{slot}
+\label{eq:frame-duration}
+\end{equation}
+
+The maximum transmission rate for a node with one slot per frame is:
+
+\begin{equation}
+R_{max} = \frac{1}{T_{frame}} = \frac{1}{N \times T_{slot}}
+\label{eq:max-rate}
+\end{equation}
+
+\vspace{0.3cm}
+
+\textbf{TDMA Advantages:}
+
+TDMA's deterministic slot allocation provides several critical benefits for
+robotic applications. The collision-free transmission inherent to TDMA
+maximizes channel utilization. Latency becomes bounded and predictable, with
+the maximum delay equal to one frame duration, enabling real-time applications
+to make reliable timing guarantees. Energy efficiency improves as nodes can
+power down their radios outside their assigned transmission slots.
+
+\vspace{0.3cm}
+
+\textbf{TDMA Challenges for MANETs:}
+
+Despite these advantages, traditional TDMA faces fundamental challenges in
+mobile ad-hoc networks. Time synchronization among all nodes becomes essential,
+as even small clock drifts can cause slot boundaries to misalign and create
+collisions at slot transitions. Centralized slot allocation proves incompatible
+with the distributed, dynamic nature of ad-hoc operation. Guard times must be
+inserted between slots to accommodate residual synchronization errors, reducing
+overall channel efficiency.
+
+
+\section{RA-TDMA Protocol Family Evolution}
+\label{sec:ra-tdma-evolution}
+
+This section traces the evolution of distributed TDMA protocols~\cite{sousa2012ra}
+from classical TDMA through RA-TDMA to RA-TDMAs+, the protocol used in this work.
+
+\subsection{Classical TDMA Limitations}
+
+Traditional TDMA systems rely on centralized coordination. A base station
+assigns time slots to each device, ensuring collision-free access. In
+MANETs, no fixed infrastructure exists, making traditional slot allocation
+mechanisms infeasible. Cellular TDMA systems synchronize to GPS or network
+timing signals broadcast by base stations, which are unavailable in
+infrastructure-less environments.
+
+\subsection{RA-TDMA: Distributed Slot Allocation}
+
+RA-TDMA (Receiver-based Autoconfiguration TDMA)~\cite{sousa2012ra} introduced
+distributed, autonomous slot selection, eliminating centralized control. Each
+node (receiver) selects a slot $s_i$ ensuring:
+
+\begin{equation}
+s_i \notin S_{2hop}(i)
+\label{eq:slot-constraint}
+\end{equation}
+
+where $S_{2hop}(i)$ is the set of slots used by nodes within 2 hops of node
+$i$. Nodes synchronize through heartbeat message timing: if node $j$ expects
+node $i$'s heartbeat at time $t_{exp}$ but receives it at $t_{recv}$, the
+offset $\delta_{ij} = t_{recv} - t_{exp}$ is used to adjust the local clock.
+
+\subsection{RA-TDMAs: Streaming Extension}
+
+RA-TDMAs extended RA-TDMA to support high-throughput applications (video,
+audio) by allowing nodes to reserve multiple consecutive slots, enabling
+real-time video streaming between mobile robots.
+
+\subsection{RA-TDMA+: Mesh Networking}
+
+RA-TDMA+ introduced connectivity matrix distribution, enabling mesh networking
+across multiple hops. Each node maintains an $N \times N$ matrix $C$ where:
+
+\begin{equation}
+C_{ij} = \begin{cases}
+1 & \text{if node } i \text{ can communicate with node } j \\
+0 & \text{otherwise}
+\end{cases}
+\label{eq:connectivity-matrix}
+\end{equation}
+
+For a 3-node line topology ($1 - 2 - 3$):
+
+\begin{equation}
+C = \begin{bmatrix}
+0 & 1 & 0 \\
+1 & 0 & 1 \\
+0 & 1 & 0
+\end{bmatrix}
+\label{eq:example-matrix}
+\end{equation}
+
+\subsection{RA-TDMAs+: Unified Protocol}
+
+RA-TDMAs+~\cite{oliveira2018clockless} represents the culmination of this
+protocol evolution, unifying streaming capabilities (RA-TDMAs) with mesh
+networking (RA-TDMA+). This convergence enables mobile robots to stream
+high-bandwidth data such as video across multi-hop paths while maintaining
+collision-free, deterministic performance.
+
+The RA-TDMAs+ frame structure for $N$ nodes consists of $N$ time slots of
+duration $T_{slot}$, separated by guard intervals $T_{guard}$ that accommodate
+residual synchronization errors:
+
+\begin{equation}
+T_{frame} = N \times T_{slot}
+\label{eq:frame-total}
+\end{equation}
+
+In the implementation developed for this work, three nodes with
+$T_{slot} = 50$\,ms yield a frame duration of $T_{frame} = 150$\,ms, as shown
+in Table~\ref{tab:tdma-frame}.
+
+\begin{table}[h]
+\centering
+\caption{RA-TDMAs+ frame structure for the 3-node implementation}
+\label{tab:tdma-frame}
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Slot 1 (Node 1)} & \textbf{Slot 2 (Node 2)} & \textbf{Slot 3 (Node 3)} & \textbf{Guard} \\
+\hline
+50\,ms & 50\,ms & 50\,ms & 5\,ms \\
+\hline
+\multicolumn{4}{c}{Frame duration: 150\,ms $\quad$ Useful slot: 45\,ms} \\
+\end{tabular}
+\end{table}
+
+\vspace{0.3cm}
+
+\textbf{Comparison Table:}
+
+\begin{table}[h]
+\centering
+\caption{TDMA Protocol Evolution Comparison}
+\label{tab:tdma-comparison}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Feature} & \textbf{Classical} & \textbf{RA-TDMA} & \textbf{RA-TDMAs} & \textbf{RA-TDMA+} & \textbf{RA-TDMAs+} \\
+\midrule
+Allocation    & Central     & Distributed & Distributed & Distributed & Distributed \\
+Multi-slot    & Yes         & No          & Yes         & No          & Yes \\
+Mesh support  & No          & No          & No          & Yes         & Yes \\
+Conn.\ Matrix & No          & No          & No          & Yes         & Yes \\
+GPS needed    & Yes         & No          & No          & No          & No \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Routing Protocols for MANETs}
+\label{sec:routing}
+
+\subsection{Classification}
+
+MANET routing protocols fundamentally divide into two categories based on their
+route maintenance strategy. Proactive protocols (also known as table-driven
+protocols such as DSDV and OLSR) continuously maintain routes to all
+destinations through periodic update exchanges. This approach ensures routes
+remain immediately available when needed, minimizing latency, but incurs
+high overhead from continuous update messages even when no data traffic flows.
+Reactive protocols (on-demand protocols such as AODV and DSR) discover routes
+only when applications require them, eliminating periodic update overhead but
+introducing route discovery latency that delays the first packets of each
+communication flow.
+
+\subsection{Link-State Routing}
+
+Link-state routing is a proactive approach where each node maintains a complete
+network topology view. This work leverages the RA-TDMAs+ connectivity matrix
+as the topology source for link-state computation, eliminating the need for a
+separate topology discovery mechanism.
+
+The connectivity matrix $C$ (Equation~\ref{eq:connectivity-matrix}) directly
+represents the network topology as a graph $G = (V, E)$ where:
+
+\begin{equation}
+(v_i, v_j) \in E \iff C_{ij} = 1
+\label{eq:graph-from-matrix}
+\end{equation}
+
+\subsection{Minimum Spanning Tree}
+
+A Minimum Spanning Tree (MST) of a weighted graph $G = (V, E, w)$ is a
+subgraph $T \subseteq E$ that connects all vertices with minimum total weight
+and no cycles:
+
+\begin{equation}
+MST(G) = \underset{T \subseteq E}{\mathrm{argmin}} \sum_{(u,v) \in T} w(u,v)
+\quad \text{subject to } T \text{ spans } V
+\label{eq:mst-definition}
+\end{equation}
+
+In the routing context, the MST provides a spanning tree rooted at the local
+node from which next-hop decisions for every destination can be derived. For
+unweighted graphs (binary connectivity), the MST degenerates to a Breadth-First
+Search spanning tree. When link quality weights are used, the MST naturally
+prefers higher-quality links, making it suitable for quality-aware routing in
+TDMA networks.
+
+Prim's algorithm~\cite{dijkstra1959note} computes the MST by greedily adding
+the minimum-weight edge connecting the growing tree to an unvisited node. For
+$N$ nodes, the time complexity is $O(N^2)$ for dense graph implementations,
+which is highly efficient for the small networks (3--10 nodes) typical in
+robotic teams.
+
+
+\section{Related Work}
+\label{sec:related-work}
+
+\subsection{Previous Work: Layer 2 Routing}
+
+Ana Morais~\cite{morais2024synchronization} established the foundation for
+multi-hop communication in RA-TDMAs+ networks, implementing routing at the
+data link layer (Layer 2) through ARP table manipulation on AlphaBot2-Pi
+robotic platforms. The work demonstrated automatic route computation using
+Prim's Minimum Spanning Tree algorithm operating on the connectivity matrix
+distributed by RA-TDMAs+ heartbeat exchanges. Forwarding was achieved by
+modifying destination MAC addresses at each hop while preserving IP addresses
+unchanged throughout the multi-hop path, providing transparency to
+higher-layer protocols. Extensive validation on physical mobile robots
+successfully demonstrated real-time video streaming across dynamic topologies,
+proving the practical feasibility of multi-hop communication in
+resource-constrained platforms.
+
+The Layer 2 approach offered several advantages: complete transparency
+resulting from unmodified IP headers throughout the path, minimal overhead
+as only MAC-level processing was required at each relay node, and use of
+existing TUN/TAP interfaces and ARP mechanisms in Linux.
+
+However, ARP table manipulation introduces significant debugging complexity
+since standard networking tools like traceroute cannot observe actual
+forwarding paths. Integration with production networking features such as
+iptables and traffic shaping becomes challenging when forwarding decisions
+occur at a layer these tools do not interact with. Additionally, the lack
+of explicit failure detection mechanisms left uncertainty about guaranteed
+recovery latency when links fail.
+
+\subsection{This Work: Layer 3 Kernel Routing}
+
+This work implemented an alternative architecture based on Layer 3 routing
+integrated with the Linux kernel IP forwarding subsystem. Rather than
+manipulating ARP tables at the data link layer, the system programmatically
+configures kernel routing tables through the Netlink interface. The routing
+engine monitors topology changes through the link quality metric derived from
+TDMA beacon statistics, executes MST computation when topology changes occur,
+and synchronizes computed routes with the kernel's forwarding tables.
+
+The Layer 3 approach offers complementary advantages: kernel-proven robustness
+leveraging decades of Linux networking development, compatibility with any
+IP-based protocol, and support for standard debugging tools including
+tcpdump and netstat. The dual routing table architecture enables relay
+forwarding via the kernel's native IP forwarding without user-space
+intervention.
+
+A detailed comparison between the two approaches is provided in
+Chapter~\ref{chap:implementation}, where the design decisions behind the
+chosen architecture are discussed in the context of the actual implementation.

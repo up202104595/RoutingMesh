@@ -5,6 +5,8 @@
 \documentclass[11pt,a4paper]{report}
 
 \usepackage[utf8]{inputenc}
+
+%% MEEC options - English version
 \usepackage[english,meec]{feupteses}
 
 \usepackage{array}
@@ -14,16 +16,19 @@
 \usepackage{amssymb}
 \usepackage{mathtools}
 \usepackage{listings}
-\usepackage{xcolor}
 
 %% Code listing style
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codebg}{rgb}{0.97,0.97,0.97}
 \lstset{
-  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,
   breaklines=true,
   frame=single,
   numbers=left,
-  numberstyle=\tiny,
-  tabsize=4
+  numberstyle=\tiny\color{codegray},
+  tabsize=4,
+  captionpos=b
 }
 
 \graphicspath{{./}{figures/}}
@@ -42,8 +47,10 @@
 %%----------------------------------------
 \begin{Prolog}
   \include{abstract}
+  %\include{un-sdg}    %% UN Sustainable Development Goals (optional)
+  %\include{acknows}   %% Acknowledgements (optional)
+  %\include{quote}     %% Opening quote (optional)
   \cleardoublepage
-  %\include{acknows}
   \pdfbookmark[0]{Table of Contents}{contents}
   \tableofcontents
   \cleardoublepage
@@ -59,11 +66,11 @@
 %%----------------------------------------
 \StartBody
 
-\include{chapter1}
-\include{chapter2}
-\include{chapter3}
-\include{chapter4}
-\include{chapter5}
+\include{chapter1}   %% Introduction
+\include{chapter2}   %% Background and State of the Art
+\include{chapter3}   %% Design and Implementation
+\include{chapter4}   %% Experimental Evaluation
+\include{chapter5}   %% Conclusions
 
 %%----------------------------------------
 \PrintBib

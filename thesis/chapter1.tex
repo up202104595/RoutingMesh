@@ -1,5 +1,4 @@
 %% chapter1.tex: Introduction
-%% Miguel Tavares Almeida - 2025
 
 \chapter{Introduction}
 \label{chap:intro}
@@ -55,12 +54,12 @@ Time Division Multiple Access (TDMA) provides an effective foundation for
 organising transmissions in the shared wireless medium. By assigning each node
 an exclusive time slot within a periodic frame, collisions are avoided by
 construction and channel access is predictable. The RA-TDMAs+ protocol
-developed at FEUP~\cite{diogo2023} extends this model to ad-hoc mesh networks
-with relative synchronisation --- that is, without requiring a global clock
---- and distributes topology information via periodic beacon packets. An
-experimental implementation of RA-TDMAs+ was realised by Diogo
-Almeida~\cite{diogo2023}, providing a functional TDMA framework as the
-foundation upon which the present work is built.
+developed at FEUP~\cite{oliveira2018clockless} extends this model to ad-hoc
+mesh networks with relative synchronisation --- that is, without requiring a
+global clock --- and distributes topology information via periodic beacon
+packets. An experimental implementation of RA-TDMAs+ was realised by Diogo
+Almeida~\cite{almeida2023synchronization}, providing a functional TDMA
+framework as the foundation upon which the present work is built.
 
 %% -----------------------------------------------------------------------
 \section{Problem Statement}
@@ -166,12 +165,10 @@ The work reported in this dissertation makes the following contributions:
     quality to zero and schedules route recomputation, triggering relay
     activation without waiting for TDMA topology convergence;
 
-    \item \textbf{Experimental evaluation}: a test methodology and set of
-    measurement scripts for characterising routing convergence time, round-trip
-    latency, video stream inter-arrival regularity, and throughput in a
-    three-node scenario with topology changes induced by controlled signal
-    attenuation, producing comparative results for direct and relay
-    communication conditions.
+    \item \textbf{Experimental evaluation}: a test methodology and measurement
+    scripts for characterising routing convergence time, round-trip latency,
+    video stream inter-arrival regularity, and throughput in a three-node
+    scenario with topology changes induced by controlled signal attenuation.
 
 \end{itemize}
 
@@ -188,7 +185,7 @@ The remainder of this document is organised as follows:
     challenges of MANETs, introduces the RA-TDMAs+ TDMA framework and its
     beacon-based topology dissemination mechanism, reviews routing algorithms
     for ad-hoc networks with emphasis on MST-based approaches, and analyses
-    related work on kernel-level routing integration in wireless mesh networks.
+    related work on Layer 2 routing in RA-TDMAs+ networks.
 
     \item \textbf{Chapter~\ref{chap:implementation}} describes the design and
     implementation of the proposed system. It covers the MATRIX protocol and
