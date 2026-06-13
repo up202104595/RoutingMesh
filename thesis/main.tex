@@ -1,0 +1,54 @@
+%% FEUP THESIS STYLE for LaTeX2e
+%% MEEC Final Report
+%% Miguel Tavares Almeida - 2025
+
+\documentclass[11pt,a4paper]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[english,meec]{feupteses}
+\usepackage{array}
+\usepackage{colortbl}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+
+\graphicspath{{./}{figures/}}
+\addbibresource{bibliography.bib}
+
+%%========================================
+\begin{document}
+%%========================================
+
+\title{Routing in Dynamic Meshes of Autonomous Agents}
+\author{Miguel Tavares Almeida}
+\copyrightnotice{Miguel Tavares Almeida, 2025}
+\supervisor{Supervisor}{Prof.\ Luís Almeida}
+\logo{uporto-feup.pdf}
+
+%%----------------------------------------
+\begin{Prolog}
+  \include{abstract}
+  \cleardoublepage
+  \pdfbookmark[0]{Table of Contents}{contents}
+  \tableofcontents
+  \cleardoublepage
+  \pdfbookmark[0]{List of Figures}{figures}
+  \listoffigures
+  \cleardoublepage
+  \pdfbookmark[0]{List of Tables}{tables}
+  \listoftables
+  \cleardoublepage
+  \include{abbrevs}
+\end{Prolog}
+
+%%----------------------------------------
+\StartBody
+
+\include{chapter1}
+\include{chapter2}
+\include{chapter3}
+
+%%----------------------------------------
+\PrintBib
+
+\end{document}
