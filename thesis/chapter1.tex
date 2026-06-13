@@ -38,8 +38,8 @@ topology change caused by node mobility. Unlike sensor networks where devices
 remain stationary after deployment, mobile robots navigate freely through their
 environment following mission requirements. A link that exists at one moment
 may vanish seconds later when a robot turns a corner, enters a different room,
-or simply moves beyond radio range. Routing --- the process of determining
-paths for data to flow from source to destination --- cannot rely on static
+or simply moves beyond radio range. Routing (the process of determining
+paths for data to flow from source to destination) cannot rely on static
 precomputation but must adapt continuously as the topology evolves.
 
 A further challenge arises when the application traffic is a real-time video
@@ -55,8 +55,8 @@ organising transmissions in the shared wireless medium. By assigning each node
 an exclusive time slot within a periodic frame, collisions are avoided by
 construction and channel access is predictable. The RA-TDMAs+ protocol
 developed at FEUP~\cite{oliveira2018clockless} extends this model to ad-hoc
-mesh networks with relative synchronisation --- that is, without requiring a
-global clock --- and distributes topology information via periodic beacon
+mesh networks with relative synchronisation (that is, without requiring a
+global clock) and distributes topology information via periodic beacon
 packets. An experimental implementation of RA-TDMAs+ was realised by Diogo
 Almeida~\cite{almeida2023synchronization}, providing a functional TDMA
 framework as the foundation upon which the present work is built.
@@ -76,8 +76,8 @@ mesh network for robotic applications. First, the routing mechanism must
 operate within the strict timing constraints imposed by the TDMA slot
 structure, computing and installing routes without disrupting the medium-access
 schedule. Second, it must detect link failures rapidly and trigger relay
-activation before the ongoing application stream --- in this case a video feed
---- is perceived as interrupted by the operator. Third, the forwarding of
+activation before the ongoing application stream (in this case a video feed)
+is perceived as interrupted by the operator. Third, the forwarding of
 transit packets must be implemented efficiently: user-space forwarding planes
 introduce additional latency and complexity, while kernel-level approaches
 offer proven performance, standard observability, and seamless integration with
@@ -149,11 +149,11 @@ The work reported in this dissertation makes the following contributions:
     into the Linux kernel routing table via Netlink;
 
     \item \textbf{Dual routing table architecture for relay forwarding}: a
-    Linux kernel integration that uses two routing tables --- one for traffic
+    Linux kernel integration that uses two routing tables: one for traffic
     originating at the local node, transported through a TUN virtual interface
     over the TDMA channel, and one for transit traffic identified by source IP
     address and forwarded directly via the physical Wi-Fi interface using the
-    kernel's built-in IP forwarding --- eliminating the need for a user-space
+    kernel's built-in IP forwarding, eliminating the need for a user-space
     relay plane;
 
     \item \textbf{Video quality feedback loop}: a closed-loop mechanism in

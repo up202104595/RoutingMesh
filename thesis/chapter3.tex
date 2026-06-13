@@ -12,8 +12,8 @@ where Node~1 (N1) is a mobile robot (AlphaBot) streaming video, Node~2 (N2)
 is an intermediate relay, and Node~3 (N3) is the base station operated by a
 human.
 
-The implementation is structured around a set of cooperating modules ---
-MATRIX, Routing, Sync, and a TUN-based transport layer --- coordinated by an
+The implementation is structured around a set of cooperating modules
+(MATRIX, Routing, Sync, and a TUN-based transport layer) coordinated by an
 event-driven architecture. The following sections describe each component and
 the mechanisms through which they interact.
 
@@ -244,7 +244,7 @@ Two kernel routing tables are used to differentiate between \emph{own traffic}
   it, wraps it in the TDMA MSG\_DATA format, and queues it for TCP delivery
   during the TX slot.
 
-  \item[Table 200] Handles \emph{relay traffic} --- packets whose source IP
+  \item[Table 200] Handles \emph{relay traffic}: packets whose source IP
   is in \texttt{10.0.0.0/24} but not the local node's own address. For each
   destination $d$, the route is:
   \begin{center}
