@@ -78,21 +78,18 @@ structure, computing and installing routes without disrupting the medium-access
 schedule. Second, it must detect link failures rapidly and trigger relay
 activation before the ongoing application stream --- in this case a video feed
 --- is perceived as interrupted by the operator. Third, the forwarding of
-transit packets must be implemented efficiently: a user-space forwarding plane
-would introduce additional latency and complexity, while kernel-level IP
-forwarding offers proven performance but requires careful integration with the
-TDMA node's routing logic. Fourth, a metric is needed to quantify link quality
+transit packets must be implemented efficiently: user-space forwarding planes
+introduce additional latency and complexity, while kernel-level approaches
+offer proven performance, standard observability, and seamless integration with
+the operating system's networking stack. Fourth, a metric is needed to quantify link quality
 within the TDMA context, since classical metrics such as hop count or received
 signal strength do not capture the slot-level packet delivery behaviour that is
 most relevant here.
 
-This dissertation addresses these problems in the context of a three-node
-scenario: a mobile robot acting as the video source, an intermediate relay
-node, and a base station where the operator receives the video stream and sends
-control commands. This minimal topology is sufficient to exercise the essential
-features of multi-hop routing --- direct link communication, link failure,
-relay activation, and recovery --- while keeping experimental conditions
-controlled and reproducible.
+This dissertation addresses these problems through the design and experimental
+validation of a routing mechanism for RA-TDMAs+ networks, evaluated across
+multiple network configurations and topology conditions to assess routing
+robustness and adaptability.
 
 %% -----------------------------------------------------------------------
 \section{Objectives}
