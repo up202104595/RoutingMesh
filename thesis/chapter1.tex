@@ -92,14 +92,16 @@ mechanism at the data link layer using ARP table manipulation on AlphaBot
 robotic platforms. Her work demonstrated the feasibility of multi-hop
 communication and adopted a Minimum Spanning Tree (MST) algorithm to derive
 forwarding paths from the connectivity matrix distributed by RA-TDMAs+.
-However, the Layer~2 approach presented several limitations in practice:
-the manipulation of ARP tables caused instability and runtime failures in
-certain topology transitions, standard diagnostic tools such as traceroute
-and ping did not reflect the actual forwarding path, and integration with
-operating system networking features was limited. These shortcomings motivated
-the investigation of an alternative architecture that retains the MST routing
-strategy proven effective by Morais while addressing the observed robustness
-and observability deficiencies.
+However, the existing implementation exhibited system-level instability
+during operation, including runtime failures whose precise cause was not
+fully identified. Beyond these stability issues, the Layer~2 approach
+presented inherent observability limitations: standard diagnostic tools
+such as traceroute and ping did not reflect the actual forwarding path,
+and integration with operating system networking features was constrained.
+The objective of the present work was therefore to build a complete,
+functional routing system from the ground up, retaining the MST strategy
+validated by Morais while resolving the observed stability issues and
+addressing the observability limitations through a Layer~3 architecture.
 
 This dissertation addresses these problems through the design and experimental
 validation of a routing mechanism for RA-TDMAs+ networks, evaluated across
