@@ -877,6 +877,7 @@ MAC address table and the Spanning Tree through shared memory, and updates the A
 via \texttt{ioctl()} system calls. Figure~\ref{fig:framework-ana} shows the complete architecture
 after the addition of the routing module.
 
+\vspace{0.5em}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\textwidth]{frameworkAna}
@@ -886,6 +887,7 @@ and the Spanning Tree from shared memory and updates the kernel ARP table via
 \texttt{ioctl()} system calls.}
 \label{fig:framework-ana}
 \end{figure}
+\vspace{0.5em}
 
 \FloatBarrier
 \subsection{Routing Matrix and Data Structures}
@@ -903,6 +905,7 @@ list contains the destination identifier, and uses the MAC address stored with t
 as the ARP next-hop. Figure~\ref{fig:linkedlist1} illustrates this structure for three example
 source nodes.
 
+\vspace{0.5em}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist1}
@@ -911,9 +914,11 @@ corresponds to a directly connected neighbour; its secondary list contains all n
 through that neighbour~\cite{morais2024synchronization}.}
 \label{fig:linkedlist1}
 \end{figure}
+\vspace{0.5em}
 
 The linked list node structure is defined as follows:
 
+\vspace{0.3em}
 \begin{lstlisting}[language=C,
     caption={Linked list structure for the routing matrix~\cite{morais2024synchronization}},
     label={lst:routinglist}]
@@ -938,6 +943,7 @@ address data. Since ARP injection requires MAC addresses, Morais extended the
 adding six bytes to every state beacon. Figure~\ref{fig:statshare-ana} shows the updated beacon
 layout.
 
+\vspace{0.5em}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{statshareAna}
@@ -945,11 +951,13 @@ layout.
 field~\cite{morais2024synchronization}.}
 \label{fig:statshare-ana}
 \end{figure}
+\vspace{0.5em}
 
 The updated structure is shown in Listing~\ref{lst:matrix-ana}. When a node receives a beacon,
 it records the sender's MAC address in a shared-memory table indexed by node identifier. The
 address is retained only while the corresponding link remains active.
 
+\vspace{0.3em}
 \begin{lstlisting}[language=C,
     caption={Updated connectivity matrix structure including MAC address~\cite{morais2024synchronization}},
     label={lst:matrix-ana}]
@@ -968,6 +976,7 @@ The collected MAC addresses are stored in a shared-memory structure, \texttt{mac
 whose entries pair each MAC address with the last octet of the node's IP address (used as the
 node identifier in the framework):
 
+\vspace{0.3em}
 \begin{lstlisting}[language=C,
     caption={MAC address shared-memory structure~\cite{morais2024synchronization}},
     label={lst:macarray}]
@@ -987,6 +996,7 @@ Figure~\ref{fig:linkedlist2} shows how the MAC address of each primary neighbour
 alongside its secondary list in the routing linked list, allowing the routing module to look up
 the correct MAC address for ARP injection in a single list traversal.
 
+\vspace{0.5em}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist2}
@@ -995,6 +1005,7 @@ address of each direct neighbour is stored alongside its secondary list of reach
 nodes~\cite{morais2024synchronization}.}
 \label{fig:linkedlist2}
 \end{figure}
+\vspace{0.5em}
 
 \FloatBarrier
 \subsection{Routing Table Update Algorithm}
