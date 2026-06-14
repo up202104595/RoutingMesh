@@ -1,440 +1,424 @@
-%% chapter3.tex: Design and Implementation
+%% chapter3.tex: System Design and Implementation
 
-\chapter{Design and Implementation}
+\chapter{System Design and Implementation}
 \label{chap:implementation}
 
-\section{Introduction}
-
-This chapter describes the design and implementation of the routing mechanism
-developed for the RA-TDMAs+ framework. The system was implemented in C as an
-extension of the RA-TDMAs+ node software, targeting a three-node network
-where Node~1 (N1) is a mobile robot (AlphaBot) streaming video, Node~2 (N2)
-is an intermediate relay, and Node~3 (N3) is the base station operated by a
-human.
-
-The implementation is structured around a set of cooperating modules
-(MATRIX, Routing, Sync, and a TUN-based transport layer) coordinated by an
-event-driven architecture. The following sections describe each component and
-the mechanisms through which they interact.
+This chapter describes the design and implementation of the routing system developed in this
+dissertation. The system is built on top of the TDMA framework of
+Almeida~\cite{almeida2023synchronization} and retains the RA-TDMAs+ protocol stack
+described in Chapter~\ref{chap:background}. The central departures from the previous work of
+Morais~\cite{morais2024synchronization} are the adoption of a Layer~3 forwarding model, the
+separation of the communication stack into a UDP control plane and a TCP data plane, and the
+addition of per-link quality monitoring to the routing decision. The following sections describe
+each design decision and its implementation in detail.
 
 
-\section{System Architecture}
-\label{sec:architecture}
+%% -----------------------------------------------------------------------
+\section{Protocol Architecture: Separating Control and Data Planes}
+\label{sec:proto-split}
 
-Figure~\ref{fig:system-architecture} illustrates the high-level architecture
-of a single network node. The system comprises four main functional areas:
-the TDMA transport layer (TX/RX threads), the topology tracking module
-(MATRIX), the routing manager, and the Linux kernel integration layer.
+The original TDMA framework and the Layer~2 routing implementation of
+Morais~\cite{morais2024synchronization} used UDP datagrams for all inter-node communication:
+both the MATRIX topology beacons and the application data packets were transmitted through
+the same UDP socket. UDP is appropriate for the MATRIX control traffic because the periodic
+nature of the beacon means that a lost packet is simply replaced by the next one, one round
+later, without any lasting effect on the shared topology state. It is, however, fundamentally
+unsuitable as the sole transport for video streaming: each lost datagram causes visible
+artefacts at the destination, and UDP provides no retransmission mechanism to recover lost
+frames. In a TDMA network where slots can occasionally be missed due to synchronisation
+transients or interference, this results in perceptible degradation in the received video.
 
-%% \begin{figure}[h]
-%% \centering
-%% \includegraphics[width=0.85\textwidth]{figures/framework_diagram.png}
-%% \caption{High-level architecture of a RA-TDMAs+ node showing the
-%%          interaction between TDMA transport, topology tracking, routing,
-%%          and the Linux kernel networking stack.}
-%% \label{fig:system-architecture}
-%% \end{figure}
+To address this, the present work separates the communication stack into two planes, each
+with a transport protocol matched to its requirements.
 
-Application traffic flows from the user-space application (e.g., a GStreamer
-video pipeline) into a TUN virtual network device. The TUN reader thread
-intercepts these IP packets and places them into a transmit queue. During the
-node's assigned TDMA slot, the TX thread dequeues packets, wraps them in a
-TDMA header and a data sub-header, and transmits them to the appropriate
-peer via a TCP connection. On the receiving side, the TCP RX thread unwraps
-the IP packet and either delivers it locally (via a second \texttt{tun\_write}
-call) or lets the Linux kernel handle relay forwarding according to the
-installed routing rules.
+The \textbf{control plane} continues to use UDP. MATRIX topology beacons are multicast
+datagrams broadcast at the start of each slot. Their content is redundant across rounds (the
+same connectivity information is retransmitted every round), so occasional packet loss has no
+lasting consequence. The stateless, broadcast nature of the beacon is also a better fit for UDP
+than for a connection-oriented protocol.
 
-The routing manager is updated by the event handler whenever the MATRIX module
-detects a topology change, computing a new MST and installing updated kernel
-routes via Netlink.
+The \textbf{data plane} uses TCP. Application data packets, encapsulated as \texttt{MSG\_DATA}
+frames, are delivered over dedicated per-peer TCP connections. TCP provides guaranteed
+in-order delivery through its retransmission and acknowledgement mechanism, ensuring that
+video frames arrive intact at the destination regardless of transient link quality changes.
+Each node maintains an array of TCP socket file descriptors indexed by peer identifier,
+\texttt{tcp\_sockfd[MAX\_NODES+1]}, so that each pair of communicating nodes has its own
+dedicated stream with no interference from control traffic.
 
-\subsection{Thread Model}
+\subsection{TCP Framing}
 
-Each node runs eight concurrent threads, as summarised in
-Table~\ref{tab:threads}. Shared state is protected by per-module mutexes.
+Because TCP is a byte-stream protocol with no inherent message boundaries, each logical
+message must carry its own length information. Every outgoing \texttt{MSG\_DATA} frame is
+prefixed with a four-byte network-order integer that encodes the total length of the following
+content:
 
-\begin{table}[h]
+\begin{center}
+\texttt{[ 4\,B length ][ tdma\_header\_t ][ msg\_data\_hdr\_t ][ IP payload ]}
+\end{center}
+
+The receiver calls \texttt{recv()} with the \texttt{MSG\_WAITALL} flag twice in sequence: first
+to read exactly four bytes and determine the message length, then to read exactly that many
+bytes to obtain the complete packet. This two-step receive guarantees that the application
+always processes whole, aligned messages, regardless of how TCP segments the byte stream
+at the network level.
+
+\subsection{TCP Socket Configuration}
+
+The TCP sockets are configured to minimise latency and to detect dead peers quickly, using
+the socket options listed in Listing~\ref{lst:tcp-opts}.
+
+\begin{lstlisting}[language=C,
+    caption={TCP socket options applied to each peer connection},
+    label={lst:tcp-opts}]
+setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,   &one,      sizeof(one));
+setsockopt(fd, SOL_SOCKET,  SO_KEEPALIVE,  &one,      sizeof(one));
+setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE,  &(int){5}, sizeof(int));
+setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &(int){2}, sizeof(int));
+setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT,   &(int){3}, sizeof(int));
+setsockopt(fd, SOL_SOCKET,  SO_SNDTIMEO,   &tv_snd,   sizeof(tv_snd));
+setsockopt(fd, SOL_SOCKET,  SO_RCVTIMEO,   &tv_rcv,   sizeof(tv_rcv));
+\end{lstlisting}
+
+\texttt{TCP\_NODELAY} disables Nagle's algorithm, which would otherwise buffer small packets
+and introduce tens of milliseconds of additional latency before transmission.
+\texttt{SO\_KEEPALIVE} enables TCP-level keep-alive probes at the kernel level: after five
+seconds of inactivity the kernel sends a probe, repeating every two seconds up to three times
+before closing the connection if no response is received. Send and receive timeouts prevent any
+socket operation from blocking indefinitely, which is critical in a real-time system where a
+blocked thread would disrupt the TDMA slot schedule.
+
+% TODO FIGURE: Protocol split diagram
+% Suggested image: two-column diagram. Left column labelled "Control Plane": MATRIX beacon
+% arrow going from one node to all others via UDP multicast. Right column labelled "Data Plane":
+% dedicated TCP arrows between specific node pairs (tcp_sockfd[peer_id]). Clearly shows that
+% MATRIX stays UDP and MSG_DATA moves to TCP, with no interference between planes.
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.80\textwidth]{FILENAME}
+% \caption{Separation of the communication stack into a UDP control plane (MATRIX beacons)
+% and a TCP data plane (MSG\_DATA). Each data-plane stream is a dedicated per-peer TCP
+% connection.}
+% \label{fig:proto-split}
+% \end{figure}
+
+
+%% -----------------------------------------------------------------------
+\section{Architecture Overview}
+\label{sec:arch-overview}
+
+The overall system extends the TDMA framework with four new components:
+\texttt{routing.c}, which computes next-hop forwarding decisions from the Minimum Spanning
+Tree; \texttt{pdr.c}, which tracks per-link Packet Delivery Ratio; \texttt{tun.c}, which manages
+the TUN virtual network interface; and \texttt{tx\_queue.c}, a thread-safe circular buffer that
+decouples packet capture from slot-timed transmission. The existing \texttt{matrix.c} and
+\texttt{sync.c} modules are retained without modification. Communication between all
+components continues to use AF\_UNIX local sockets for control events and shared memory
+for high-frequency data exchange, consistent with the original framework architecture.
+
+% TODO FIGURE: Updated framework architecture diagram
+% Suggested image: same layout style as the Diogo framework diagram in chapter 2, but with
+% the new modules added. Show: TDMA_Core in the centre, matrix.c and sync.c as before,
+% plus the new routing.c (reads Spanning Tree SHM, writes kernel routing table),
+% pdr.c (reads per-peer PDR from SHM), tun.c (reads/writes tun0), tx_queue.c (between
+% tun.c and TDMA_Core). Mark UDP path for MATRIX and TCP connections to peers.
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.84\textwidth]{FILENAME}
+% \caption{Updated TDMA framework architecture with the new routing, PDR, TUN, and
+% transmission queue modules. MATRIX beacons use the existing UDP broadcast path;
+% application data travels over dedicated per-peer TCP streams.}
+% \label{fig:arch-new}
+% \end{figure}
+
+
+%% -----------------------------------------------------------------------
+\section{Layer 3 Routing Design}
+\label{sec:layer3-design}
+
+The forwarding mechanism operates at the network layer (Layer~3), in contrast to the
+Layer~2 ARP-manipulation approach of Morais~\cite{morais2024synchronization}. The central
+component is a TUN virtual network interface, \texttt{tun0}, which intercepts IP packets from
+the application before they reach the wireless interface and reinjects received packets directly
+into the kernel IP stack at the destination node. At each relay node, the Linux kernel's native
+IP forwarding capability routes transit packets to the correct outgoing interface without
+requiring any MAC-level manipulation.
+
+This design provides several practical advantages. Standard IP diagnostic tools such as
+\texttt{ping} and \texttt{traceroute} operate correctly because all forwarding decisions are
+visible at the IP level: each hop decrements the IP TTL and the complete relay path appears
+in \texttt{traceroute} output. Linux networking subsystems that operate at Layer~3, including
+traffic shaping with \texttt{tc}, firewall rules with \texttt{iptables}, and policy routing tables,
+interact normally with traffic passing through the system. Debugging is substantially easier
+than with the Layer~2 solution, where the relay path is invisible to all IP-level tools.
+
+% TODO FIGURE: Layer 2 vs Layer 3 comparison
+% Suggested image: two-panel diagram side by side.
+% Left panel (Layer 2 - Ana): shows ARP table manipulation at each hop, MAC address
+% rewriting, IP header unchanged end to end, traceroute seeing only source and destination.
+% Right panel (Layer 3 - this work): shows tun0 interception, IP TTL decremented at each
+% hop, kernel routing table consulted, traceroute seeing every intermediate hop.
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.86\textwidth]{FILENAME}
+% \caption{Comparison of Layer~2 (left) and Layer~3 (right) routing approaches. In the
+% Layer~3 case the relay path is visible to \texttt{traceroute} and compatible with all
+% Linux IP-layer tools.}
+% \label{fig:l2-vs-l3}
+% \end{figure}
+
+
+%% -----------------------------------------------------------------------
+\section{Thread Architecture}
+\label{sec:threads}
+
+The system runs eight concurrent threads per node. Table~\ref{tab:threads} summarises their
+roles and the protocols they use.
+
+\begin{table}[H]
 \centering
-\caption{Thread model — one instance per node}
+\caption{Threads running per node and their responsibilities.}
 \label{tab:threads}
-\begin{tabular}{lp{8cm}}
+\begin{tabular}{lll}
 \toprule
-\textbf{Thread} & \textbf{Responsibility} \\
+\textbf{Thread} & \textbf{Entry point} & \textbf{Role} \\
 \midrule
-\texttt{receiver\_loop}        & UDP receive: MATRIX beacons \\
-\texttt{tx\_loop}              & TX: sends MATRIX beacon + queued MSG\_DATA during own slot \\
-\texttt{tcp\_rx\_peer\_loop[i]} & TCP receive for each peer $i$: MSG\_DATA delivery or relay \\
-\texttt{tun\_reader\_loop}     & Reads IP packets from TUN, pushes to \texttt{tx\_queue} \\
-\texttt{tcp\_accept\_loop}     & Accepts incoming TCP connections \\
-\texttt{tcp\_keepalive\_loop}  & Monitors TCP connections, reconnects, manages recovery hysteresis \\
-\texttt{event\_handler\_loop}  & Handles topology events; triggers routing recomputation \\
-\texttt{video\_feedback\_loop} & N1 only: listens for video loss feedback from base station \\
+Receiver          & \texttt{receiver\_loop()}        & Receives MATRIX beacons via UDP \\
+Transmitter       & \texttt{tx\_loop()}               & Sends MATRIX (UDP) and MSG\_DATA (TCP) during slot \\
+TUN reader        & \texttt{tun\_reader\_loop()}      & Reads IP packets from \texttt{tun0}, pushes to tx\_queue \\
+Event handler     & \texttt{event\_handler\_loop()}   & Processes topology events, triggers re-routing \\
+TCP acceptor      & \texttt{tcp\_accept\_loop()}      & Accepts incoming TCP connections from peers \\
+TCP keepalive     & \texttt{tcp\_keepalive\_loop()}   & Monitors peer connections, reconnects dead ones \\
+TCP RX (per peer) & \texttt{tcp\_rx\_peer\_loop()}    & Receives MSG\_DATA from one connected peer \\
+Video feedback    & \texttt{video\_feedback\_loop()}  & Receives quality reports on UDP port 9002 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+The transmitter thread is the timing-critical component. It wakes at the beginning of the
+node's assigned TDMA slot, drains the transmission queue, and sends each queued packet
+over the appropriate TCP connection to the next-hop peer determined by the routing module.
+The TUN reader thread runs continuously, capturing outgoing IP packets from \texttt{tun0} and
+pushing them into the transmission queue with the destination peer ID, decoupling packet
+capture from the slot-timed transmission.
 
-\section{MATRIX Protocol and Topology Dissemination}
-\label{sec:matrix}
+The TCP acceptor thread executes a blocking \texttt{accept()} call and, upon each new
+connection, records the peer socket in the \texttt{tcp\_sockfd[]} array and spawns a dedicated
+\texttt{tcp\_rx\_peer\_loop} thread for that peer. Each per-peer receive thread calls
+\texttt{recv()} with \texttt{MSG\_WAITALL} in a tight loop, processing one complete framed
+message per iteration: it first reads the four-byte length prefix, then reads exactly that many
+bytes for the payload. On delivery, it passes the packet to the routing layer, which either
+injects it into \texttt{tun0} for local consumption or pushes it back into the transmission
+queue for forwarding.
 
-The MATRIX module is responsible for maintaining a consistent view of the
-network topology. Each node broadcasts a \emph{MATRIX beacon} (UDP,
-port $7000 + \text{node\_id}$) once per TDMA frame, at the beginning of its
-assigned slot. The beacon carries the TDMA header and a serialised
-representation of the sender's link quality vector.
+The TCP keepalive thread complements the kernel-level keep-alive mechanism with an
+application-level health check. Every second it probes each peer socket with a non-blocking
+\texttt{recv()} call using \texttt{MSG\_PEEK | MSG\_DONTWAIT}. A return value of zero
+indicates a graceful connection close; a negative return with a non-recoverable error indicates
+a reset or broken link. In either case the socket is closed, the \texttt{tcp\_sockfd[]} entry is
+set to $-1$, and a reconnection attempt is scheduled. A race condition between the keepalive
+thread closing a socket and a receive thread still using it is avoided by copying the file
+descriptor under the TCP mutex before use and verifying that the descriptor has not been
+replaced before closing it.
 
-\subsection{Beacon Structure}
+\subsection{Synchronisation Primitives}
 
-Each MATRIX beacon is prefixed by a \texttt{tdma\_header\_t} structure
-containing:
-
-\begin{itemize}
-  \item \texttt{type}: packet type identifier (\texttt{MATRIX} or \texttt{MSG\_DATA})
-  \item \texttt{slot\_id}: sender's node identifier
-  \item \texttt{seq\_num}: monotonically increasing sequence number
-  \item \texttt{timestamp}: sender's local time (seconds, floating point)
-  \item \texttt{slot\_begin\_ms}, \texttt{slot\_end\_ms}: current slot boundaries for synchronization
-\end{itemize}
-
-The MATRIX payload appended after the header contains the sender's row of the
-link quality matrix: one quality byte per peer node (0--100 scale).
-
-\subsection{Topology Convergence}
-
-Each node receiving a MATRIX beacon updates its local copy of the link quality
-matrix for the sender's row. When any entry changes beyond a hysteresis
-threshold, the MATRIX module fires a \texttt{EVENT\_TOPOLOGY\_CHANGED} event
-into the event queue. The event handler thread wakes up, calls
-\texttt{routing\_manager\_recompute()}, and the routing module installs new
-kernel routes.
-
-This design decouples topology discovery (beacon reception, every 150\,ms)
-from routing computation (event-driven, only when topology changes), keeping
-the routing computation off the critical TX path.
-
-
-\section{Link Quality Metric}
-\label{sec:link-quality}
-
-A key contribution of this work is the introduction of a per-link quality
-score $q_{ij} \in [0, 100]$ that captures the observed reliability of the
-link from node $j$ to node $i$ from the perspective of node $i$. The score
-is maintained by the MATRIX module and updated on every received beacon and
-on every detected slot miss.
-
-\subsection{Score Update Rules}
-
-The quality score is updated according to the following rules:
-
-\begin{enumerate}
-
-  \item \textbf{Beacon received}: $q_{ij} \mathrel{+}= 3$, capped at 100.
-  This rewards active neighbours with a gradual quality increase.
-
-  \item \textbf{Consecutive slot misses $\geq$ \texttt{MISS\_THRESHOLD} (5)}:
-  $q_{ij} \mathrel{-}= 40$. Applied when the TX thread detects that a node
-  has not transmitted in the last five consecutive frames.
-
-  \item \textbf{Node timeout ($>$ 2\,s without beacon)}: $q_{ij} \mathrel{-}= 20$,
-  and the node is removed from the active set if the score reaches zero.
-
-  \item \textbf{Video loss feedback (N1 only)}: $q_{i3} \leftarrow 0$ immediately,
-  forcing route recomputation and relay activation.
-
-\end{enumerate}
-
-The asymmetry between reward (+3) and penalty ($-40$, $-20$) was deliberately
-chosen to make the system fast to detect degradation and slow to reward
-recovery, providing a natural hysteresis against oscillation between routes.
-
-\subsection{WiFi Signal Quality Override}
-
-In addition to beacon-based statistics, the system reads per-peer RSSI
-measurements from the Wi-Fi driver via \texttt{iw station dump} and uses the
-reported signal quality to override the beacon-derived score when the physical
-signal quality is significantly worse than the logical score would indicate.
-This provides an additional early warning mechanism for imminent link failure.
-
-
-\section{MST-Based Routing}
-\label{sec:routing-alg}
-
-The routing manager translates the current link quality matrix into a
-forwarding table that maps each destination node to a next-hop node.
-
-\subsection{Spanning Tree Computation}
-
-The MATRIX module computes a Minimum Spanning Tree over the weighted graph
-defined by the link quality matrix. Prim's algorithm is run from the local
-node as the root, using $100 - q_{ij}$ as edge weights (higher quality $\to$
-lower weight $\to$ preferred in the MST). The result is an $N \times N$
-adjacency matrix \texttt{spanning\_tree[i][j]}, where entry $(i,j) = 1$ if
-and only if the edge $i$--$j$ is in the MST.
-
-\subsection{Next-Hop Derivation}
-
-The routing manager builds a linked list of \emph{primary} route nodes (direct
-MST neighbours) and, for each primary node, a linked list of \emph{secondary}
-nodes reachable through it. The data structure used is:
-
-\begin{lstlisting}[language=C, caption=Route node linked list]
-typedef struct route_node {
-    uint8_t node_id;
-    uint8_t quality;
-    struct route_node *reachable;  /* nodes reached via this hop */
-    struct route_node *next;       /* next primary neighbour */
-} route_node_t;
-\end{lstlisting}
-
-Given this structure, next-hop lookup for destination $d$ is performed by
-first searching the \texttt{reachable} list of each primary node (multi-hop
-case), then falling back to a direct match in the primary list (single-hop
-case). The result is stored in a flat routing table indexed by active node
-position:
-
-\begin{lstlisting}[language=C, caption=Routing table entry]
-typedef struct {
-    uint8_t destination;
-    uint8_t next_hop;
-    uint8_t quality;
-    bool    valid;
-} route_entry_t;
-\end{lstlisting}
-
-
-\section{Linux Kernel Integration}
-\label{sec:kernel}
-
-A central design goal of this work is to perform packet relay using the Linux
-kernel's native IP forwarding, avoiding a user-space relay loop. This section
-describes the two-table architecture that achieves this.
-
-\subsection{TUN Virtual Interface}
-
-Each node opens a TUN virtual network interface (\texttt{tun\textit{N}}, where
-$N$ is the node identifier) and assigns it the IP address \texttt{10.0.0.\textit{N}/24}.
-The interface is brought up and configured on startup by \texttt{tun\_open()}.
-
-Application traffic destined for other nodes is routed by the kernel into the
-TUN interface according to the routing rules described below. The TUN reader
-thread reads these IP packets, wraps them in the TDMA framing, and enqueues
-them for transmission in the next TX slot.
-
-IP packets received from the wireless channel are unwrapped and written back
-into the TUN interface via \texttt{tun\_write()}, causing the kernel to deliver
-them to the local application or forward them according to the routing rules.
-
-\subsection{Dual Routing Table Architecture}
-\label{subsec:dual-table}
-
-Two kernel routing tables are used to differentiate between \emph{own traffic}
-(generated by applications running on this node) and \emph{relay traffic}
-(packets that arrived from another node and must be forwarded):
-
-\begin{description}
-
-  \item[Table \texttt{main} (default)] Handles traffic \emph{originating} at
-  this node. For each destination $d$, the route is:
-  \begin{center}
-  \texttt{10.0.0.\textit{d} via 10.0.0.\textit{nh} dev tun\textit{N}}
-  \end{center}
-  where \textit{nh} is the next-hop node identifier. This causes the kernel to
-  send the packet into \texttt{tun\textit{N}}, where the TUN reader intercepts
-  it, wraps it in the TDMA MSG\_DATA format, and queues it for TCP delivery
-  during the TX slot.
-
-  \item[Table 200] Handles \emph{relay traffic}: packets whose source IP
-  is in \texttt{10.0.0.0/24} but not the local node's own address. For each
-  destination $d$, the route is:
-  \begin{center}
-  \texttt{10.0.0.\textit{d} via 172.20.10.\textit{nh} dev wlan0}
-  \end{center}
-  This causes the kernel to forward the packet directly via the physical Wi-Fi
-  interface to the next-hop node's physical IP, without passing through the
-  TUN device. The kernel's built-in IP forwarding performs this operation
-  with no user-space involvement.
-
-\end{description}
-
-The routing policy rule that directs relay traffic to table~200 is installed
-by \texttt{tun\_open()} at startup:
-
-\begin{lstlisting}[language=bash, caption=IP policy rule for relay traffic]
-ip rule add from 10.0.0.0/24 \
-    not from 10.0.0.N/32 lookup 200
-\end{lstlisting}
-
-This rule matches packets whose source address is in the mesh subnet but is
-not the local node's own address, directing them to table~200. Own traffic
-(source = local node) is not matched and remains in table~\texttt{main}.
-
-Figure~\ref{fig:dual-table} illustrates the forwarding path for both cases.
-
-%% \begin{figure}[h]
-%% \centering
-%% \includegraphics[width=0.85\textwidth]{figures/routing_diagram.png}
-%% \caption{Dual routing table architecture. Own traffic (source = local) uses
-%%          table main via TUN and the TDMA channel. Relay traffic (source =
-%%          remote) uses table 200 via wlan0 and kernel IP forwarding.}
-%% \label{fig:dual-table}
-%% \end{figure}
-
-\subsection{Route Installation via Netlink}
-
-Kernel routes are installed and removed programmatically via the Linux Netlink
-interface (\texttt{NETLINK\_ROUTE}), using \texttt{RTM\_NEWROUTE} and
-\texttt{RTM\_DELROUTE} messages. This avoids the overhead and security
-implications of invoking \texttt{ip} as a subprocess and allows routes to be
-updated atomically within the routing recomputation path.
-
-Before each recomputation, all previously installed /32 routes in both tables
-are flushed by \texttt{ip\_route\_flush\_mesh()}, ensuring that stale routes
-from the previous topology are not left in the kernel after a link change.
-
-
-\section{Packet Transport: TCP and MSG\_DATA}
-\label{sec:transport}
-
-Data packets (video frames, telemetry, commands) are transported between nodes
-over persistent TCP connections (port $8000 + \text{peer\_id}$). TCP was
-chosen over UDP for data delivery because it provides:
+Four synchronisation primitives protect shared state accessed by multiple threads:
 
 \begin{itemize}
-  \item Reliable, in-order delivery of IP packet payloads
-  \item Flow control that naturally adapts to available bandwidth
-  \item Connection state that signals link failure (TCP RST / keepalive timeout)
+  \item \texttt{tcp\_mutex}: protects \texttt{tcp\_sockfd[]} against concurrent reads by the
+    keepalive thread and writes by the acceptor thread.
+  \item \texttt{tx\_queue->lock}: an internal mutex protecting the circular buffer head and
+    tail indices during push and pop operations.
+  \item \texttt{g\_matrix\_mutex}: protects the global connectivity matrix during updates by
+    the receiver thread and reads by the routing and synchroniser modules.
+  \item Event queue lock: a producer-consumer mutex protecting the event queue shared
+    between the receiver thread (producer) and the event handler thread (consumer).
 \end{itemize}
 
-Each MSG\_DATA packet is framed as \texttt{[4-byte length][tdma\_header\_t][msg\_data\_hdr\_t][IP payload]}.
-The \texttt{msg\_data\_hdr\_t} carries source and destination node identifiers,
-a sequence number used for PDR estimation, and the IP payload length.
 
-\subsection{Transmit Queue and Slot Budget}
+%% -----------------------------------------------------------------------
+\section{Data Structures}
+\label{sec:data-structures}
 
-The TUN reader thread continuously pushes incoming IP packets into a
-thread-safe FIFO queue (\texttt{tx\_queue}). The TX thread drains this queue
-during the node's slot, subject to two budget constraints:
+\subsection{Transmission Queue}
 
-\begin{enumerate}
-  \item \textbf{Time budget}: if \texttt{get\_time\_us() $\geq$ slot\_end}, the
-  TX thread stops sending and returns remaining packets to the queue for the
-  next frame.
-  \item \textbf{Byte budget} (\texttt{MAX\_BYTES\_SLOT}): computed from the
-  assumed Wi-Fi link rate (24\,Mbps) and the usable slot duration (45\,ms),
-  ensuring that a single node never transmits more data than the channel can
-  carry in one slot.
-\end{enumerate}
+The transmission queue (\texttt{tx\_queue.c}) is a circular buffer that stores packets captured
+from \texttt{tun0} until the transmitter thread can send them during the node's TDMA slot.
+Its parameters are a capacity of 64 packets (\texttt{TX\_QUEUE\_CAPACITY}) and a maximum
+entry size of 2048 bytes (\texttt{TX\_QUEUE\_MAX\_PKT\_SIZE}). When the buffer is full, the
+oldest packet at the head is discarded to make room for the new arrival (tail-drop policy),
+and a warning is logged. Push and pop operations are non-blocking and mutex-protected.
 
-If the queue grows beyond 10 packets, a warning is logged indicating that the
-offered load exceeds the slot capacity and delay is accumulating. To prevent
-unbounded delay accumulation, the queue implements a \emph{tail-drop} policy:
-when the queue is full, the oldest packet is discarded rather than the newest,
-ensuring that queued packets remain as fresh as possible.
+The tail-drop policy is appropriate for video streaming: a packet that has been waiting in
+the queue through one or more missed slots is less valuable to the receiver than a fresh
+frame, so discarding old entries on overflow is preferable to discarding new ones.
 
+\subsection{Routing Linked List}
 
-\section{Relay Forwarding Architecture}
-\label{sec:relay}
+The routing module retains the linked-list structure introduced by
+Morais~\cite{morais2024synchronization}: primary list entries represent directly connected
+neighbours, and each primary entry carries a secondary list of all nodes reachable through
+that neighbour, as described in Section~\ref{sec:related-work}. The \texttt{routingList\_t}
+type is unchanged. The difference lies in how MAC addresses are obtained: rather than
+embedding them in the MATRIX beacon, this work retrieves MAC addresses through a separate
+shared-memory structure populated by \texttt{matrix.c}, keeping the beacon compact.
 
-When the TCP RX thread receives a MSG\_DATA packet whose destination is not
-the local node, it writes the unwrapped IP packet into the local TUN interface
-via \texttt{tun\_write()}. The Linux kernel receives this IP packet from the
-TUN device and consults its routing tables:
+\subsection{Per-peer Quality State}
 
-\begin{enumerate}
-  \item The ip rule matches the packet (source = remote node in 10.0.0.0/24,
-  not local) $\to$ directs to table~200.
-  \item Table~200 contains a /32 route to the destination via the next-hop
-  physical IP on \texttt{wlan0}.
-  \item The kernel forwards the packet via \texttt{wlan0} directly to the
-  next-hop node, decrementing the IP TTL as required.
-\end{enumerate}
-
-This path is entirely within the kernel's forwarding engine. No user-space
-relay loop is involved; the TCP RX thread returns to listening immediately
-after the \texttt{tun\_write()} call.
-
-\subsection{Relay Delay and Queue Flushing}
-
-Since relay packets share the \texttt{tx\_queue} with local application
-traffic, the tail-drop policy and slot budget constraints described in
-Section~\ref{sec:transport} apply equally. When a topology change causes the
-relay route to change, \texttt{tx\_queue\_flush()} is called to discard all
-queued packets, preventing stale packets from being forwarded via an outdated
-next hop.
+Each peer is tracked through two fields: its TCP socket file descriptor in
+\texttt{tcp\_sockfd[]} and its link quality score maintained by \texttt{pdr.c}. The link
+quality score is an integer in the range $[0, 100]$, updated after every ten received packets
+and used as the edge weight in the Minimum Spanning Tree computation.
 
 
-\section{Video Quality Feedback Loop}
-\label{sec:feedback}
+%% -----------------------------------------------------------------------
+\section{Routing Algorithm}
+\label{sec:routing-algo}
 
-The video feedback loop provides a fast relay-activation path that bypasses
-the TDMA topology convergence delay. It is implemented as a closed loop
-between the base station (N3) and the robot (N1).
+The routing algorithm follows the MST-based proactive approach identified in
+Section~\ref{sec:routing-applicability}. At each topology update, the routing module reads the
+Spanning Tree computed by \texttt{matrix.c} from shared memory. It then runs a
+Depth-First Search (DFS) rooted at the local node over the Spanning Tree, enumerating all
+reachable nodes grouped by their first-hop neighbour. The DFS output for each first-hop
+neighbour is sorted with \texttt{qsort} by node identifier to produce the secondary linked
+list for that primary entry.
 
-\subsection{Loss Detection at the Base Station}
+The incremental update procedure is retained from the previous work: the sorted DFS output
+for each primary neighbour is compared against the existing secondary linked list in a single
+linear scan. Nodes present in the new output but absent from the existing list are inserted;
+nodes in the list but absent from the new output are removed. If no difference is detected
+for a primary neighbour, its secondary list is not modified. This keeps the number of list
+operations proportional to the size of the topology change rather than the total network size.
 
-The base station monitors the video UDP stream (port 5000) for interruptions.
-When no video packet arrives within a \texttt{VIDEO\_LOSS\_TIMEOUT} of 1.5\,s,
-the base station declares the stream lost and begins sending \texttt{"video\_poor"}
-messages to N1's IP address (10.0.0.1) on UDP port 9002, at a rate of one
-message per \texttt{FEEDBACK\_INTERVAL} (0.5\,s).
-
-\subsection{Feedback Processing at N1}
-
-N1 runs a dedicated \texttt{video\_feedback\_loop} thread that listens on
-port 9002. On receiving a \texttt{"video\_poor"} message, the thread:
-
-\begin{enumerate}
-  \item Sets the global flag \texttt{g\_video\_poor\_active = 1}.
-  \item Calls \texttt{MATRIX\_setLinkQuality(3, 0)}, immediately setting the
-  quality of the link to N3 to zero.
-  \item Enqueues an \texttt{EVENT\_TOPOLOGY\_CHANGED} event.
-\end{enumerate}
-
-The event handler thread wakes up, calls \texttt{routing\_manager\_recompute()},
-and the routing module selects N2 as the next hop to N3 (since $q_{13} = 0$
-makes the direct link the worst option in the MST computation). Kernel routes
-are updated accordingly within microseconds of the event firing.
-
-\subsection{Recovery Hysteresis}
-
-Once the direct link recovers (TCP reconnects), the system does not immediately
-restore the direct route. Instead, a \emph{recovery grace period} of 8\,s
-(\texttt{RECOVERY\_GRACE\_US}) must elapse \emph{and} the PDR to the peer must
-exceed 60\% (\texttt{RECOVERY\_PDR\_MIN}) before \texttt{g\_video\_poor\_active}
-is cleared and the link quality is restored. This hysteresis prevents rapid
-oscillation between routes when a link is marginal.
-
-If no \texttt{"video\_poor"} feedback arrives for 15\,s (\texttt{POOR\_RECOVERY\_US}),
-N1 autonomously resets the link quality to 80, allowing the MST to re-evaluate
-the direct path.
+When a packet must be forwarded, \texttt{routing\_manager\_lookup()} traverses the primary
+linked list and searches each secondary list for the destination identifier. The first matching
+primary entry yields the next-hop peer ID, which indexes into \texttt{tcp\_sockfd[]} to obtain
+the TCP socket for transmission.
 
 
-\section{Synchronization: RA-TDMAs+ Slot Algorithm}
-\label{sec:sync}
+%% -----------------------------------------------------------------------
+\section{Slot Data Control}
+\label{sec:slot-control}
 
-Slot synchronization is handled by the \texttt{sync.c} module, which implements
-the algorithm from Diogo Almeida~\cite{almeida2023synchronization}.
+A limitation of the previous routing work was the absence of any mechanism to limit the
+volume of data transmitted within a single TDMA slot. Without such a mechanism, a burst
+of queued packets could cause the transmitter thread to overstay its slot, causing its
+transmissions to overlap with the following node's slot and degrading synchronisation quality.
 
-\subsection{Delay Computation}
+This work introduces a per-slot byte budget, \texttt{MAX\_BYTES\_SLOT}, computed from the
+configured WiFi link rate and the slot duration. The transmitter thread tracks elapsed time
+and stops dequeuing when the slot boundary is reached:
 
-For each received MATRIX beacon, \texttt{compute\_delay()} estimates the
-propagation delay from the sender's perspective by comparing the observed
-reception time with the expected reception time. The key quantities are:
+\begin{lstlisting}[language=C,
+    caption={Back-pressure mechanism in the transmitter thread (\texttt{tx\_loop})},
+    label={lst:backpressure}]
+while ((pkt = tx_queue_pop(node->tx_queue)) != NULL) {
+    if (get_time_us() >= slot_end) {
+        tx_queue_push(node->tx_queue, pkt->data,
+                      pkt->len, pkt->dst_id);
+        break; /* return packet to queue for next slot */
+    }
+    /* send packet over TCP to next-hop peer */
+}
+\end{lstlisting}
 
-\begin{itemize}
-  \item \texttt{msg\_position}: position of the received packet within the
-  sender's slot, computed from the timestamp in the beacon header.
-  \item \texttt{ideal\_slot\_init}: when the sender's slot \emph{should}
-  have begun, according to the receiver's current slot boundaries.
-  \item \texttt{delay\_ms = cur\_time - msg\_position - ideal\_slot\_init}
-\end{itemize}
+If the slot boundary is reached before the queue is empty, the current packet is pushed back
+into the queue and the loop exits. The packet will be sent in the node's next slot, one round
+later. This back-pressure mechanism ensures that the transmitter thread always releases the
+channel before its slot expires, regardless of queue depth or packet size.
 
-\subsection{Slot Adjustment}
 
-At the end of each frame, \texttt{sync\_adjust\_slot()} computes the mean
-delay observed from each neighbour during that frame, takes the maximum across
-all neighbours, and advances the local slot boundaries by that amount (limited
-to \texttt{SYNC\_CSI} $\times$ slot\_width to prevent overcorrection). A small
-random component (0--20\%) is added to the adjustment to desynchronise the
-convergence cycles of different nodes and prevent oscillation.
+%% -----------------------------------------------------------------------
+\section{Link Quality Monitoring}
+\label{sec:pdr}
+
+The routing decision in the previous work was based solely on the binary connectivity matrix,
+treating all present links as equivalent regardless of their reliability. This work introduces
+per-link Packet Delivery Ratio (PDR) monitoring through \texttt{pdr.c}.
+
+Each received \texttt{MSG\_DATA} packet carries a monotonically increasing sequence number
+in the TDMA header. The PDR module counts received packets and compares the sequence
+against the expected count, updating the estimate for the corresponding peer after every ten
+received packets:
+
+\begin{equation}
+\mathrm{PDR}_{ij} = \frac{\text{packets received from peer } j}{%
+  \text{packets expected from peer } j} \times 100
+\label{eq:pdr}
+\end{equation}
+
+The PDR value, an integer in $[0,\,100]$, is used as the edge weight in the MST computation.
+Because the MST minimises total edge weight, a link with lower PDR (higher loss rate) has
+a higher weight and is less likely to be selected when a more reliable alternative exists.
+
+\subsection{Video Quality Feedback and Hysteresis}
+
+An external video quality monitor can signal degradation by sending a \texttt{video\_poor}
+message to UDP port 9002. Upon reception, the video feedback thread sets a flag that forces
+the PDR of the affected relay link to zero, immediately triggering an MST recomputation and
+path switch.
+
+Recovery is governed by a hysteresis mechanism to prevent rapid oscillation between paths
+when link quality is near a threshold. The system re-enables the affected link only when the
+measured PDR has recovered above 60\,\% (\texttt{RECOVERY\_PDR\_MIN}) and eight seconds
+have elapsed since the degradation event (\texttt{RECOVERY\_GRACE\_US}). Both conditions
+must be satisfied simultaneously before the link is restored to the MST candidate set.
+
+
+%% -----------------------------------------------------------------------
+\section{End-to-End Packet Flow}
+\label{sec:pkt-flow}
+
+This section traces a video packet from source application to destination through a three-node
+relay topology to illustrate how all components interact.
+
+\paragraph{Source node.}
+The video application writes IP packets addressed to the destination into \texttt{tun0}. The
+TUN reader thread captures each packet, extracts the destination identifier from the IP
+header, and pushes the packet into the transmission queue. During the source node's TDMA
+slot, the transmitter thread pops the packet, calls \texttt{routing\_manager\_lookup()} to
+obtain the next-hop peer ID, and sends the framed packet over the TCP connection to that
+peer. If the slot boundary is reached, remaining packets are held for the following round.
+
+\paragraph{Relay node.}
+The \texttt{tcp\_rx\_peer\_loop} thread receives the framed packet, updates the PDR estimate
+for the source link, and inspects the destination IP address. Because the destination is not
+the local node, the packet is written to \texttt{tun0} via \texttt{tun\_write()}. The Linux
+kernel routes it through the IP forwarding path, placing it back on \texttt{tun0} for the
+next outgoing TCP send during the relay's slot.
+
+\paragraph{Destination node.}
+The \texttt{tcp\_rx\_peer\_loop} thread receives the packet and writes it to \texttt{tun0}.
+The kernel delivers the IP datagram to the application. Because TCP has ensured in-order
+delivery, the application receives a contiguous, gapless sequence of video frames.
+
+% TODO FIGURE: End-to-end packet flow diagram
+% Suggested image: horizontal diagram with three boxes (Source, Relay, Destination).
+% Inside each box show the relevant threads/components as smaller labelled boxes.
+% Arrows between boxes show the TCP connections. Inside source: application -> tun0 ->
+% tun_reader -> tx_queue -> tx_loop -> TCP out. Inside relay: TCP in -> tcp_rx_peer ->
+% pdr_update -> tun_write -> tun0 -> kernel forward -> tx_queue -> tx_loop -> TCP out.
+% Inside destination: TCP in -> tcp_rx_peer -> tun_write -> tun0 -> application.
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.92\textwidth]{FILENAME}
+% \caption{End-to-end packet flow through a three-node relay topology. Each labelled block
+% corresponds to a thread or kernel component; arrows show the data path from the video
+% source application to the destination application.}
+% \label{fig:pkt-flow}
+% \end{figure}
+
+
+%% -----------------------------------------------------------------------
+\section{Summary}
+\label{sec:impl-summary}
+
+This chapter described the design and implementation of a Layer~3 routing system for
+RA-TDMAs+ mesh networks. The communication stack was separated into a UDP control
+plane for MATRIX beacons and a TCP data plane for application data, ensuring reliable
+video delivery without modifying the beacon mechanism. Layer~3 forwarding through the
+TUN interface makes the relay path visible to standard IP tools and compatible with Linux
+networking subsystems. Per-link PDR monitoring weights the MST computation so that
+unreliable links are avoided when alternatives exist. A slot byte budget with back-pressure
+prevents the transmitter from overrunning its slot. The following chapter presents the
+experimental evaluation of this system on physical robotic hardware.
