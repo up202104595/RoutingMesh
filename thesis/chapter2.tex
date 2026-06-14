@@ -441,7 +441,19 @@ beginning of the node's slot and sleeps for the remainder of the frame; when
 active, it dequeues packets, prepends a TDMA header, and transmits them via a
 UDP socket over \texttt{wlan0}. The TDMA header carries the packet type, a
 global sequence number, the transmission offset $p_k$ relative to the slot
-start, the node ID, and the current slot boundaries. The receive thread (RX)
+start, the node ID, and the current slot boundaries.
+Figure~\ref{fig:tdma-header} shows the layout of the encapsulated packet.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\textwidth]{figures/headerstdma}
+\caption{TDMA packet encapsulation: an application payload (Transport and
+Application layers) is wrapped in a TDMA header and transmitted over a UDP
+socket on the \texttt{wlan0} interface.}
+\label{fig:tdma-header}
+\end{figure}
+
+The receive thread (RX)
 listens on the same UDP socket, strips incoming TDMA headers, records the
 per-packet timing information needed for synchronisation, and returns payloads
 to the application. The event-handler thread processes control events received
@@ -462,8 +474,20 @@ the TDMA transport layer transparent to higher layers.
 \subsection{Topology-Tracking Module}
 
 The topology-tracking module (\texttt{matrix.c}) implements the connectivity
-matrix mechanism described in Section~\ref{sec:ra-tdma}. Matrix state is held
-in a packed structure:
+matrix mechanism described in Section~\ref{sec:ra-tdma}. Each beacon packet
+broadcast by a node contains four fields: the number of active nodes, the list
+of their identifiers, the full connectivity matrix, and a row of age values.
+Figure~\ref{fig:matrix-packet} illustrates this structure.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/matrixpacket}
+\caption{Structure of the matrix beacon packet broadcast by each node at the
+start of its slot.}
+\label{fig:matrix-packet}
+\end{figure}
+
+Matrix state is held in a packed structure:
 
 \begin{lstlisting}[language=C,
     caption={Connectivity matrix structure (\texttt{matrix.c})},
@@ -508,7 +532,18 @@ boundary. The module reads the per-packet delays from shared memory, filters
 them through the spanning tree to exclude cyclic paths, averages the filtered
 delays by sender ID, computes $\Delta(r)$ bounded by 25\% of the current slot
 duration, and sends the result to \texttt{TDMA\_Core} as an event on the
-AF\_UNIX socket.
+AF\_UNIX socket. Figure~\ref{fig:sync-module} illustrates the execution flow
+of the Synchroniser within each round.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/syncmodule}
+\caption{Execution flow of the Synchroniser module. At the end of each round
+it reads packet delays from shared memory, filters and averages them, computes
+the slot boundary shift $\Delta(r)$, and notifies \texttt{TDMA\_Core} before
+the next round begins.}
+\label{fig:sync-module}
+\end{figure}
 
 
 %% -----------------------------------------------------------------------
