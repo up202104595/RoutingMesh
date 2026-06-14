@@ -418,6 +418,17 @@ separates a core scheduling module from a set of independently loaded
 plug-in modules, allowing components to be added or replaced without
 disrupting the core. The modules used in this work are the
 topology-tracking module (\texttt{matrix.c}) and the Synchroniser.
+Figure~\ref{fig:tdma-framework} shows the overall architecture.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.72\textwidth]{tdmaframeworkDiogo}
+\caption{Architecture of the TDMA framework~\cite{almeida2023synchronization}.
+The \texttt{TDMA\_Core} communicates with the application through the TUN
+virtual device and with plug-in modules through AF\_UNIX local sockets
+(red) and shared memory (green).}
+\label{fig:tdma-framework}
+\end{figure}
 
 \subsection{Core Scheduling Module}
 
