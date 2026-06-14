@@ -1102,27 +1102,9 @@ the underlying TDMA framework.
 \section{Summary}
 \label{sec:background-summary}
 
-This chapter established the theoretical and practical background for the routing work described
-in the remainder of this dissertation. The need for multi-hop routing arises from the limited
-radio range of individual nodes in a MANET, combined with the continuous topology changes
-caused by node mobility. RA-TDMAs+ addresses the medium access and synchronisation
-problems through a clockless distributed TDMA protocol that also disseminates a continuously
-updated connectivity matrix to all nodes via the MATRIX beacon. This matrix provides a global
-view of the topology that serves as the direct foundation for routing without requiring any
-additional control traffic.
-
-Among the routing approaches reviewed, reactive protocols were ruled out because route
-discovery is redundant given the already-available topology and because TDMA slot scheduling
-introduces prohibitive per-hop discovery latency. Standard proactive protocols add control
-overhead that duplicates functionality already present in the MATRIX beacon. A proactive
-MST-based strategy that operates directly on the existing Spanning Tree maintained by
-\texttt{matrix.c} was identified as the natural choice, reusing available infrastructure with
-negligible additional computation. This is the same conclusion reached by
-Morais~\cite{morais2024synchronization}, whose Layer 2 routing implementation on
-AlphaBot2-Pi robots provided the first experimental validation of MST-based routing in
-RA-TDMAs+ networks. Her work demonstrated multi-hop video streaming in practice and
-defined the routing matrix, linked-list data structures, and ARP-based forwarding mechanism
-that constitute the reference architecture for this research area. The limitations of the Layer 2
-approach, in particular the invisibility of relay paths to standard IP tools and the absence of
-integration with Linux networking subsystems, motivate the exploration of an alternative
-architecture, described in subsequent chapters.
+This chapter surveyed the technical context in which the routing mechanism described in this
+dissertation was developed. The previous work by Morais~\cite{morais2024synchronization}
+constituted a valuable first step, but the implementation was incomplete, exhibited runtime
+instability, and required significant changes before it could serve as a production-ready
+foundation. The absence of the source code made incremental improvement impractical,
+motivating the development of a new system from scratch, described in the following chapters.
