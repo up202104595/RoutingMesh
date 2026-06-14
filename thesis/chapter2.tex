@@ -1075,9 +1075,23 @@ them and complicating debugging. Linux networking subsystems operating at the IP
 including traffic shaping with \texttt{tc}, policy routing tables, and firewall rules with
 \texttt{iptables}, cannot interact with a forwarding mechanism that operates below them.
 The implementation also exhibited system-level instability during operation, with runtime
-failures of undetermined origin. Finally, the source code was not made available for inspection
-or reuse; only the TDMA framework of Almeida~\cite{almeida2023synchronization} was
-accessible as a starting point for subsequent work.
+failures of undetermined origin.
+
+A further limitation concerns the management of data sent within each TDMA slot. No
+mechanism was implemented to control or limit the volume of data placed in the transmission
+queue per slot, leaving the slot window unprotected against overflow when application traffic
+exceeded the available capacity. Related to this, no link-quality metrics were integrated into
+the routing decision: the MST was derived solely from the binary connectivity matrix, with no
+consideration of packet delivery ratios, received signal strength, or any other indicator of
+link reliability. This means that a weak but nominally connected link was treated identically to
+a strong one, with no mechanism to prefer more reliable paths.
+
+Finally, the source code of the routing module was not made available for inspection or reuse.
+Only the TDMA framework of Almeida~\cite{almeida2023synchronization} was accessible as a
+starting point. The combination of these constraints, together with the architectural limitations
+of the Layer~2 approach, motivated the decision to build an entirely new routing system from
+scratch, adopting a different operating layer and different design principles while reusing only
+the underlying TDMA framework.
 
 
 
