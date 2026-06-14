@@ -64,8 +64,10 @@ at the network level.
 
 \subsection{TCP Socket Configuration}
 
-The TCP sockets are configured to minimise latency and to detect dead peers quickly, using
-the socket options listed in Listing~\ref{lst:tcp-opts}.
+The TCP sockets are configured with a set of options that are essential for correct and
+low-latency operation. Without each option the system would either introduce unacceptable
+delays, fail to detect broken connections, or block indefinitely and disrupt the TDMA slot
+schedule. Listing~\ref{lst:tcp-opts} shows the options applied to every peer connection.
 
 \begin{lstlisting}[language=C,
     caption={TCP socket options applied to each peer connection},
@@ -79,13 +81,48 @@ setsockopt(fd, SOL_SOCKET,  SO_SNDTIMEO,   &tv_snd,   sizeof(tv_snd));
 setsockopt(fd, SOL_SOCKET,  SO_RCVTIMEO,   &tv_rcv,   sizeof(tv_rcv));
 \end{lstlisting}
 
-\texttt{TCP\_NODELAY} disables Nagle's algorithm, which would otherwise buffer small packets
-and introduce tens of milliseconds of additional latency before transmission.
-\texttt{SO\_KEEPALIVE} enables TCP-level keep-alive probes at the kernel level: after five
-seconds of inactivity the kernel sends a probe, repeating every two seconds up to three times
-before closing the connection if no response is received. Send and receive timeouts prevent any
-socket operation from blocking indefinitely, which is critical in a real-time system where a
-blocked thread would disrupt the TDMA slot schedule.
+\textbf{\texttt{TCP\_NODELAY}} disables Nagle's algorithm, which accumulates outgoing data
+in a buffer until a full TCP segment is ready or a previous segment has been acknowledged.
+Without this option, small video packets would be held by the kernel for up to 200\,ms
+waiting to be bundled with subsequent data. Since the transmitter thread must complete all
+sends within its TDMA slot window (50\,ms for a three-node network), a packet delayed by
+Nagle's buffering could miss the slot entirely and wait a full round before retransmission,
+introducing one frame period of avoidable latency per hop.
+
+\textbf{\texttt{SO\_KEEPALIVE}} enables TCP-level keep-alive probes at the kernel level.
+Without it, if a peer node moves out of radio range or crashes without sending a TCP FIN or
+RST, the local socket would remain in the \texttt{ESTABLISHED} state indefinitely. The routing
+module would continue directing packets toward the dead peer, those packets would queue in
+the transmission buffer, and no failure would ever be signalled to the application. The network
+would appear to the operator as if packets were being forwarded normally, while in reality they
+were being silently discarded.
+
+\textbf{\texttt{TCP\_KEEPIDLE}} sets the idle time before the first keep-alive probe is sent.
+The Linux default is 7200 seconds (two hours). In a robotic scenario where a node can move
+out of range in a matter of seconds, a two-hour detection timeout is entirely unusable. Setting
+this to 5 seconds ensures that an unresponsive peer is probed within five seconds of the last
+received data.
+
+\textbf{\texttt{TCP\_KEEPINTVL}} and \textbf{\texttt{TCP\_KEEPCNT}} control how often probes
+are repeated and how many failures are tolerated before the connection is declared dead. With
+the values used (interval of 2\,s, count of 3), the worst-case detection time after the idle
+period expires is $5 + 3 \times 2 = 11$\,s. Under the Linux defaults (interval of 75\,s, count
+of 9) this would be $7200 + 9 \times 75 = 7875$\,s, more than two hours, which is
+impractical for a mobile network.
+
+\textbf{\texttt{SO\_SNDTIMEO}} applies a one-second timeout to send operations. Without it,
+if the TCP send buffer fills because the peer is slow or unreachable but not yet detected as
+dead, the \texttt{send()} call inside the transmitter thread would block indefinitely. Because the
+transmitter thread must release the channel before the TDMA slot boundary, an indefinitely
+blocking send would cause it to overstay the slot and transmit into the following node's
+allocation, corrupting slot boundaries for all nodes in the network.
+
+\textbf{\texttt{SO\_RCVTIMEO}} applies a two-second timeout to receive operations. Without
+it, the per-peer receive thread would block on \texttt{recv()} indefinitely if the peer stops
+sending data without closing the connection cleanly, a condition known as a half-open
+connection. The thread would remain stuck, the PDR module would stop receiving sequence
+number updates for that peer, and stale link quality data would continue to influence routing
+decisions long after the link had effectively failed.
 
 % TODO FIGURE: Protocol split diagram
 % Suggested image: two-column diagram. Left column labelled "Control Plane": MATRIX beacon
@@ -106,14 +143,15 @@ blocked thread would disrupt the TDMA slot schedule.
 \section{Architecture Overview}
 \label{sec:arch-overview}
 
-The overall system extends the TDMA framework with four new components:
-\texttt{routing.c}, which computes next-hop forwarding decisions from the Minimum Spanning
-Tree; \texttt{pdr.c}, which tracks per-link Packet Delivery Ratio; \texttt{tun.c}, which manages
-the TUN virtual network interface; and \texttt{tx\_queue.c}, a thread-safe circular buffer that
-decouples packet capture from slot-timed transmission. The existing \texttt{matrix.c} and
-\texttt{sync.c} modules are retained without modification. Communication between all
-components continues to use AF\_UNIX local sockets for control events and shared memory
-for high-frequency data exchange, consistent with the original framework architecture.
+The overall system extends the TDMA framework with four new modules: the
+\textbf{Routing module}, which computes next-hop forwarding decisions from the Minimum
+Spanning Tree; the \textbf{PDR module}, which tracks per-link Packet Delivery Ratio; the
+\textbf{TUN module}, which manages the TUN virtual network interface; and the
+\textbf{Transmission Queue}, a thread-safe circular buffer that decouples packet capture from
+slot-timed transmission. The existing Topology-Tracking module and Synchroniser module are
+retained without modification. Communication between all components continues to use
+AF\_UNIX local sockets for control events and shared memory for high-frequency data
+exchange, consistent with the original framework architecture.
 
 % TODO FIGURE: Updated framework architecture diagram
 % Suggested image: same layout style as the Diogo framework diagram in chapter 2, but with
