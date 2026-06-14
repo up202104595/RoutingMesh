@@ -259,43 +259,60 @@ longer overlap.
 
 RA-TDMA+~\cite{oliveira2018clockless} extended the RA-TDMA approach to
 fully dynamic mesh networks where the set of communicating nodes is not
-fixed and not all pairs of nodes have a direct radio link.
+fixed and not all pairs of nodes have a direct radio link. Two key
+mechanisms were introduced: a round structure that adapts dynamically
+to team membership changes, and a topology dissemination protocol that
+gives every node a globally consistent view of the network.
 
-\textbf{Round structure and slot assignment.}
-The active team at any moment is denoted $\tau_A$, and the number of
-active nodes is $N = |\tau_A|$, which changes as nodes join or leave.
-The round period $T_{up}$ is fixed according to the real-time
-requirements of the application. Each slot has duration
-$t_{slot} = T_{up} / N$, so that as the team grows, each node's slot
-becomes shorter and the round absorbs the new members without changing
-its total duration.
+\subsubsection{Round Structure and Slot Assignment}
 
-Slots are allocated in ascending order of each node's unique numeric
-ID. The node with the smallest ID in $\tau_A$ is assigned the first
-slot $s_0$, the next smallest gets $s_1$, and so on. As an example,
-if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$ then
-$\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$,
+The set of nodes currently active in the team is denoted $\tau_A$, and
+the number of active nodes is $N = |\tau_A|$. Both quantities change
+dynamically as nodes join or leave. The round period $T_{up}$ is
+chosen according to the real-time requirements of the application and
+remains fixed. Each node receives exactly one slot of duration:
+
+\begin{equation}
+t_{slot} = \frac{T_{up}}{N}
+\label{eq:slot-duration}
+\end{equation}
+
+This means that as the team grows, slot duration decreases
+proportionally, allowing new members to be absorbed without changing
+the total round period. Slots are assigned in ascending order of each
+node's unique numeric ID: the node with the smallest ID in $\tau_A$
+receives slot $s_0$, the next smallest $s_1$, and so on. For example,
+if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$, then
+$\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$, and
 $\text{ID}_5 \to s_2$~\cite{oliveira2018clockless}.
 
-\textbf{State dissemination via flooding with aggregation.}
-In a mesh network where some node pairs lack direct links, each node
-must share its local view of the topology with nodes it cannot reach
-directly. RA-TDMA+ uses a flooding-with-aggregation mechanism: at the
-start of each slot, a node broadcasts its current state (connectivity
-information, team membership, and an age variable for each piece of
-data) as a multicast message. Neighbours that receive this broadcast
-merge the new information with their own state and re-broadcast the
-merged result at the start of their own slots. Because each broadcast
-merges the freshest available data from all previously heard nodes,
-the information propagates outward one hop per round. After a bounded
-number of rounds equal to the diameter of the network, every node
-holds a globally consistent view of the full topology and team
-membership, regardless of which pairs of nodes have direct links.
+\subsubsection{State Dissemination: Flooding with Aggregation}
 
-\textbf{Topology tracking.}
-The network topology is represented by a connectivity matrix $M$ of
-size $N \times N$. Entry $M_{jk} = 1$ if node $j$ is currently
-receiving transmissions from node $k$, and $M_{jk} = 0$ otherwise:
+In a mesh network, not all nodes have a direct radio link to each
+other. A node that is two or more hops away from another cannot
+observe its transmissions directly. To overcome this, RA-TDMA+ uses a
+flooding-with-aggregation mechanism.
+
+At the start of each slot, the transmitting node broadcasts its current
+state as a multicast message. This state includes its local view of
+team membership, connectivity to neighbours, and an age variable for
+each piece of information that tracks how recently it was updated.
+Nodes that receive this broadcast merge the incoming state with their
+own local state, always keeping the most recently timestamped entry for
+each piece of data. At the start of their own slot, they rebroadcast
+the merged state.
+
+Through this process, information travels one hop per round. After a
+number of rounds equal to the network diameter, every node has received
+contributions from all others, achieving a globally consistent shared
+state. The age variables prevent old data from overwriting more recent
+updates as information circulates through the network.
+
+\subsubsection{Topology Tracking}
+
+The network topology is represented as a connectivity matrix $M$ of
+size $N \times N$. Each entry $M_{jk}$ is a binary value indicating
+whether node $j$ is currently receiving transmissions from node $k$:
 
 \begin{equation}
 M_{jk} = \begin{cases}
@@ -305,31 +322,37 @@ M_{jk} = \begin{cases}
 \label{eq:matrix}
 \end{equation}
 
-Each node is responsible for keeping its own row up to date: before
-broadcasting, it sets $M_{j\cdot}$ to reflect which neighbours it
-observed during the preceding rounds. When receiving a matrix from
-another node, it updates its local copy row by row, keeping the entry
-with the most recent age value so that stale information does not
-overwrite fresh data. The result is that every node maintains a
-consistent and globally accurate view of the topology within a bounded
-number of rounds, and changes propagate through the network in the
-round immediately following their occurrence.
+Each node is solely responsible for maintaining its own row of $M$.
+Before broadcasting, it updates row $j$ to reflect which neighbours
+it has heard in the most recent rounds. When a matrix is received from
+another node, only the rows for which the incoming age value is more
+recent than the local copy are updated. This ensures that topology
+changes propagate through the network within one round after they
+occur, while stale information is never able to overwrite fresh data.
 
-\textbf{Membership tracking.}
-Tracking which nodes belong to the active team $\tau_A$ is essential
-for computing the correct slot allocation. A new node's presence is
-detected when its row first appears in a received matrix broadcast;
-the receiving node adds a new row and column to its local matrix,
-increments $N$, and notifies the TDMA core to reorganise the round
-structure. The reorganised round is then propagated in the next
-broadcast, so all nodes converge to the same slot layout within a
-bounded number of rounds.
+\subsubsection{Membership Tracking}
 
-A node is considered to have left the team when its row in the matrix
-has not been refreshed for more than a threshold number of consecutive
-rounds (three rounds in the implementation used in this work). All
-nodes independently detect this condition, remove the corresponding
-row and column, decrement $N$, and contract the round accordingly.
+Keeping an accurate record of which nodes belong to $\tau_A$ is
+essential for correct slot allocation. Node additions and removals are
+detected through the connectivity matrix:
+
+\begin{itemize}
+  \item \textbf{Node joins:} when a new node's row appears for the
+    first time in a received matrix broadcast, the local copy is
+    extended with a new row and column, $N$ is incremented, and the
+    TDMA core is notified to reorganise the round. The updated layout
+    propagates through the network in the following broadcast.
+
+  \item \textbf{Node leaves:} when a node's row has not been refreshed
+    for more than a threshold number of consecutive rounds (three rounds
+    in the implementation used in this work), all nodes independently
+    detect the departure, remove the corresponding row and column,
+    decrement $N$, and contract the round accordingly.
+\end{itemize}
+
+Because every node applies the same deterministic rules to the same
+shared state, all nodes converge to the same slot layout without
+requiring any explicit coordination message.
 
 \subsection{RA-TDMAs+: Combined Operation}
 
