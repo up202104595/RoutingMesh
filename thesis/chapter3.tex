@@ -50,11 +50,18 @@ dedicated stream with no interference from control traffic.
 Because TCP is a byte-stream protocol with no inherent message boundaries, each logical
 message must carry its own length information. Every outgoing \texttt{MSG\_DATA} frame is
 prefixed with a four-byte network-order integer that encodes the total length of the following
-content:
+content. Figure~\ref{fig:frame-structure} shows the structure of both message types used in
+the system.
 
-\begin{center}
-\texttt{[ 4\,B length ][ tdma\_header\_t ][ msg\_data\_hdr\_t ][ IP payload ]}
-\end{center}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\textwidth]{frame_structure}
+\caption{Frame structure for the two message types. Type~1 (MATRIX Beacon) is sent over
+UDP and carries the TDMA header followed by the topology payload. Type~2 (\texttt{MSG\_DATA})
+is sent over TCP and carries the TDMA header, the \texttt{MSG\_DATA} header, and the
+original IP packet (Transport + Application layers) encapsulated transparently.}
+\label{fig:frame-structure}
+\end{figure}
 
 The receiver calls \texttt{recv()} with the \texttt{MSG\_WAITALL} flag twice in sequence: first
 to read exactly four bytes and determine the message length, then to read exactly that many
