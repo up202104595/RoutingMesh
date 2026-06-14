@@ -131,6 +131,18 @@ T = N \times T_{slot}
 \label{eq:frame}
 \end{equation}
 
+Figure~\ref{fig:tdma-round} illustrates the round structure for a
+network with $N$ nodes, where the slots are numbered sequentially and
+the sequence repeats periodically.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.78\textwidth]{fig_tdma_round}
+\caption{TDMA round structure. Each node is assigned one numbered slot
+per round; the round repeats with period $T$.}
+\label{fig:tdma-round}
+\end{figure}
+
 A packet that arrives at the transmit queue must wait at most one full
 round before it can be sent, giving a deterministic upper bound on
 access latency. This property makes TDMA well suited to real-time
