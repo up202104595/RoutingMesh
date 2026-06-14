@@ -491,7 +491,7 @@ Listing~\ref{lst:matrix}, which is serialised into a compact beacon and broadcas
 at the beginning of each node's slot. Figure~\ref{fig:matrix-packet} shows the layout of this
 beacon packet.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{matrixpacket}
 \caption{Structure of the matrix beacon packet broadcast by each node at the beginning of its
@@ -499,6 +499,7 @@ slot~\cite{almeida2023synchronization}.}
 \label{fig:matrix-packet}
 \end{figure}
 
+\FloatBarrier
 \begin{lstlisting}[language=C,
     caption={Variables used to save the matrix information (\texttt{matrix.c})~\cite{almeida2023synchronization}},
     label={lst:matrix}]
