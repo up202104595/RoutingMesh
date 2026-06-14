@@ -358,6 +358,20 @@ recent than the local copy are updated. This ensures that topology
 changes propagate through the network within one round after they
 occur, while stale information is never able to overwrite fresh data.
 
+Figure~\ref{fig:connectivity} shows how the connectivity matrix evolves
+when a new node joins the network. When node~2 joins and connects to
+node~4, a new row and column are added to the matrix, and the updated
+topology is reflected in the network graph.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.82\textwidth]{connectivity}
+\caption{Update of the connectivity matrix and network topology after
+node~2 joins the network. The matrix gains a new row and column,
+and the link between node~2 and node~4 becomes visible to all nodes.}
+\label{fig:connectivity}
+\end{figure}
+
 \subsubsection{Membership Tracking}
 
 Keeping an accurate record of which nodes belong to $\tau_A$ is
