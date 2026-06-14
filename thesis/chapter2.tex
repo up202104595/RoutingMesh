@@ -276,26 +276,18 @@ mechanisms were introduced: a round structure that adapts dynamically
 to team membership changes, and a topology dissemination protocol that
 gives every node a globally consistent view of the network.
 
-\subsubsection{Round Structure and Slot Assignment}
-
 The set of nodes currently active in the team is denoted $\tau_A$, and
 the number of active nodes is $N = |\tau_A|$. Both quantities change
 dynamically as nodes join or leave. The round period $T_{up}$ is
 chosen according to the real-time requirements of the application and
-remains fixed. Each node receives exactly one slot of duration:
-
-\begin{equation}
-t_{slot} = \frac{T_{up}}{N}
-\label{eq:slot-duration}
-\end{equation}
-
-This means that as the team grows, slot duration decreases
-proportionally, allowing new members to be absorbed without changing
-the total round period. Slots are assigned in ascending order of each
-node's unique numeric ID: the node with the smallest ID in $\tau_A$
-receives slot $s_0$, the next smallest $s_1$, and so on. For example,
-if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$, then
-$\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$, and
+remains fixed. Each node receives exactly one slot of duration
+$t_{slot} = T_{up} / N$, so that as the team grows, slot duration
+decreases proportionally, allowing new members to be absorbed without
+changing the total round period. Slots are assigned in ascending order
+of each node's unique numeric ID: the node with the smallest ID in
+$\tau_A$ receives slot $s_0$, the next smallest $s_1$, and so on. For
+example, if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$,
+then $\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$, and
 $\text{ID}_5 \to s_2$~\cite{oliveira2018clockless}.
 
 \subsubsection{State Dissemination: Flooding with Aggregation}
