@@ -212,10 +212,10 @@ for $\delta_k$:
 \label{eq:delay-full}
 \end{equation}
 
-At the end of each round, before the node begins transmitting in the
-next round, all delay estimates accumulated during that round are passed
-to a delay function $f$ that distils them into a single representative
-value. Three choices are defined:
+Before a node starts transmitting at the beginning of its slot, all
+packet delay estimates recorded during the previous round are analysed
+and a delay function $f$ is used to determine the shift to apply. Three
+methods are defined for this analysis:
 
 \begin{description}
 \item[Minimum delay] Uses the smallest observed $\delta_k$. The slot
