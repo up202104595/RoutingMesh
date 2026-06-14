@@ -792,90 +792,180 @@ implementations.
 \label{sec:routing-applicability}
 
 The RA-TDMAs+ framework provides every node with a continuously updated, globally
-consistent view of the full network topology through the MATRIX beacon mechanism described
-in Section~\ref{sec:ra-tdma-plus}. This has direct implications for the choice of routing
-approach.
+consistent view of the full network topology through the MATRIX beacon exchanged at the
+beginning of each slot. This property has direct implications for the selection of a routing
+approach, as analysed by Morais~\cite{morais2024synchronization}.
 
-Reactive protocols are not appropriate in this context. Flooding a RREQ to discover routes is
-redundant when the topology is already known at every node from the MATRIX beacon. In
-addition, each hop of a RREQ flood in a TDMA network must wait for the transmitting node's
-slot, so a three-hop discovery requires at least three complete frame periods before the reply
-can return. At a typical frame period of 150\,ms, this represents more than 450\,ms of
-unavoidable latency before a flow can start, which is unacceptable for real-time video
-teleoperation.
+\paragraph{Reactive protocols.}
+Flooding a RREQ to discover routes is redundant when the topology is already known at every
+node from the MATRIX beacon. Moreover, in a TDMA network each hop of a RREQ flood
+must wait for the transmitting node's assigned slot before the request can be forwarded. A
+three-hop discovery therefore requires at least three complete frame periods to complete. At a
+typical frame period, this represents hundreds of milliseconds of unavoidable latency per
+discovery, which is unacceptable for real-time video teleoperation. Additionally, the reactive
+approach does not leverage the topology information that RA-TDMAs+ already disseminates,
+wasting the infrastructure that the medium-access layer has already established.
 
-Among proactive approaches, OLSR's Hello messages duplicate the neighbour-discovery
-function already provided by the MATRIX beacon, and the MPR optimisation offers diminishing
-returns in the small networks of robotic deployments. DSDV requires nodes to exchange
-routing tables in addition to the MATRIX beacon, increasing per-slot communication overhead
-without adding information that is not already contained in the matrix. Both proactive
-protocols therefore add control overhead without benefit in this setting.
+\paragraph{Proactive protocols.}
+The periodic sharing of the connectivity matrix in RA-TDMAs+ is itself a proactive topology
+exchange, so proactive routing is the natural fit. However, standard proactive protocols
+introduce redundancy. OLSR's Hello messages duplicate the neighbour-discovery function
+already performed by the MATRIX beacon; the MPR selection mechanism reduces flooding
+overhead but provides diminishing returns in the small networks typical of robotic deployments
+where nearly all nodes are within two hops of each other. DSDV requires nodes to share a
+routing table in addition to the MATRIX beacon, increasing the size of each slot transmission
+without adding information that is not already present in the connectivity matrix.
 
-The MST-based approach, applied directly to the connectivity matrix distributed by
-RA-TDMAs+, requires no additional control messages whatsoever. Routes are recomputed
-locally each time the matrix is updated, so convergence after a topology change occurs within
-one beacon round. This combination of zero additional overhead, immediate route availability,
-and low computational cost makes MST routing the natural choice for the RA-TDMAs+
-framework.
+\paragraph{Network size and computation time.}
+An additional constraint comes from the TDMA slot structure. With a fixed round period $T$
+and $N$ active nodes, each slot occupies $T/N$ seconds. As $N$ grows, both the slot duration
+and the transmission window available for data shrink. The routing computation must therefore
+complete within the processing window at the start of each slot, before the transmission phase
+begins. Any algorithm that is too costly in time or processing would reduce the effective
+transmission window, increasing packet loss. This imposes a preference for algorithms with
+low time complexity.
+
+\paragraph{Algorithm selection.}
+Three graph algorithms are applicable to the connectivity matrix: Prim's algorithm for the
+MST, Dijkstra's algorithm for shortest paths, and the Bellman-Ford algorithm used by DSDV.
+Dijkstra's and Prim's both have $O(N^2)$ time complexity on an adjacency matrix, while
+Bellman-Ford runs in $O(N^3)$, which becomes disadvantageous as the network grows.
+Beyond complexity, the key observation is that \texttt{matrix.c} already computes a Minimum
+Spanning Tree using Prim's algorithm and stores it in shared memory as part of the
+synchronisation pipeline. A routing algorithm that directly consumes this existing Spanning
+Tree therefore requires no additional graph computation, reusing infrastructure that is already
+executed every round. Dijkstra's algorithm, by contrast, would require a separate graph
+traversal and an additional shared-memory structure for the result, adding latency and
+complexity without benefit in the small, well-connected networks of robotic deployments.
+
+The MST-based approach, consuming the Spanning Tree already maintained by
+\texttt{matrix.c}, is therefore the most natural fit for RA-TDMAs+: it requires no additional
+control messages, adds no per-slot overhead, completes in negligible time, and converges within
+one beacon round after any topology change. Morais~\cite{morais2024synchronization}
+reached the same conclusion in her analysis and adopted Prim's MST as the basis for the first
+routing implementation built on top of RA-TDMAs+.
 
 
 %% -----------------------------------------------------------------------
 \section{Previous Routing Work in RA-TDMAs+}
 \label{sec:related-work}
 
-Morais~\cite{morais2024synchronization} implemented the first routing
-mechanism for RA-TDMAs+ networks. Her approach operated at the data link
-layer (Layer 2): forwarding decisions were implemented by modifying
-destination MAC addresses at each relay hop, while IP headers remained
-unchanged throughout the path. This made the relay transparent to
-applications, which observed an apparently direct IP path to the
-destination regardless of the number of relay hops.
+Morais~\cite{morais2024synchronization} designed and implemented the first routing mechanism
+for RA-TDMAs+ networks. Her work established a complete routing architecture on top of the
+TDMA framework and provided the first experimental validation of multi-hop video streaming
+in this context.
 
-Routes were computed from the connectivity matrix provided by the MATRIX
-beacon using Prim's MST algorithm, which is the same strategy adopted in the
-present work. Practical experiments on physical AlphaBot2-Pi robots
-successfully demonstrated video streaming over a multi-hop path, establishing
-the viability of MST-based proactive routing in this framework.
+\subsection{Layer 2 Routing Architecture}
 
-The Layer 2 forwarding strategy has limitations that become apparent in
-practice. Standard IP diagnostic tools such as \texttt{traceroute} and
-\texttt{ping} communicate exclusively through the IP layer and therefore
-cannot observe MAC-level forwarding; the actual relay path is invisible to
-these tools, complicating debugging and monitoring. Similarly, Linux
-networking features that operate at the IP layer, including policy routing,
-traffic shaping with \texttt{tc}, and firewall rules with \texttt{iptables},
-cannot interact with a forwarding mechanism that operates below them. The
-existing implementation also exhibited system-level instability during
-operation, including runtime failures of undetermined origin. Finally, the
-source code from that work was not made available; only the TDMA framework of
-Almeida~\cite{almeida2023synchronization} could be used as a starting point.
+The routing strategy adopted by Morais operates at the data link layer (Layer 2). Rather than
+modifying IP addresses, which would require changes visible to applications, forwarding
+decisions are implemented by manipulating the destination MAC address at each relay hop.
+The IP header, including the source and destination IP addresses, remains unchanged throughout
+the path. As a result, the relay is completely transparent to applications: the destination receives
+the packet as if it had arrived directly from the source, regardless of the number of intermediate
+relay hops.
 
-These factors jointly motivated the development of a new routing system from
-the ground up. The Layer 3 architecture adopted in this work installs routes
-into the Linux kernel routing table via the Netlink interface and relies on
-the kernel's own IP forwarding engine to relay transit packets. This
-approach preserves full compatibility with standard IP tools, integrates
-naturally with Linux networking subsystems, and benefits from decades of
-production hardening in the kernel networking stack. The design and
-implementation are described in Chapter~\ref{chap:implementation}.
+For a node to forward a packet toward a destination it cannot reach directly, the Linux kernel
+must have a mapping from the destination IP address to the MAC address of the appropriate
+next-hop neighbour in the ARP table. By injecting custom ARP entries using the
+\texttt{ioctl()} system call, the routing module redirects IP-level traffic to the desired next hop
+at the link layer, without any change to the IP layer itself. The \texttt{ioctl()} interface was
+chosen over \texttt{popen()} and \texttt{system()} calls because it completes in negligible time
+compared to the slot duration; the alternatives were found to consume nearly an entire slot
+just to add ARP entries for three nodes, which would disrupt ongoing transmissions.
+
+For relay nodes to forward transit packets rather than discard them, IP forwarding must be
+enabled at the operating-system level. This is achieved by setting \texttt{net.ipv4.ip\_forward
+= 1} in the kernel parameters. Additional settings disable ICMP redirect generation, ensuring
+that relay nodes silently forward packets without sending redirect messages to the source.
+
+\subsection{Routing Matrix and Data Structures}
+
+Routes are represented as a routing matrix derived from the Spanning Tree. Each node
+constructs a local routing table that maps every destination in the network to a next-hop
+neighbour and its MAC address. Because the Spanning Tree is a tree, there is exactly one path
+between any two nodes, so the next-hop lookup is unambiguous.
+
+The routing matrix is implemented as a linked list structure. Each entry in the primary list
+represents a node that has a direct link to the local node; attached to each primary entry is a
+secondary list of all nodes reachable through that direct neighbour. When the local node needs
+to forward a packet to a destination, it finds the primary entry whose secondary list contains the
+destination and uses the MAC address stored with that entry as the next-hop address for the ARP
+injection. Figure~\ref{fig:tdma-framework} illustrates the structure of the TDMA framework
+in which this routing module operates.
+
+\subsection{MAC Address Distribution}
+
+A limitation of the original MATRIX beacon was that it carried only the connectivity matrix
+and node identifiers, with no MAC address information. Since MAC addresses are required to
+inject ARP entries, Morais modified the \texttt{tdma\_matrix\_t} structure to include each
+node's MAC address as an additional field in the state beacon, adding six bytes per node to the
+transmitted packet. This modification ensures that whenever a node receives a beacon, it also
+learns the MAC address of the sender, which is stored in a shared-memory table
+(\texttt{macArraySHM\_t}) indexed by node identifier. The MAC address is retained only as
+long as the corresponding link remains active.
+
+\subsection{Routing Table Update Algorithm}
+
+When the Spanning Tree changes, the linked-list routing table must be updated efficiently.
+Morais developed an incremental update algorithm that avoids recomputing the entire table
+from scratch on every round. The algorithm first performs a Depth-First Search (DFS) from
+the local node over the updated Spanning Tree to enumerate all reachable nodes and their
+next-hop neighbours. The result is sorted by node identifier using \texttt{qsort}. The sorted
+array is then compared element-by-element against the existing linked list: if an identifier
+appears in the array but not in the list, it is a new entry and is added; if it appears in the list
+but not in the array, it has been removed and is deleted; if it appears in both, no change is
+needed. This comparison runs in linear time and ensures that ARP table updates are issued
+only for entries that genuinely changed, minimising the number of \texttt{ioctl()} calls per
+round and keeping the routing update within the slot processing window.
+
+\subsection{Experimental Validation and Limitations}
+
+Morais validated the system on physical AlphaBot2-Pi robotic platforms, demonstrating
+successful video streaming over a three-node relay topology. The experiments confirmed that
+MST-based proactive routing built on top of RA-TDMAs+ is viable and that multi-hop
+communication is achievable in practice.
+
+Despite this success, the Layer 2 approach presents limitations that motivate an alternative
+architecture. Standard IP diagnostic tools such as \texttt{traceroute} and \texttt{ping} operate
+exclusively at the IP layer and cannot observe MAC-level forwarding; the actual relay path is
+therefore invisible to these tools, complicating debugging and network monitoring. Linux
+networking subsystems that operate at the IP layer, including traffic shaping with \texttt{tc},
+policy routing, and firewall rules with \texttt{iptables}, also cannot interact with a forwarding
+mechanism that operates below them. Furthermore, the implementation exhibited system-level
+instability during operation, including runtime failures of undetermined origin, and the source
+code was not made available for inspection or reuse. Only the TDMA framework of
+Almeida~\cite{almeida2023synchronization} was accessible as a starting point for subsequent
+work.
+
+
 
 
 %% -----------------------------------------------------------------------
 \section{Summary}
 \label{sec:background-summary}
 
-This chapter established the background for the routing work described in the
-remainder of this dissertation. The need for multi-hop routing arises from
-the limited radio range of individual nodes in a MANET, combined with the
-continuous topology changes caused by node mobility. RA-TDMAs+ addresses
-the medium access and synchronisation problems through a clockless distributed
-TDMA protocol that also distributes a continuously updated connectivity
-matrix to all nodes. This matrix is the foundation on which routing can be
-built without any additional control traffic. Among the routing approaches
-reviewed, a proactive MST-based strategy operating directly on the
-connectivity matrix was identified as the most natural fit for the
-RA-TDMAs+ framework. The previous Layer 2 routing implementation by Morais
-demonstrated the feasibility of MST routing in this context; the present work
-extends that foundation with a Layer 3 architecture that offers better
-observability, tighter integration with the Linux networking stack, and a
-clean-slate implementation on top of the TDMA framework by Almeida.
+This chapter established the theoretical and practical background for the routing work described
+in the remainder of this dissertation. The need for multi-hop routing arises from the limited
+radio range of individual nodes in a MANET, combined with the continuous topology changes
+caused by node mobility. RA-TDMAs+ addresses the medium access and synchronisation
+problems through a clockless distributed TDMA protocol that also disseminates a continuously
+updated connectivity matrix to all nodes via the MATRIX beacon. This matrix provides a global
+view of the topology that serves as the direct foundation for routing without requiring any
+additional control traffic.
+
+Among the routing approaches reviewed, reactive protocols were ruled out because route
+discovery is redundant given the already-available topology and because TDMA slot scheduling
+introduces prohibitive per-hop discovery latency. Standard proactive protocols add control
+overhead that duplicates functionality already present in the MATRIX beacon. A proactive
+MST-based strategy that operates directly on the existing Spanning Tree maintained by
+\texttt{matrix.c} was identified as the natural choice, reusing available infrastructure with
+negligible additional computation. This is the same conclusion reached by
+Morais~\cite{morais2024synchronization}, whose Layer 2 routing implementation on
+AlphaBot2-Pi robots provided the first experimental validation of MST-based routing in
+RA-TDMAs+ networks. Her work demonstrated multi-hop video streaming in practice and
+defined the routing matrix, linked-list data structures, and ARP-based forwarding mechanism
+that constitute the reference architecture for this research area. The limitations of the Layer 2
+approach, in particular the invisibility of relay paths to standard IP tools and the absence of
+integration with Linux networking subsystems, motivate the exploration of an alternative
+architecture, described in subsequent chapters.
