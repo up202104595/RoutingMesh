@@ -762,15 +762,14 @@ a tree, there is exactly one path between any pair of nodes, which simplifies ne
 derivation: the next hop from node $u$ toward destination $d$ is uniquely determined by the
 tree structure without ambiguity or any further search.
 
-% TODO FIGURE: MST example on a weighted network graph
-% Suggested image: a 4-5 node graph with link weights, showing the MST edges highlighted
-% vs the full graph, and the resulting unique paths.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.78\textwidth]{FILENAME}
-% \caption{Caption.}
-% \label{fig:mst-example}
-% \end{figure}
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.92\textwidth]{MSTexample}
+\caption{MST topology update after a node movement and a new node join. On the left, the
+original spanning tree; on the right, the recomputed tree after node~E changes position
+(orange) and node~H is added as a new entry (green)~\cite{morais2024synchronization}.}
+\label{fig:mst-example}
+\end{figure}
 
 Prim's algorithm~\cite{dijkstra1959note} constructs the MST incrementally, starting from an
 arbitrary root node. At each step it selects the minimum-weight edge that connects the
@@ -1026,6 +1025,17 @@ an identifier appears in both, no action is needed. This linear comparison ensur
 processing time within the slot window regardless of network size. Changes to the primary list
 (direct neighbours) trigger removal of all secondary entries associated with the old neighbour
 before the list is rebuilt from the DFS output.
+
+\bigskip
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{linkedlist}
+\caption{Incremental routing table update for source node~A. The DFS over neighbour~C yields
+the sorted array $\{E, F, G, H\}$; comparing it against the existing secondary list reveals H as
+a new addition (green), inserted without modifying the unchanged entries~\cite{morais2024synchronization}.}
+\label{fig:linkedlist-update}
+\end{figure}
+\bigskip
 
 \FloatBarrier
 \subsection{Packet Routing via TUN and iptables}
