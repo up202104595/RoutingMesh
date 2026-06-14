@@ -407,27 +407,6 @@ Minimum Spanning Tree of $M$ and filtering delay observations so
 that only delays from links present in the spanning tree are used
 in the computation of $\Delta(r)$.
 
-In the three-node implementation used in this work, each slot has
-a duration of 50\,ms with a guard interval of 5\,ms, giving 45\,ms
-of usable transmission time per slot and a round period of 150\,ms,
-as shown in Table~\ref{tab:frame}.
-
-\begin{table}[h]
-\centering
-\caption{TDMA round structure for the three-node implementation}
-\label{tab:frame}
-\begin{tabular}{cccc}
-\toprule
-\textbf{Slot 1 (N1)} & \textbf{Slot 2 (N2)} & \textbf{Slot 3 (N3)}
-  & \textbf{Guard} \\
-\midrule
-50\,ms & 50\,ms & 50\,ms & 5\,ms \\
-\midrule
-\multicolumn{4}{c}{Round period: 150\,ms \quad Usable per slot: 45\,ms} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
 
 %% -----------------------------------------------------------------------
 \section{TDMA Framework}
