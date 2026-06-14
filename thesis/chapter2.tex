@@ -320,6 +320,22 @@ contributions from all others, achieving a globally consistent shared
 state. The age variables prevent old data from overwriting more recent
 updates as information circulates through the network.
 
+Figure~\ref{fig:flooding} illustrates this process for a four-node
+network in which node~4 joins via node~2. In round~1, node~4 broadcasts
+its state to node~2, its only neighbour. In round~2, node~2 merges the
+received state with its own and rebroadcasts, reaching nodes~1, 3, and~4.
+After two rounds the entire network holds a consistent shared state.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.90\textwidth]{fig_flooding}
+\caption{Flooding with aggregation. In round~1 (left), node~4 broadcasts
+its state to its sole neighbour, node~2. In round~2 (right), node~2
+rebroadcasts the merged state to all its neighbours, completing
+global dissemination in two rounds.}
+\label{fig:flooding}
+\end{figure}
+
 \subsubsection{Topology Tracking}
 
 The network topology is represented as a connectivity matrix $M$ of
