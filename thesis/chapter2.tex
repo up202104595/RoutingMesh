@@ -480,7 +480,7 @@ a UDP socket over \texttt{wlan0}~\cite{almeida2023synchronization}.}
 
 The topology-tracking module (\texttt{matrix.c}) is essential for the correct operation of
 RA-TDMAs+ and implements the connectivity matrix mechanism described in
-Section~\ref{sec:ra-tdma-plus}. It runs as an independent plug-in process that communicates
+Section~\ref{sec:ratdma-plus}. It runs as an independent plug-in process that communicates
 with \texttt{TDMA\_Core} through shared memory and AF\_UNIX events.
 
 To maintain a direct view of the network topology, each node must share the total number of
@@ -551,7 +551,7 @@ typedef struct {
 \subsection{Synchroniser Module}
 
 The Synchroniser implements the RA-TDMAs+ slot-adjustment algorithm described in
-Section~\ref{sec:sync-algorithm}. It has access to the packet delays computed by
+Section~\ref{sec:ratdmas-sync}. It has access to the packet delays computed by
 \texttt{TDMA\_Core} and to the Spanning Tree maintained by \texttt{matrix.c}, both exposed
 through shared memory. The module remains dormant until three milliseconds before the end of
 the current TDMA round. In this window it reads the accumulated delay values, determines the
@@ -563,7 +563,7 @@ corrupting the synchronisation algorithm. Only delays corresponding to links pre
 Spanning Tree between a transmitting node and the local synchronisation node are considered.
 Once filtered, the delays are grouped by transmitter ID and averaged per group. The configured
 delay selection method (minimum, maximum, or median across groups) is then applied to obtain
-a single raw shift value, following the procedure described in Section~\ref{sec:sync-algorithm}.
+a single raw shift value, following the procedure described in Section~\ref{sec:ratdmas-sync}.
 
 The $\Delta_{\max}$ parameter, set during the configuration phase, defines the maximum
 allowable phase adjustment per round, preventing large single-round corrections from
