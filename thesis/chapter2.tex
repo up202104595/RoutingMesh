@@ -851,92 +851,208 @@ routing implementation built on top of RA-TDMAs+.
 \label{sec:related-work}
 
 Morais~\cite{morais2024synchronization} designed and implemented the first routing mechanism
-for RA-TDMAs+ networks. Her work established a complete routing architecture on top of the
-TDMA framework and provided the first experimental validation of multi-hop video streaming
-in this context.
+for RA-TDMAs+ networks, establishing a complete Layer~2 routing architecture on top of the
+TDMA framework. The work covered the full stack from algorithm selection and data structure
+design to framework adaptation and practical validation on physical robotic hardware. This
+section describes the architecture, its key design decisions, and the limitations that motivate
+subsequent approaches.
 
 \subsection{Layer 2 Routing Architecture}
 
-The routing strategy adopted by Morais operates at the data link layer (Layer 2). Rather than
-modifying IP addresses, which would require changes visible to applications, forwarding
-decisions are implemented by manipulating the destination MAC address at each relay hop.
-The IP header, including the source and destination IP addresses, remains unchanged throughout
-the path. As a result, the relay is completely transparent to applications: the destination receives
-the packet as if it had arrived directly from the source, regardless of the number of intermediate
-relay hops.
+The routing strategy adopted by Morais operates at the data link layer (Layer~2). Forwarding
+decisions are implemented by manipulating the destination MAC address at each relay hop,
+while the IP header, including both the source and destination IP addresses, remains unchanged
+throughout the path. This makes the relay completely transparent to applications: the destination
+receives the packet as if it had arrived directly from the source, regardless of the number of
+intermediate hops.
 
 For a node to forward a packet toward a destination it cannot reach directly, the Linux kernel
-must have a mapping from the destination IP address to the MAC address of the appropriate
-next-hop neighbour in the ARP table. By injecting custom ARP entries using the
-\texttt{ioctl()} system call, the routing module redirects IP-level traffic to the desired next hop
-at the link layer, without any change to the IP layer itself. The \texttt{ioctl()} interface was
-chosen over \texttt{popen()} and \texttt{system()} calls because it completes in negligible time
-compared to the slot duration; the alternatives were found to consume nearly an entire slot
-just to add ARP entries for three nodes, which would disrupt ongoing transmissions.
+must map the destination IP address to the MAC address of the appropriate next-hop neighbour
+in the ARP table. Custom ARP entries are injected using the \texttt{ioctl()} system call, which
+redirects IP-level traffic to the correct next hop at the link layer without modifying the IP layer.
+For relay nodes to forward transit packets rather than discard them, IP forwarding is enabled
+via the \texttt{net.ipv4.ip\_forward = 1} kernel parameter. A new plug-in routing module was
+developed to run within the TDMA framework alongside the existing modules. It accesses the
+MAC address table and the Spanning Tree through shared memory, and updates the ARP table
+via \texttt{ioctl()} system calls. Figure~\ref{fig:framework-ana} shows the complete architecture
+after the addition of the routing module.
 
-For relay nodes to forward transit packets rather than discard them, IP forwarding must be
-enabled at the operating-system level. This is achieved by setting \texttt{net.ipv4.ip\_forward
-= 1} in the kernel parameters. Additional settings disable ICMP redirect generation, ensuring
-that relay nodes silently forward packets without sending redirect messages to the source.
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.82\textwidth]{frameworkAna}
+\caption{Updated TDMA framework architecture incorporating the Routing
+module~\cite{morais2024synchronization}. The Routing module reads the MAC address table
+and the Spanning Tree from shared memory and updates the kernel ARP table via
+\texttt{ioctl()} system calls.}
+\label{fig:framework-ana}
+\end{figure}
 
 \subsection{Routing Matrix and Data Structures}
 
-Routes are represented as a routing matrix derived from the Spanning Tree. Each node
-constructs a local routing table that maps every destination in the network to a next-hop
-neighbour and its MAC address. Because the Spanning Tree is a tree, there is exactly one path
-between any two nodes, so the next-hop lookup is unambiguous.
+Routes are represented as a routing matrix derived from the Spanning Tree. Each node constructs
+a local routing table that maps every network destination to a next-hop neighbour and its MAC
+address. Because the Spanning Tree is cycle-free, there is exactly one path between any two
+nodes, making the next-hop lookup unambiguous.
 
-The routing matrix is implemented as a linked list structure. Each entry in the primary list
-represents a node that has a direct link to the local node; attached to each primary entry is a
+The routing matrix is implemented as a singly linked list. Each entry in the primary list
+represents a node with a direct link to the local node; attached to each primary entry is a
 secondary list of all nodes reachable through that direct neighbour. When the local node needs
-to forward a packet to a destination, it finds the primary entry whose secondary list contains the
-destination and uses the MAC address stored with that entry as the next-hop address for the ARP
-injection. Figure~\ref{fig:tdma-framework} illustrates the structure of the TDMA framework
-in which this routing module operates.
+to forward a packet to a destination, it traverses the primary list to find the entry whose secondary
+list contains the destination identifier, and uses the MAC address stored with that primary entry
+as the ARP next-hop. Figure~\ref{fig:linkedlist1} illustrates this structure for three example
+source nodes.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.88\textwidth]{linkedlist1}
+\caption{Routing linked list for three example source nodes A, C, and G. Each primary entry
+corresponds to a directly connected neighbour; its secondary list contains all nodes reachable
+through that neighbour~\cite{morais2024synchronization}.}
+\label{fig:linkedlist1}
+\end{figure}
+
+The linked list node structure is defined as follows:
+
+\begin{lstlisting}[language=C,
+    caption={Linked list structure for the routing matrix~\cite{morais2024synchronization}},
+    label={lst:routinglist}]
+typedef struct routingList_ {
+    uint8_t id;
+    uint8_t macAddress[MAC_BYTES];
+    struct routingList_* next;
+    struct routingList_* accessibleNodes;
+} routingList_t;
+\end{lstlisting}
+
+Each node stores the neighbour identifier, the corresponding MAC address, a pointer to the next
+primary entry (\texttt{next}), and a pointer to the secondary list of reachable nodes
+(\texttt{accessibleNodes}).
 
 \subsection{MAC Address Distribution}
 
-A limitation of the original MATRIX beacon was that it carried only the connectivity matrix
-and node identifiers, with no MAC address information. Since MAC addresses are required to
-inject ARP entries, Morais modified the \texttt{tdma\_matrix\_t} structure to include each
-node's MAC address as an additional field in the state beacon, adding six bytes per node to the
-transmitted packet. This modification ensures that whenever a node receives a beacon, it also
-learns the MAC address of the sender, which is stored in a shared-memory table
-(\texttt{macArraySHM\_t}) indexed by node identifier. The MAC address is retained only as
-long as the corresponding link remains active.
+The original MATRIX beacon carried only connectivity and identifier information, with no MAC
+address data. Since ARP injection requires MAC addresses, Morais extended the
+\texttt{tdma\_matrix\_t} structure to include each node's MAC address as an additional field,
+adding six bytes to every state beacon. Figure~\ref{fig:statshare-ana} shows the updated beacon
+layout.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.88\textwidth]{statshareAna}
+\caption{Updated state beacon layout, extending the original four fields with a MAC address
+field~\cite{morais2024synchronization}.}
+\label{fig:statshare-ana}
+\end{figure}
+
+The updated structure is shown in Listing~\ref{lst:matrix-ana}. When a node receives a beacon,
+it records the sender's MAC address in a shared-memory table indexed by node identifier. The
+address is retained only while the corresponding link remains active.
+
+\begin{lstlisting}[language=C,
+    caption={Updated connectivity matrix structure including MAC address~\cite{morais2024synchronization}},
+    label={lst:matrix-ana}]
+typedef struct {
+    uint8_t myId;
+    uint8_t macAddress[MAC_BYTES];
+    uint8_t numberOfActiveNodes;
+    uint8_t matrix[MNUM_DRONES][MNUM_DRONES];
+    uint8_t idOfActiveNodes[MNUM_DRONES];
+    double  creationTime[MNUM_DRONES];
+    double  age[MNUM_DRONES];
+} __attribute__((__packed__)) tdma_matrix_t;
+\end{lstlisting}
+
+The collected MAC addresses are stored in a shared-memory structure, \texttt{macArraySHM\_t},
+whose entries pair each MAC address with the last octet of the node's IP address (used as the
+node identifier in the framework):
+
+\begin{lstlisting}[language=C,
+    caption={MAC address shared-memory structure~\cite{morais2024synchronization}},
+    label={lst:macarray}]
+typedef struct {
+    uint8_t id[4];
+    uint8_t mac_bytes[MAC_BYTES];
+} macInfo_t;
+
+typedef struct {
+    pthread_mutex_t mut_macArray;
+    macInfo_t array[MNUM_DRONES];
+    size_t size;
+} macArraySHM_t;
+\end{lstlisting}
+
+Figure~\ref{fig:linkedlist2} shows how the MAC address of each primary neighbour is stored
+alongside its secondary list in the routing linked list, allowing the routing module to look up
+the correct MAC address for ARP injection in a single list traversal.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.88\textwidth]{linkedlist2}
+\caption{MAC address association in the routing linked list for source nodes A and G. The MAC
+address of each direct neighbour is stored alongside its secondary list of reachable
+nodes~\cite{morais2024synchronization}.}
+\label{fig:linkedlist2}
+\end{figure}
 
 \subsection{Routing Table Update Algorithm}
 
 When the Spanning Tree changes, the linked-list routing table must be updated efficiently.
-Morais developed an incremental update algorithm that avoids recomputing the entire table
-from scratch on every round. The algorithm first performs a Depth-First Search (DFS) from
-the local node over the updated Spanning Tree to enumerate all reachable nodes and their
-next-hop neighbours. The result is sorted by node identifier using \texttt{qsort}. The sorted
-array is then compared element-by-element against the existing linked list: if an identifier
-appears in the array but not in the list, it is a new entry and is added; if it appears in the list
-but not in the array, it has been removed and is deleted; if it appears in both, no change is
-needed. This comparison runs in linear time and ensures that ARP table updates are issued
-only for entries that genuinely changed, minimising the number of \texttt{ioctl()} calls per
-round and keeping the routing update within the slot processing window.
+Morais developed an incremental algorithm that avoids rebuilding the entire table from scratch
+on every round. The procedure begins with a Depth-First Search (DFS) from the local node over
+the updated Spanning Tree, enumerating all reachable nodes grouped by their first-hop neighbour.
+The result for each primary neighbour is sorted by node identifier using \texttt{qsort}, producing
+a sorted array that can be compared directly against the corresponding secondary linked list.
+
+The comparison scans both structures in parallel. If an identifier appears in the sorted array
+but not in the linked list, the node is new and must be added together with an \texttt{ioctl()}
+ARP insertion. If an identifier appears in the linked list but not in the array, the node has
+become unreachable and its entry is removed together with an \texttt{ioctl()} ARP deletion. If
+an identifier appears in both, no action is needed. This linear comparison ensures that
+\texttt{ioctl()} calls are issued only for entries that genuinely changed, keeping the total
+processing time within the slot window regardless of network size. Changes to the primary list
+(direct neighbours) trigger removal of all secondary entries associated with the old neighbour
+before the list is rebuilt from the DFS output.
+
+\subsection{Packet Routing via TUN and iptables}
+
+In the TDMA framework, the TUN interface (\texttt{tun0}) operates on a separate IP subnet
+(192.168.3.X) from the wireless ad-hoc interface \texttt{wlan0} (192.168.2.X), where X is the
+node identifier. Applications must send packets addressed to the \texttt{wlan0} subnet so that
+routing and ARP manipulation can take effect. To redirect application-generated packets from
+\texttt{wlan0} to \texttt{tun0} transparently, iptables mangle rules are used.
+
+The OUTPUT chain marks all outgoing \texttt{wlan0} packets with a non-zero mark, then
+resets the mark to zero for TDMA framework packets identified by their fixed UDP port number
+(4000 + node~ID). A policy routing rule then sends all marked packets to a secondary routing
+table that routes them through \texttt{tun0}. This mechanism ensures that only application
+traffic enters the TDMA framework, while the framework's own UDP transmissions are excluded
+to prevent routing loops.
+
+When a packet arrives at \texttt{tun0} at the destination node, it must be delivered back to the
+application on \texttt{wlan0}. A raw socket of type \texttt{IPPROTO\_RAW} reads the packet
+from \texttt{tun0} and re-injects it toward the destination IP address, causing the kernel to
+route it to the \texttt{wlan0} interface via the standard routing table. Binding the raw socket to
+the destination address rather than directly to the interface allows the kernel to handle
+fragmentation and reassembly normally.
 
 \subsection{Experimental Validation and Limitations}
 
-Morais validated the system on physical AlphaBot2-Pi robotic platforms, demonstrating
-successful video streaming over a three-node relay topology. The experiments confirmed that
-MST-based proactive routing built on top of RA-TDMAs+ is viable and that multi-hop
-communication is achievable in practice.
+Morais validated the system on physical AlphaBot2-Pi robotic platforms, successfully
+demonstrating video streaming over a three-node relay topology and confirming that MST-based
+proactive routing is viable within the RA-TDMAs+ framework.
 
-Despite this success, the Layer 2 approach presents limitations that motivate an alternative
-architecture. Standard IP diagnostic tools such as \texttt{traceroute} and \texttt{ping} operate
-exclusively at the IP layer and cannot observe MAC-level forwarding; the actual relay path is
-therefore invisible to these tools, complicating debugging and network monitoring. Linux
-networking subsystems that operate at the IP layer, including traffic shaping with \texttt{tc},
-policy routing, and firewall rules with \texttt{iptables}, also cannot interact with a forwarding
-mechanism that operates below them. Furthermore, the implementation exhibited system-level
-instability during operation, including runtime failures of undetermined origin, and the source
-code was not made available for inspection or reuse. Only the TDMA framework of
-Almeida~\cite{almeida2023synchronization} was accessible as a starting point for subsequent
-work.
+Despite this success, the Layer~2 approach has limitations that motivate alternative
+architectures. Standard IP diagnostic tools such as \texttt{traceroute} and \texttt{ping} operate
+at the IP layer and cannot observe MAC-level forwarding, making the relay path invisible to
+them and complicating debugging. Linux networking subsystems operating at the IP layer,
+including traffic shaping with \texttt{tc}, policy routing tables, and firewall rules with
+\texttt{iptables}, cannot interact with a forwarding mechanism that operates below them.
+The implementation also exhibited system-level instability during operation, with runtime
+failures of undetermined origin. Finally, the source code was not made available for inspection
+or reuse; only the TDMA framework of Almeida~\cite{almeida2023synchronization} was
+accessible as a starting point for subsequent work.
+
+
 
 
 
