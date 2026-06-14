@@ -435,73 +435,72 @@ virtual device and with plug-in modules through AF\_UNIX local sockets
 
 \subsection{Core Scheduling Module}
 
-\texttt{TDMA\_Core} manages medium access. Four threads divide its
-responsibilities. The transmit thread (TX) is scheduled to wake at the
-beginning of the node's slot and sleeps for the remainder of the frame; when
-active, it dequeues packets, prepends a TDMA header, and transmits them via a
-UDP socket over \texttt{wlan0}. The TDMA header carries the packet type, a
-global sequence number, the transmission offset $p_k$ relative to the slot
-start, the node ID, and the current slot boundaries.
-Figure~\ref{fig:tdma-header} shows the layout of the encapsulated packet.
+\texttt{TDMA\_Core} is the central component of the framework and is responsible for managing
+medium access according to the TDMA slot schedule. It implements four concurrent threads.
+The transmit thread (TX) is scheduled to wake at the beginning of the node's assigned slot and
+remains dormant for the rest of the frame. When active, it dequeues pending packets, prepends
+a TDMA header, and forwards them via a UDP socket over the wireless interface (\texttt{wlan0}).
+The TDMA header carries the packet type, a global sequence number, the relative sending
+timestamp based on the current round time, the node ID, and the current slot boundaries. As
+noted in~\cite{almeida2023synchronization}, the header is 18 bytes in size and plays an essential
+role in the RA-TDMAs+ protocol. The receive thread (RX) listens on the same UDP socket,
+strips incoming TDMA headers, records the per-packet timing information required for
+synchronisation, and returns payloads to the application layer. The event-handler thread
+processes control events sent by plug-in modules over AF\_UNIX local sockets, such as updated
+slot boundaries from the Synchroniser or membership changes from \texttt{matrix.c}. Finally,
+the configuration thread manages the round parameters and coordinates the scheduling of the TX
+thread.
+
+Each module operates as a separate process and communicates with \texttt{TDMA\_Core} through
+two IPC mechanisms: AF\_UNIX local sockets, used to send control events between modules and
+the core, and shared memory, which allows essential data to be exchanged with minimal overhead.
+\texttt{TDMA\_Core} holds exclusive write permissions over the shared memory it creates; if
+another module needs to modify a shared variable, it must send a request event via AF\_UNIX.
+
+The framework exposes the network to applications through a TUN virtual network interface
+(\texttt{tun0}). TUN operates at Layer~3, handling IP packets as if they were passing through a
+physical network interface card, unlike TAP which operates at Layer~2 and processes Ethernet
+frames. IP packets sent by an application to \texttt{tun0} are read by \texttt{TDMA\_Core} in
+user space, encapsulated with the TDMA header, and queued for transmission during the node's
+slot. On the receive side, stripped payloads are injected back into \texttt{tun0} and delivered
+to the destination application as ordinary IP datagrams, making the TDMA transport layer
+transparent to higher layers. Figure~\ref{fig:tdma-header} illustrates the headers a packet
+carries when leaving the TDMA framework.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.75\textwidth]{figures/headerstdma}
-\caption{TDMA packet encapsulation: an application payload (Transport and
-Application layers) is wrapped in a TDMA header and transmitted over a UDP
-socket on the \texttt{wlan0} interface.}
+\includegraphics[width=0.75\textwidth]{headerstdma}
+\caption{Headers present in a packet leaving the TDMA framework. The application payload
+(Transport and Application layers) is encapsulated with the TDMA header and transmitted via
+a UDP socket over \texttt{wlan0}~\cite{almeida2023synchronization}.}
 \label{fig:tdma-header}
 \end{figure}
 
-The receive thread (RX)
-listens on the same UDP socket, strips incoming TDMA headers, records the
-per-packet timing information needed for synchronisation, and returns payloads
-to the application. The event-handler thread processes control events received
-from plug-in modules over AF\_UNIX local sockets, such as updated slot limits
-from the Synchroniser or membership changes from \texttt{matrix.c}. The
-configuration thread manages round parameters and coordinates the scheduling
-of the TX thread.
-
-Applications access the framework through a TUN virtual network interface
-(\texttt{tun0}). TUN presents itself to the operating system as a standard
-Layer 3 (network-layer) network interface: IP packets sent by an application
-to \texttt{tun0} are read by \texttt{TDMA\_Core} in user space, encapsulated
-with the TDMA header, and queued for transmission during the node's slot.
-On the receive side, stripped payloads are injected back into \texttt{tun0}
-and delivered to the destination application as ordinary IP datagrams, making
-the TDMA transport layer transparent to higher layers.
-
 \subsection{Topology-Tracking Module}
 
-The topology-tracking module (\texttt{matrix.c}) implements the connectivity
-matrix and membership mechanisms described in Section~\ref{sec:ra-tdma-plus}.
-It runs as an independent plug-in process that communicates with
-\texttt{TDMA\_Core} through shared memory and AF\_UNIX events.
+The topology-tracking module (\texttt{matrix.c}) is essential for the correct operation of
+RA-TDMAs+ and implements the connectivity matrix mechanism described in
+Section~\ref{sec:ra-tdma-plus}. It runs as an independent plug-in process that communicates
+with \texttt{TDMA\_Core} through shared memory and AF\_UNIX events.
 
-\paragraph{Beacon format.}
-At the beginning of its assigned slot, each node serialises its local
-\texttt{tdma\_matrix\_t} structure into a compact beacon and broadcasts it via
-UDP multicast. The beacon carries the node's own identifier, the number of
-currently active nodes, the full connectivity matrix, the list of active node
-identifiers, the local creation timestamp, and a per-row age vector indicating
-how many rounds ago each row was last refreshed. Figure~\ref{fig:matrix-packet}
-illustrates the on-wire layout of the beacon.
+To maintain a direct view of the network topology, each node must share the total number of
+active nodes, their respective identifiers, the connectivity matrix containing link information
+between nodes, and a per-row age vector that allows the most recent information to be retained.
+These fields are stored in the \texttt{tdma\_matrix\_t} structure shown in
+Listing~\ref{lst:matrix}, which is serialised into a compact beacon and broadcast via multicast
+at the beginning of each node's slot. Figure~\ref{fig:matrix-packet} shows the layout of this
+beacon packet.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.85\textwidth]{figures/matrixpacket}
-\caption{Structure of the matrix beacon packet broadcast by each node at the
-start of its slot. The four main fields carry the active-node count, the node
-identifier list, the full $N \times N$ connectivity matrix, and the row age
-vector.}
+\includegraphics[width=0.85\textwidth]{matrixpacket}
+\caption{Structure of the matrix beacon packet broadcast by each node at the beginning of its
+slot~\cite{almeida2023synchronization}.}
 \label{fig:matrix-packet}
 \end{figure}
 
-The in-memory representation matches the beacon layout directly through a
-packed C structure, avoiding any serialisation overhead:
-
 \begin{lstlisting}[language=C,
-    caption={Connectivity matrix structure (\texttt{matrix.c})},
+    caption={Variables used to save the matrix information (\texttt{matrix.c})~\cite{almeida2023synchronization}},
     label={lst:matrix}]
 typedef struct {
     uint8_t myId;
@@ -513,38 +512,33 @@ typedef struct {
 } __attribute__((__packed__)) tdma_matrix_t;
 \end{lstlisting}
 
-\paragraph{Slot-start processing.}
-At the start of each slot the module performs three operations in order.
-First, it ages all rows by incrementing their age counter and removes any
-row whose age exceeds three rounds, which indicates that the corresponding
-node has not transmitted recently and is considered absent. Second, it
-refreshes its own row by scanning the list of nodes from which packets were
-received during the previous round and updating the corresponding matrix
-entries. Third, it serialises the updated structure and broadcasts it via
-multicast so that neighbours can merge it into their own copies.
+Three functions govern the lifecycle of this module. \texttt{MATRIX\_init()} initialises all
+necessary variables when the module loads. \texttt{MATRIX\_parsePkt()} parses received beacon
+packets and updates the local matrix. \texttt{MATRIX\_share()} serialises and broadcasts the
+local matrix to the network.
 
-\paragraph{Reception and merging.}
-Incoming beacons are processed by \texttt{MATRIX\_parsePkt()}. For each row
-in the received matrix the function compares the incoming age value with the
-locally stored age for the same node. The row with the smaller age (more
-recent) is retained, ensuring that the most up-to-date connectivity
-information propagates across the network through the flooding-with-aggregation
-mechanism described in Section~\ref{sec:flooding}.
+Before \texttt{MATRIX\_share()} transmits the local information, it first removes stale entries:
+any row whose age exceeds three rounds is considered to belong to a node that has left the
+network, and both its row and its slot assignment are removed. The remaining rows are then
+aged by one, the local row is refreshed with the currently active links observed during the
+preceding round, and the updated structure is serialised and broadcast.
 
-\paragraph{Membership events.}
-When the set of active nodes changes (a node joins or departs), the module
-sends a membership-change event to \texttt{TDMA\_Core} over the AF\_UNIX
-socket. \texttt{TDMA\_Core} responds by recomputing the slot schedule so that
-the new membership is reflected in the TDMA frame from the next round onward.
+When a packet is received, \texttt{MATRIX\_parsePkt()} deserialises it into a local
+\texttt{tdma\_matrix\_t} variable and merges each incoming row into the local copy using the
+age field to resolve conflicts: the row with the lower age value (more recently updated) is
+retained. The total number of active nodes, their identifiers, and the slot order are updated as
+necessary. If the slot assignment for the local node changes, the module notifies
+\texttt{TDMA\_Core} via an AF\_UNIX event so that the schedule can be reorganised before
+the next round. The matrix encodes the topology in binary form: a value of~1 indicates a direct
+link between two nodes, while 0 indicates no connection.
 
-\paragraph{Spanning tree computation.}
-After updating the matrix, the module runs Prim's algorithm on the
-connectivity graph to derive a Minimum Spanning Tree (MST). The result is
-written to a shared-memory region protected by a mutex so that other modules
-can read the current tree without race conditions:
+After updating the matrix, the module runs Prim's algorithm on the connectivity graph to compute
+a Minimum Spanning Tree (MST) and writes the result to a shared-memory region protected by
+a mutex, as shown in Listing~\ref{lst:spanning}. This structure is consumed by the Synchroniser
+to filter delay measurements and by higher-level components to derive forwarding decisions.
 
 \begin{lstlisting}[language=C,
-    caption={Spanning tree in shared memory (\texttt{matrix.c})},
+    caption={Variables stored in the shared memory for the Spanning Tree~\cite{almeida2023synchronization}},
     label={lst:spanning}]
 typedef struct {
     pthread_mutex_t mut_spanningTree;
@@ -554,59 +548,39 @@ typedef struct {
 } spanningTreeSHM_t;
 \end{lstlisting}
 
-The Synchroniser reads this structure to filter out cyclic delay measurements,
-and higher-level routing components can consume it to derive next-hop
-forwarding decisions.
-
 \subsection{Synchroniser Module}
 
-The Synchroniser implements the relative slot-adjustment algorithm described
-in Section~\ref{sec:sync-algorithm}. It runs as a plug-in process that wakes
-shortly before the end of each TDMA round, computes the boundary shift
-$\Delta(r)$, and delivers it to \texttt{TDMA\_Core} before the next round
-begins.
+The Synchroniser implements the RA-TDMAs+ slot-adjustment algorithm described in
+Section~\ref{sec:sync-algorithm}. It has access to the packet delays computed by
+\texttt{TDMA\_Core} and to the Spanning Tree maintained by \texttt{matrix.c}, both exposed
+through shared memory. The module remains dormant until three milliseconds before the end of
+the current TDMA round. In this window it reads the accumulated delay values, determines the
+shift $\Delta(r)$, and delivers it to \texttt{TDMA\_Core} before the round boundary, at which
+point the slot limits are updated.
 
-\paragraph{Timing.}
-The module is scheduled to wake three milliseconds before the end of the
-current round. This margin is large enough to complete the delay computation
-and deliver the event to \texttt{TDMA\_Core} before the round boundary, yet
-small enough that the slot limits reported reflect the most recent packet
-arrivals of the round.
+The Spanning Tree is used to filter the delay measurements and prevent topology loops from
+corrupting the synchronisation algorithm. Only delays corresponding to links present in the
+Spanning Tree between a transmitting node and the local synchronisation node are considered.
+Once filtered, the delays are grouped by transmitter ID and averaged per group. The configured
+delay selection method (minimum, maximum, or median across groups) is then applied to obtain
+a single raw shift value, following the procedure described in Section~\ref{sec:sync-algorithm}.
 
-\paragraph{Delay collection and filtering.}
-On waking, the Synchroniser reads the per-packet reception timestamps
-accumulated in shared memory by the RX thread of \texttt{TDMA\_Core}. Raw
-delays from all received packets are grouped by sender node ID. Before
-computing any statistics, the module consults the MST stored in
-\texttt{spanningTreeSHM\_t} and discards delays from senders that are not
-direct tree neighbours of the local node. This filtering prevents cyclic
-relay paths from introducing spurious delay measurements that would
-destabilise the synchronisation loop.
-
-\paragraph{Delta computation.}
-After filtering, the Synchroniser averages the remaining delays per sender and
-selects the method configured for the node (minimum, maximum, or median delay
-across senders) to obtain a single raw shift value. The value is then clipped
-to the interval $[-\Delta_{\max}, +\Delta_{\max}]$, where $\Delta_{\max}$
-equals 25\% of the current slot duration, preventing large single-round
-corrections from disrupting the schedule.
-
-\paragraph{Event delivery.}
-The computed $\Delta(r)$ is sent to \texttt{TDMA\_Core} as a slot-limits
-event over the AF\_UNIX socket. \texttt{TDMA\_Core} applies the shift at the
-round boundary, adjusting the wake time of the TX thread so that future
-transmissions are better aligned with the expected slot window of each
-neighbour. Figure~\ref{fig:sync-module} illustrates the complete execution
-cycle of the Synchroniser.
+The $\Delta_{\max}$ parameter, set during the configuration phase, defines the maximum
+allowable phase adjustment per round, preventing large single-round corrections from
+destabilising the schedule. If the computed shift exceeds $\Delta_{\max}$, the value is clipped
+to that limit, which accelerates convergence toward a global virtual round when the required
+adjustment is large and provides fine-grained control when the required adjustment is small.
+The clipped value is sent to \texttt{TDMA\_Core} as a slot-limits event via AF\_UNIX, and
+\texttt{TDMA\_Core} adjusts the TX thread wake time accordingly at the round boundary.
+Figure~\ref{fig:sync-module} illustrates the complete execution cycle of the Synchroniser.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.72\textwidth]{figures/syncmodule}
-\caption{Execution cycle of the Synchroniser module within a single TDMA
-round. The module wakes near the end of the round, reads packet delays from
-shared memory, filters them against the spanning tree, averages and clips the
-result, and delivers the slot boundary shift $\Delta(r)$ to
-\texttt{TDMA\_Core} before the next round starts.}
+\includegraphics[width=0.70\textwidth]{syncmodule}
+\caption{Execution cycle of the Synchroniser module. The module wakes near the end of each
+round, reads and filters packet delays from shared memory, computes the bounded shift
+$\Delta(r)$, and delivers it to \texttt{TDMA\_Core} via AF\_UNIX before the next round
+begins~\cite{almeida2023synchronization}.}
 \label{fig:sync-module}
 \end{figure}
 
