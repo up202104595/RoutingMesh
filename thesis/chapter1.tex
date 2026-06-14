@@ -155,53 +155,33 @@ This primary objective decomposes into the following specific objectives:
 \section{Contributions}
 \label{sec:contributions}
 
-The work reported in this dissertation makes the following contributions:
+This dissertation makes the following contributions:
 
 \begin{itemize}
 
-    \item \textbf{Link quality metric for RA-TDMAs+}: a score in the range
-    0--100 computed per TDMA slot from beacon reception statistics, integrating
-    packet delivery rate estimation and consecutive slot miss detection, used
-    to weight MST computation and to trigger relay activation;
+    \item Design and implementation of a Layer~3 routing mechanism for
+    RA-TDMAs+ networks, enabling transparent IP communication between any
+    two nodes independently of the current topology;
 
-    \item \textbf{MST-based routing layer}: design and implementation of a
-    routing algorithm that builds a Minimum Spanning Tree over the link quality
-    graph provided by the MATRIX protocol, derives a per-destination next-hop
-    table from the spanning tree structure, and installs the computed routes
-    into the Linux kernel routing table via Netlink;
+    \item Definition of a link quality metric derived from TDMA beacon
+    statistics, used to drive both route computation and relay activation;
 
-    \item \textbf{Dual routing table architecture for relay forwarding}: a
-    Linux kernel integration that uses two routing tables: one for traffic
-    originating at the local node, transported through a TUN virtual interface
-    over the TDMA channel, and one for transit traffic identified by source IP
-    address and forwarded directly via the physical Wi-Fi interface using the
-    kernel's built-in IP forwarding, eliminating the need for a user-space
-    relay plane;
+    \item Integration of the routing and relay forwarding mechanism with
+    the Linux kernel networking stack, using standard operating system
+    interfaces and leveraging the kernel's built-in IP forwarding;
 
-    \item \textbf{Video quality feedback loop}: a closed-loop mechanism in
-    which the base station detects video stream loss and sends a UDP feedback
-    signal to the robot node, which immediately sets the corresponding link
-    quality to zero and schedules route recomputation, triggering relay
-    activation without waiting for TDMA topology convergence;
+    \item Implementation of a video quality feedback loop that allows the
+    base station to signal stream loss to the robot, triggering immediate
+    relay activation independently of the TDMA topology convergence cycle;
 
-    \item \textbf{TX queue flow control}: a bounded transmit queue with
-    tail-drop eviction and pre-route-change flush, ensuring that each TDMA
-    transmission slot carries only the most recent application data and that
-    packets belonging to a superseded route are discarded immediately upon
-    route recomputation, preventing slot overload and stale-data delivery;
+    \item Reconstruction of the Layer~2 routing approach described by
+    Morais~\cite{morais2024synchronization} from published documentation,
+    providing a reference implementation for direct comparison between the
+    two architectures under identical experimental conditions;
 
-    \item \textbf{Comparative reference implementation}: a clean-room
-    reimplementation of the Layer~2 routing approach described by
-    Morais~\cite{morais2024synchronization}, reconstructed entirely from her
-    published documentation without access to the original source code, and
-    deployed on the same hardware platform to provide a direct performance
-    comparison between the two architectures under identical experimental
-    conditions;
-
-    \item \textbf{Experimental evaluation}: a test methodology and measurement
-    scripts for characterising routing convergence time, round-trip latency,
-    video stream inter-arrival regularity, and throughput in a three-node
-    scenario with topology changes induced by controlled signal attenuation.
+    \item Experimental evaluation of the complete system on physical
+    hardware, with a test methodology and automation scripts for measuring
+    routing convergence, latency, throughput, and video stream continuity.
 
 \end{itemize}
 
