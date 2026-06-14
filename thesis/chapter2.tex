@@ -877,7 +877,7 @@ MAC address table and the Spanning Tree through shared memory, and updates the A
 via \texttt{ioctl()} system calls. Figure~\ref{fig:framework-ana} shows the complete architecture
 after the addition of the routing module.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.82\textwidth]{frameworkAna}
 \caption{Updated TDMA framework architecture incorporating the Routing
@@ -887,6 +887,7 @@ and the Spanning Tree from shared memory and updates the kernel ARP table via
 \label{fig:framework-ana}
 \end{figure}
 
+\FloatBarrier
 \subsection{Routing Matrix and Data Structures}
 
 Routes are represented as a routing matrix derived from the Spanning Tree. Each node constructs
@@ -902,7 +903,7 @@ list contains the destination identifier, and uses the MAC address stored with t
 as the ARP next-hop. Figure~\ref{fig:linkedlist1} illustrates this structure for three example
 source nodes.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist1}
 \caption{Routing linked list for three example source nodes A, C, and G. Each primary entry
@@ -928,6 +929,7 @@ Each node stores the neighbour identifier, the corresponding MAC address, a poin
 primary entry (\texttt{next}), and a pointer to the secondary list of reachable nodes
 (\texttt{accessibleNodes}).
 
+\FloatBarrier
 \subsection{MAC Address Distribution}
 
 The original MATRIX beacon carried only connectivity and identifier information, with no MAC
@@ -936,7 +938,7 @@ address data. Since ARP injection requires MAC addresses, Morais extended the
 adding six bytes to every state beacon. Figure~\ref{fig:statshare-ana} shows the updated beacon
 layout.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{statshareAna}
 \caption{Updated state beacon layout, extending the original four fields with a MAC address
@@ -985,7 +987,7 @@ Figure~\ref{fig:linkedlist2} shows how the MAC address of each primary neighbour
 alongside its secondary list in the routing linked list, allowing the routing module to look up
 the correct MAC address for ARP injection in a single list traversal.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist2}
 \caption{MAC address association in the routing linked list for source nodes A and G. The MAC
@@ -994,6 +996,7 @@ nodes~\cite{morais2024synchronization}.}
 \label{fig:linkedlist2}
 \end{figure}
 
+\FloatBarrier
 \subsection{Routing Table Update Algorithm}
 
 When the Spanning Tree changes, the linked-list routing table must be updated efficiently.
@@ -1013,6 +1016,7 @@ processing time within the slot window regardless of network size. Changes to th
 (direct neighbours) trigger removal of all secondary entries associated with the old neighbour
 before the list is rebuilt from the DFS output.
 
+\FloatBarrier
 \subsection{Packet Routing via TUN and iptables}
 
 In the TDMA framework, the TUN interface (\texttt{tun0}) operates on a separate IP subnet
@@ -1035,6 +1039,7 @@ route it to the \texttt{wlan0} interface via the standard routing table. Binding
 the destination address rather than directly to the interface allows the kernel to handle
 fragmentation and reassembly normally.
 
+\FloatBarrier
 \subsection{Experimental Validation and Limitations}
 
 Morais validated the system on physical AlphaBot2-Pi robotic platforms, successfully
