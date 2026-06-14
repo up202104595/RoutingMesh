@@ -184,6 +184,20 @@ The work reported in this dissertation makes the following contributions:
     quality to zero and schedules route recomputation, triggering relay
     activation without waiting for TDMA topology convergence;
 
+    \item \textbf{TX queue flow control}: a bounded transmit queue with
+    tail-drop eviction and pre-route-change flush, ensuring that each TDMA
+    transmission slot carries only the most recent application data and that
+    packets belonging to a superseded route are discarded immediately upon
+    route recomputation, preventing slot overload and stale-data delivery;
+
+    \item \textbf{Comparative reference implementation}: a clean-room
+    reimplementation of the Layer~2 routing approach described by
+    Morais~\cite{morais2024synchronization}, reconstructed entirely from her
+    published documentation without access to the original source code, and
+    deployed on the same hardware platform to provide a direct performance
+    comparison between the two architectures under identical experimental
+    conditions;
+
     \item \textbf{Experimental evaluation}: a test methodology and measurement
     scripts for characterising routing convergence time, round-trip latency,
     video stream inter-arrival regularity, and throughput in a three-node
