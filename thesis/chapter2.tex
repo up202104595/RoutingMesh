@@ -103,74 +103,138 @@ Section~\ref{sec:related-work}.
 \section{Time Division Multiple Access and RA-TDMAs+}
 \label{sec:ra-tdma}
 
-\subsection{TDMA Principles}
+RA-TDMAs+~\cite{oliveira2018clockless} is a TDMA protocol designed for
+dynamic ad-hoc mesh networks. It achieves clockless relative
+synchronisation without requiring GPS or any external time reference,
+reduces interference among team members, and runs as an overlay on top of
+the underlying IEEE 802.11 CSMA/CA hardware, which continues to handle
+external interference from nodes outside the team. The protocol is the
+product of combining the synchronisation method of RA-TDMAs~\cite{sousa2012ra}
+with the topology-tracking and membership-management mechanisms of
+RA-TDMA+~\cite{oliveira2018clockless}, taking the most effective features
+of each.
 
-Time Division Multiple Access (TDMA) addresses the shared medium problem by
-partitioning time into a periodic sequence of frames. Each frame is divided
-into $N$ slots, with each node assigned one slot per frame. A node transmits
-only during its assigned slot, so at most one transmission occurs at any
-instant, eliminating intra-network collisions by construction rather than
-by probabilistic avoidance.
+\subsection{TDMA}
 
-The frame duration $T_{frame}$ is determined by the slot duration $T_{slot}$
-and the number of nodes:
+Time Division Multiple Access (TDMA) is a channel-sharing protocol that
+partitions time into a repeating sequence of rounds, each subdivided into
+$N$ equal slots. Every node in the network is assigned one unique slot per
+round and is permitted to transmit data only within that slot. Because
+transmissions are scheduled rather than contended, two nodes can never
+occupy the channel simultaneously, eliminating collisions by construction.
+
+If $T_{slot}$ is the slot duration and $N$ the number of active nodes,
+the round period $T$ is:
 
 \begin{equation}
-T_{frame} = N \times T_{slot}
+T = N \times T_{slot}
 \label{eq:frame}
 \end{equation}
 
-A guard interval is inserted at the boundary of each slot to absorb residual
-clock drift and signal propagation delay, preventing transmissions from
-adjacent slots from overlapping. The maximum time a packet must wait before
-it can be transmitted is one full frame, providing a deterministic upper
-bound on access latency.
+A packet that arrives at the transmit queue must wait at most one full
+round before it can be sent, giving a deterministic upper bound on
+access latency. This property makes TDMA well suited to real-time
+applications that require predictable timing, such as video streaming.
 
-For TDMA to function correctly, every node must agree on where slot
-boundaries lie. In cellular networks this synchronisation is provided by the
-base station. In an ad-hoc network with no central node, distributed
-synchronisation algorithms are required.
+\subsection{RA-TDMA}
 
-\subsection{Distributed Synchronisation: The RA-TDMA Family}
+For a TDMA round to operate without slot overlaps, every participating
+node must perceive slot boundaries in the same way. In infrastructure
+networks, a base station broadcasts a reference clock that all devices
+lock onto. In ad-hoc networks this centralised reference does not exist,
+and a distributed synchronisation mechanism is needed instead.
 
-The RA-TDMA family of protocols~\cite{sousa2012ra, oliveira2018clockless}
-achieves TDMA operation in ad-hoc networks through relative synchronisation:
-instead of locking to an external time reference, nodes adjust their slot
-boundaries based on the timing of transmissions they observe from their
-neighbours.
+RA-TDMA addresses this by having nodes synchronise through the timing
+of each other's transmissions, without requiring any shared external
+clock. Each node transmits a state packet at the beginning of its
+designated slot. Receivers observe when those packets arrive and
+compare the arrival time to the expected time, deriving a per-packet
+delay estimate. These estimates are used to progressively adjust slot
+boundaries so that overlaps are driven toward zero. The protocol can
+be layered on top of any wireless communication technology.
 
-Each packet carries a header field containing the offset $p_k$ of that
-transmission relative to the start of the sender's slot. A receiving node $j$
-observes the actual arrival time $rx_k$ of packet $k$ from node $i$ and
-compares it to the expected arrival time $\hat{rx}_k$ derived from the known
-slot layout. The difference is the synchronisation delay:
+Two versions of RA-TDMA are relevant to this work: RA-TDMAs~\cite{sousa2012ra},
+which contributed the synchronisation algorithm, and
+RA-TDMA+~\cite{oliveira2018clockless}, which contributed the
+topology-tracking mechanism.
+
+\subsection{RA-TDMAs: Synchronisation Algorithm}
+\label{sec:ratdmas-sync}
+
+RA-TDMAs~\cite{sousa2012ra} was originally developed to support video
+streaming between Unmanned Aerial Vehicles (UAVs) and a ground base
+station over a multi-hop line topology. In this setting each UAV relays
+the video stream one hop closer to the base station, up to a maximum of
+five hops; each additional hop introduces forwarding delay that
+accumulates at the destination.
+
+The synchronisation mechanism works as follows. The header of each
+transmitted packet carries the slot ID and the transmission offset
+$p_k$, defined as the time elapsed since the start of the sender's
+slot at the moment the packet was sent. A receiving node $j$ observes
+the real arrival time $rx_k$ of packet $k$ from node $i$ and computes
+the synchronisation delay $\delta_k$ as the difference between the
+observed arrival and the arrival that would have occurred if the two
+nodes were already perfectly synchronised:
 
 \begin{equation}
-\delta_k = \bigl(rx_k - \hat{rx}_k + T/2\bigr)_T - T/2
+\delta_k = (rx_k - \hat{rx}_k + T/2)_T - T/2
 \label{eq:delay}
 \end{equation}
 
-where the modular arithmetic keeps $\delta_k$ within the interval
-$(-T/2,\, T/2)$ to resolve ambiguity between early and late arrivals.
+The modular arithmetic, denoted by the subscript $T$, wraps the result
+into the interval $(-T/2,\; T/2)$, disambiguating whether the packet
+arrived early or late relative to the expected slot.
 
-The expected arrival time is computed from the receiver's slot start $B^{(j)}$
-and its knowledge of the slot layout. For node $j$ expecting a packet from
-node $i$, with $n$ nodes each assigned slot duration $s = T/n$:
+To compute $\hat{rx}_k$, the receiver must first estimate where node
+$i$'s slot begins. Given that node $j$ knows its own slot start
+$B^{(j)}$ and that slots are of equal length $s = T/n$ and ordered by
+node ID, the expected slot start of node $i$ as seen by node $j$ is:
 
 \begin{equation}
-\hat{B}^{(i)} = \bigl(B^{(j)} - (j - i)\,s + T\bigr)_T
+\hat{B}^{(i)}_k = (B^{(j)} - (j - i)\,s + T)_T,
+\quad j, i \in [1, n]
 \label{eq:expected-slot}
 \end{equation}
 
+Adding the transmission offset $p_k$ yields the expected packet arrival:
+
 \begin{equation}
-\hat{rx}_k = \bigl(\hat{B}^{(i)} + p_k\bigr)_T
+\hat{rx}_k = (\hat{B}^{(i)}_k + p_k)_T
 \label{eq:expected-rx}
 \end{equation}
 
-Before the start of each slot, the delays accumulated during the previous
-round are analysed. A delay function $f$ (minimum, maximum, or median
-depending on configuration) selects a representative value, from which the
-slot shift for the next round is computed:
+Substituting into Equation~\ref{eq:delay} gives the full expression
+for $\delta_k$:
+
+\begin{equation}
+\delta_k = (rx_k - (\hat{B}^{(i)}_k + p_k) + T/2)_T - T/2
+\label{eq:delay-full}
+\end{equation}
+
+At the end of each round, before the node begins transmitting in the
+next round, all delay estimates accumulated during that round are passed
+to a delay function $f$ that distils them into a single representative
+value. Three choices are defined:
+
+\begin{description}
+\item[Minimum delay] Uses the smallest observed $\delta_k$. The slot
+  advances by the least amount, making conservative corrections. This
+  reduces the risk of advancing the slot so far that it overlaps with
+  the preceding slot, but it is the slowest to converge.
+\item[Maximum delay] Uses the largest observed $\delta_k$. The slot
+  advances aggressively, reducing the chance of overlapping with the
+  following slot, at the cost of a higher risk of encroaching on the
+  preceding one.
+\item[Median delay] Uses the median of all $\delta_k$ values,
+  dampening the influence of outliers caused by occasional retransmissions
+  or interference spikes. This balances the trade-offs of the two
+  extreme approaches and is the strategy adopted in RA-TDMAs+.
+\end{description}
+
+The selected delay value is bounded to prevent excessively large
+corrections, and slots can only be shifted forward (delayed), never
+backwards:
 
 \begin{equation}
 \Delta(r) = \min\!\Bigl(\max\!\bigl(f(\delta_1,\,\delta_2,\,\ldots),\;0\bigr),\;
@@ -178,26 +242,60 @@ slot shift for the next round is computed:
 \label{eq:shift}
 \end{equation}
 
-The shift is bounded to at most $\Delta_{max}$, typically set to 25\% of the
-slot duration, to prevent large abrupt corrections. Slots can only be delayed,
-never advanced, ensuring a monotonic convergence process. The start of node
-$j$'s slot in round $r$ is then:
+where $\Delta_{max}$ is a configurable ceiling, typically 25\% of the
+slot duration. The slot start for the next round is updated as:
 
 \begin{equation}
 B^{(j)}(r) = B^{(j)}(r-1) + \Delta(r)
 \label{eq:slot-start}
 \end{equation}
 
-This iterative process drives all nodes toward a common timing without any
-external clock reference.
+All nodes continuously apply this adjustment until no delay is detected,
+at which point the round structure has converged and transmissions no
+longer overlap.
 
-\subsection{Topology Dissemination}
+\subsection{RA-TDMA+: Topology and Membership}
+\label{sec:ratdma-plus}
 
-The RA-TDMA+ protocol~\cite{oliveira2018clockless} extended the relative
-synchronisation mechanism to fully dynamic mesh networks by adding a
-distributed topology-tracking mechanism. Each node maintains a connectivity
-matrix $M$ of size $N \times N$, where entry $M_{jk} = 1$ indicates that
-node $j$ is currently receiving transmissions from node $k$:
+RA-TDMA+~\cite{oliveira2018clockless} extended the RA-TDMA approach to
+fully dynamic mesh networks where the set of communicating nodes is not
+fixed and not all pairs of nodes have a direct radio link.
+
+\textbf{Round structure and slot assignment.}
+The active team at any moment is denoted $\tau_A$, and the number of
+active nodes is $N = |\tau_A|$, which changes as nodes join or leave.
+The round period $T_{up}$ is fixed according to the real-time
+requirements of the application. Each slot has duration
+$t_{slot} = T_{up} / N$, so that as the team grows, each node's slot
+becomes shorter and the round absorbs the new members without changing
+its total duration.
+
+Slots are allocated in ascending order of each node's unique numeric
+ID. The node with the smallest ID in $\tau_A$ is assigned the first
+slot $s_0$, the next smallest gets $s_1$, and so on. As an example,
+if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$ then
+$\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$,
+$\text{ID}_5 \to s_2$~\cite{oliveira2018clockless}.
+
+\textbf{State dissemination via flooding with aggregation.}
+In a mesh network where some node pairs lack direct links, each node
+must share its local view of the topology with nodes it cannot reach
+directly. RA-TDMA+ uses a flooding-with-aggregation mechanism: at the
+start of each slot, a node broadcasts its current state (connectivity
+information, team membership, and an age variable for each piece of
+data) as a multicast message. Neighbours that receive this broadcast
+merge the new information with their own state and re-broadcast the
+merged result at the start of their own slots. Because each broadcast
+merges the freshest available data from all previously heard nodes,
+the information propagates outward one hop per round. After a bounded
+number of rounds equal to the diameter of the network, every node
+holds a globally consistent view of the full topology and team
+membership, regardless of which pairs of nodes have direct links.
+
+\textbf{Topology tracking.}
+The network topology is represented by a connectivity matrix $M$ of
+size $N \times N$. Entry $M_{jk} = 1$ if node $j$ is currently
+receiving transmissions from node $k$, and $M_{jk} = 0$ otherwise:
 
 \begin{equation}
 M_{jk} = \begin{cases}
@@ -207,42 +305,59 @@ M_{jk} = \begin{cases}
 \label{eq:matrix}
 \end{equation}
 
-At the start of each slot, a node updates its own row in $M$ to reflect
-which neighbours it has heard during the preceding rounds, then broadcasts the
-complete matrix. Receiving nodes merge incoming rows into their local copy,
-retaining the freshest entry for each row as determined by a per-row age
-counter. Through this flooding-with-aggregation process, every node converges
-to a globally consistent topology view within a bounded number of rounds, even
-when not all node pairs have direct radio links.
+Each node is responsible for keeping its own row up to date: before
+broadcasting, it sets $M_{j\cdot}$ to reflect which neighbours it
+observed during the preceding rounds. When receiving a matrix from
+another node, it updates its local copy row by row, keeping the entry
+with the most recent age value so that stale information does not
+overwrite fresh data. The result is that every node maintains a
+consistent and globally accurate view of the topology within a bounded
+number of rounds, and changes propagate through the network in the
+round immediately following their occurrence.
 
-Team membership changes are handled automatically. A new node's row appears in
-the next broadcast, causing all nodes to extend the round by one slot. A
-departed node's row ages past a threshold of three consecutive rounds without
-update, and all nodes remove it from their copy and contract the round
-accordingly.
+\textbf{Membership tracking.}
+Tracking which nodes belong to the active team $\tau_A$ is essential
+for computing the correct slot allocation. A new node's presence is
+detected when its row first appears in a received matrix broadcast;
+the receiving node adds a new row and column to its local matrix,
+increments $N$, and notifies the TDMA core to reorganise the round
+structure. The reorganised round is then propagated in the next
+broadcast, so all nodes converge to the same slot layout within a
+bounded number of rounds.
 
-\subsection{RA-TDMAs+: Unified Protocol}
+A node is considered to have left the team when its row in the matrix
+has not been refreshed for more than a threshold number of consecutive
+rounds (three rounds in the implementation used in this work). All
+nodes independently detect this condition, remove the corresponding
+row and column, decrement $N$, and contract the round accordingly.
 
-RA-TDMAs+~\cite{oliveira2018clockless} combines the synchronisation algorithm
-described above with the topology-tracking mechanism of RA-TDMA+, forming a
-single protocol that simultaneously provides collision-free medium access,
-clockless distributed synchronisation, and a continuously updated view of the
-network topology shared by all nodes.
+\subsection{RA-TDMAs+: Combined Operation}
 
-The synchronisation mechanism uses the spanning tree of the connectivity
-matrix to filter delay observations: only delays from links present in the
-spanning tree are used to compute the slot shift, preventing feedback loops
-that would otherwise form if delays were accumulated across cyclic paths in
-the topology graph.
+RA-TDMAs+ brings together the synchronisation algorithm of RA-TDMAs
+(Section~\ref{sec:ratdmas-sync}) and the topology and membership
+mechanisms of RA-TDMA+ (Section~\ref{sec:ratdma-plus}). The result
+is a single protocol that provides collision-free medium access,
+clockless distributed synchronisation, and a continuously updated
+network topology view, all without any external reference or
+centralised coordinator.
 
-In the three-node implementation used in this work, each slot has a duration
-of 50\,ms and a guard interval of 5\,ms, yielding 45\,ms of usable
-transmission time per slot and a total frame duration of 150\,ms, as shown
-in Table~\ref{tab:frame}.
+The two mechanisms interact through the spanning tree of the
+connectivity matrix. The synchronisation algorithm requires each
+node to observe delays from its neighbours, but in a mesh topology
+with cycles, combining delays from multiple paths would create
+synchronisation loops. RA-TDMAs+ resolves this by computing the
+Minimum Spanning Tree of $M$ and filtering delay observations so
+that only delays from links present in the spanning tree are used
+in the computation of $\Delta(r)$.
+
+In the three-node implementation used in this work, each slot has
+a duration of 50\,ms with a guard interval of 5\,ms, giving 45\,ms
+of usable transmission time per slot and a round period of 150\,ms,
+as shown in Table~\ref{tab:frame}.
 
 \begin{table}[h]
 \centering
-\caption{TDMA frame structure for the three-node implementation}
+\caption{TDMA round structure for the three-node implementation}
 \label{tab:frame}
 \begin{tabular}{cccc}
 \toprule
@@ -251,7 +366,7 @@ in Table~\ref{tab:frame}.
 \midrule
 50\,ms & 50\,ms & 50\,ms & 5\,ms \\
 \midrule
-\multicolumn{4}{c}{Frame: 150\,ms \quad Usable per slot: 45\,ms} \\
+\multicolumn{4}{c}{Round period: 150\,ms \quad Usable per slot: 45\,ms} \\
 \bottomrule
 \end{tabular}
 \end{table}
