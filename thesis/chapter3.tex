@@ -56,10 +56,7 @@ the system.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\textwidth]{frame_structure}
-\caption{Frame structure for the two message types. Type~1 (MATRIX Beacon) is sent over
-UDP and carries the TDMA header followed by the topology payload. Type~2 (\texttt{MSG\_DATA})
-is sent over TCP and carries the TDMA header, the \texttt{MSG\_DATA} header, and the
-original IP packet (Transport + Application layers) encapsulated transparently.}
+\caption{Frame structure for MATRIX Beacon (UDP, Type~1) and MSG\_DATA (TCP, Type~2).}
 \label{fig:frame-structure}
 \end{figure}
 
@@ -161,10 +158,7 @@ framework.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{frameworkmiguel}
-\caption{Final architecture of the TDMA framework extended with the Routing module and
-TCP Manager. Local sockets (red) carry control events; shared memory (green) carries
-high-frequency data; the TUN interface (blue) connects the application layer to the TDMA
-Core; Netlink (black) installs forwarding rules in the kernel routing tables.}
+\caption{Final architecture of the TDMA framework extended with the Routing module and TCP Manager.}
 \label{fig:framework-miguel}
 \end{figure}
 \bigskip
@@ -327,9 +321,10 @@ The routing module retains the linked-list structure introduced by
 Morais~\cite{morais2024synchronization}: primary list entries represent directly connected
 neighbours, and each primary entry carries a secondary list of all nodes reachable through
 that neighbour, as described in Section~\ref{sec:related-work}. The \texttt{routingList\_t}
-type is unchanged. The difference lies in how MAC addresses are obtained: rather than
-embedding them in the MATRIX beacon, this work retrieves MAC addresses through a separate
-shared-memory structure populated by \texttt{matrix.c}, keeping the beacon compact.
+type is unchanged. In the Layer~3 design no MAC address distribution is needed: the routing module derives each
+destination's IP address directly from its node identifier as the last octet of the
+10.0.0.0/24 prefix, so the lookup result is a TCP socket index rather than a link-layer
+address.
 
 \subsection{Per-peer Quality State}
 
@@ -343,25 +338,148 @@ and used as the edge weight in the Minimum Spanning Tree computation.
 \section{Routing Algorithm}
 \label{sec:routing-algo}
 
-The routing algorithm follows the MST-based proactive approach identified in
-Section~\ref{sec:routing-applicability}. At each topology update, the routing module reads the
-Spanning Tree computed by \texttt{matrix.c} from shared memory. It then runs a
-Depth-First Search (DFS) rooted at the local node over the Spanning Tree, enumerating all
-reachable nodes grouped by their first-hop neighbour. The DFS output for each first-hop
-neighbour is sorted with \texttt{qsort} by node identifier to produce the secondary linked
-list for that primary entry.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.70\textwidth]{routingModule}
+\caption{Execution cycle of the Routing module.}
+\label{fig:routing-module}
+\end{figure}
 
-The incremental update procedure is retained from the previous work: the sorted DFS output
-for each primary neighbour is compared against the existing secondary linked list in a single
-linear scan. Nodes present in the new output but absent from the existing list are inserted;
-nodes in the list but absent from the new output are removed. If no difference is detected
-for a primary neighbour, its secondary list is not modified. This keeps the number of list
-operations proportional to the size of the topology change rather than the total network size.
+The routing algorithm follows the MST-based proactive approach identified in
+Section~\ref{sec:routing-applicability}. The Routing module executes as a dedicated thread
+driven by topology-change events. Figure~\ref{fig:routing-module} shows its execution cycle,
+which repeats each time the mesh connectivity changes.
+
+\textbf{Wait for event.} The module blocks on the event queue until the Event Handler
+delivers a topology-change notification. Such a notification is issued whenever the
+Topology-Tracking module detects a node joining or leaving the mesh, causing the MATRIX
+connectivity matrix to change.
+
+\textbf{Read active nodes and Spanning Tree from shared memory.} On wake-up, the module
+reads the current set of active node identifiers and the Minimum Spanning Tree from the
+shared-memory regions maintained by the Topology-Tracking module. Both values are
+protected by \texttt{g\_matrix\_mutex} to prevent a torn read during a concurrent update.
+
+\textbf{Compute next hop.} A Depth-First Search~(DFS) is performed on the Spanning Tree,
+rooted at the local node. For each reachable destination the DFS records the first-hop
+neighbour through which the destination is reached. The set of destinations associated with
+each first-hop neighbour is sorted by node identifier using \texttt{qsort}, producing the
+secondary linked list for that primary entry.
+
+\textbf{Update routing table.} The sorted DFS output is compared against the current
+linked-list routing table in a single linear scan. Nodes present in the new output but absent
+from the existing list are inserted; nodes in the list but absent from the new output are
+removed. Unchanged entries are left untouched, keeping the number of list operations
+proportional to the size of the topology change rather than the total network size.
+
+\textbf{Update kernel routes.} For every modified entry in the routing table, the module
+installs or removes host routes in the Linux kernel. Two routes are installed per destination:
+one in the main routing table for application-originated traffic, and one in policy table~200
+for relay-forwarded traffic. This step is described in detail in
+Section~\ref{sec:kernel-config}.
+
+\textbf{Sleep.} After all kernel routes are updated, the module sleeps for a short settling
+interval before processing the next event, preventing route flapping during rapid topology
+transients.
 
 When a packet must be forwarded, \texttt{routing\_manager\_lookup()} traverses the primary
 linked list and searches each secondary list for the destination identifier. The first matching
 primary entry yields the next-hop peer ID, which indexes into \texttt{tcp\_sockfd[]} to obtain
 the TCP socket for transmission.
+
+
+%% -----------------------------------------------------------------------
+\section{Kernel Network Configuration}
+\label{sec:kernel-config}
+
+Correct operation of the Layer~3 forwarding path requires a set of kernel network rules
+established once at startup by the TUN module. This section describes the four configuration
+groups and their interaction with the routing tables maintained by the Routing module.
+
+\subsection{IP Forwarding and Interface Setup}
+
+Two kernel parameters are set at startup. \texttt{ip\_forward}
+(\texttt{/proc/sys/net/ipv4/ip\_forward}) is enabled so that the kernel forwards IP packets
+between interfaces; without it, packets arriving on \texttt{tun0} would be silently dropped
+instead of being routed towards \texttt{wlan0}. \texttt{rp\_filter} is disabled on
+\texttt{conf/all}, \texttt{conf/default}, and \texttt{conf/wlan0}: because relay traffic
+injected through \texttt{tun0} originates from the 10.0.0.0/24 prefix but exits on
+\texttt{wlan0}, the kernel's reverse-path check would reject these packets if left enabled.
+
+The wireless interface \texttt{wlan0} is configured in IEEE~802.11 ad-hoc mode with ESSID
+\texttt{manet-mesh} on channel~6, and assigned the physical address
+\texttt{172.20.10.\textit{id}/28}. The virtual interface \texttt{tun\textit{id}} is assigned
+the logical address \texttt{10.0.0.\textit{id}/24}, which is the address space visible to
+applications. The two address spaces are intentionally kept separate: 172.20.10.x is used
+only for physical next-hop forwarding (table~200), while 10.0.0.x is the namespace
+presented to the application and the routing algorithm.
+
+\subsection{Application Traffic Redirection (Table~100)}
+
+Application traffic addressed to the mesh (10.0.0.0/24) must be intercepted before it
+reaches \texttt{wlan0} and redirected through \texttt{tun0} so the TUN reader thread can
+capture it. Three rules achieve this:
+
+\begin{enumerate}
+\item \textbf{iptables mangle OUTPUT}: marks every outgoing packet to 10.0.0.0/24 on
+  \texttt{wlan0} with \texttt{fwmark~1}. A second rule immediately clears the mark for
+  packets whose source UDP port is the TDMA beacon port ($7000 + \text{node\_id}$),
+  ensuring that MATRIX beacons are never diverted.
+\item \textbf{ip rule fwmark~1}: routes all marked packets through policy table~100 instead
+  of the main routing table.
+\item \textbf{Table~100 default route}: \texttt{default dev tun\textit{id}} is installed in
+  table~100, so every marked packet is unconditionally sent to \texttt{tun0}.
+\end{enumerate}
+
+The packet then appears at the \texttt{/dev/tun\textit{id}} file descriptor. The TUN reader
+thread reads it, determines the destination node identifier from the IP destination address,
+and pushes the packet into the transmission queue. During its TDMA slot, the transmitter
+thread pops the packet, queries the routing table for the correct next-hop peer ID, and sends
+the framed packet over the corresponding TCP connection.
+
+\subsection{Relay Forwarding Path (Table~200)}
+
+When a relay node receives a TCP packet destined for a further node, it injects the IP
+payload into \texttt{tun0} via \texttt{tun\_write()}. From the kernel's perspective the
+packet appears as traffic arriving on the TUN interface and requiring IP forwarding.
+Table~200 handles these relay packets:
+
+\begin{enumerate}
+\item \textbf{ip rule iif tun\textit{id} priority~100}: routes all traffic whose ingress
+  interface is \texttt{tun\textit{id}} through table~200, taking precedence over the main
+  table.
+\item \textbf{Table~200 host routes}: for each reachable destination, the Routing module
+  installs \texttt{10.0.0.\textit{dest}/32 via 172.20.10.\textit{next\_hop} dev wlan0}.
+  The gateway is the physical address of the next-hop node, so the forwarded packet exits
+  directly onto the \texttt{wlan0} ad-hoc link without passing through \texttt{tun0} again.
+\item \textbf{iptables FORWARD}: rules \texttt{-i tun\textit{id} -o wlan0 ACCEPT} and
+  \texttt{-i wlan0 -o tun\textit{id} ACCEPT} permit the kernel to forward packets between
+  the two interfaces; without them the default-drop FORWARD policy silently discards all
+  relay traffic.
+\end{enumerate}
+
+\subsection{Kernel Route Installation via Netlink}
+
+Route entries in both the main table and table~200 are installed and removed using Netlink
+sockets (\texttt{AF\_NETLINK}, \texttt{NETLINK\_ROUTE}) rather than by spawning
+\texttt{ip route} as a child process. Each Netlink message contains an \texttt{nlmsghdr}
+header (type \texttt{RTM\_NEWROUTE} or \texttt{RTM\_DELROUTE}), an \texttt{rtmsg}
+routing header specifying family, prefix length, table, protocol, scope, and route type, and
+a set of \texttt{rtattr} attributes carrying the destination address (\texttt{RTA\_DST}),
+gateway (\texttt{RTA\_GATEWAY}), and output interface index (\texttt{RTA\_OIF}). The full
+round-trip including the kernel ACK costs approximately 50\,\textmu s per route, compared
+to approximately 3\,ms for an equivalent \texttt{system("ip route ...")} call, a 60-fold
+reduction that is significant when updating routes for the entire mesh at topology-change
+time.
+
+Two functions implement this interface: \texttt{ip\_route\_add()} installs a route in the
+main table with flags \texttt{NLM\_F\_CREATE | NLM\_F\_REPLACE}, so a second call for the
+same destination silently replaces the existing entry; \texttt{ip\_route\_add\_t()} accepts
+an explicit table identifier and is called with \texttt{table\_id = 200} for relay routes.
+When a node leaves the mesh, \texttt{ip\_route\_del()} removes the main-table entry via
+\texttt{RTM\_DELROUTE}, and \texttt{ip\_route\_flush\_table(200)} purges all table-200
+entries in a single \texttt{system("ip route flush table 200")} call, acceptable at
+teardown time.
 
 
 %% -----------------------------------------------------------------------
