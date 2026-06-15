@@ -652,26 +652,22 @@ sends it over the TCP connection directly to the destination. The destination's
 \texttt{tcp\_rx\_peer} thread receives it, calls \texttt{tun\_write()}, and the kernel
 delivers it to the destination application via \texttt{tun0}.
 
-\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.95\linewidth]{EndtoEnd2}
+\includegraphics[width=1.0\textwidth]{EndtoEnd2}
 \caption{Direct packet delivery between two neighbouring nodes.}
 \label{fig:endtoend2}
 \end{figure}
-\end{landscape}
 
 \paragraph{Relay delivery.}
 Figure~\ref{fig:endtoend} shows the three-node relay case.
 
-\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.95\linewidth]{Endtoend}
+\includegraphics[width=1.0\textwidth]{Endtoend}
 \caption{End-to-end packet flow through a three-node relay topology.}
 \label{fig:endtoend}
 \end{figure}
-\end{landscape}
 
 \paragraph{Source node.}
 The video application writes IP packets addressed to the destination into \texttt{tun0}. The
