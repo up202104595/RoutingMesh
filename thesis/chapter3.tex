@@ -419,12 +419,14 @@ established once at startup by the TUN module. This section describes the four c
 groups and their interaction with the routing tables maintained by the Routing module.
 Figure~\ref{fig:trafico} shows the two traffic paths and the routing tables that govern them.
 
+\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=1.0\textwidth]{trafico}
+\includegraphics[width=0.95\linewidth]{trafico}
 \caption{Separation of application traffic (Table~100) and relay traffic (Table~200).}
 \label{fig:trafico}
 \end{figure}
+\end{landscape}
 
 \subsection{IP Forwarding and Interface Setup}
 
@@ -568,12 +570,14 @@ illustrates the mechanism: packets P1, P2 and P3 (blue) are sent during the slot
 \texttt{slot\_end} is detected, packets P4 and P5 (red) are pushed back into the queue
 and sent in the following round.
 
+\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=1.0\textwidth]{buffercontrol}
+\includegraphics[width=0.95\linewidth]{buffercontrol}
 \caption{Slot data control: packets sent during the slot (blue) and pushed back on slot\_end (red).}
 \label{fig:buffercontrol}
 \end{figure}
+\end{landscape}
 
 \begin{lstlisting}[language=C,
     caption={Back-pressure mechanism in the transmitter thread (\texttt{tx\_loop})},
@@ -648,22 +652,26 @@ sends it over the TCP connection directly to the destination. The destination's
 \texttt{tcp\_rx\_peer} thread receives it, calls \texttt{tun\_write()}, and the kernel
 delivers it to the destination application via \texttt{tun0}.
 
+\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=1.0\textwidth]{EndtoEnd2}
+\includegraphics[width=0.95\linewidth]{EndtoEnd2}
 \caption{Direct packet delivery between two neighbouring nodes.}
 \label{fig:endtoend2}
 \end{figure}
+\end{landscape}
 
 \paragraph{Relay delivery.}
 Figure~\ref{fig:endtoend} shows the three-node relay case.
 
+\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=1.0\textwidth]{Endtoend}
+\includegraphics[width=0.95\linewidth]{Endtoend}
 \caption{End-to-end packet flow through a three-node relay topology.}
 \label{fig:endtoend}
 \end{figure}
+\end{landscape}
 
 \paragraph{Source node.}
 The video application writes IP packets addressed to the destination into \texttt{tun0}. The
