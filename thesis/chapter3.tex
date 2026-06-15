@@ -561,7 +561,17 @@ degrading synchronisation quality.
 
 This work introduces a per-slot byte budget, \texttt{MAX\_BYTES\_SLOT}, computed from the
 configured WiFi link rate and the slot duration. The transmitter thread tracks elapsed time
-and stops dequeuing when the slot boundary is reached:
+and stops dequeuing when the slot boundary is reached. Figure~\ref{fig:buffercontrol}
+illustrates the mechanism: packets P1, P2 and P3 (blue) are sent during the slot; when
+\texttt{slot\_end} is detected, packets P4 and P5 (red) are pushed back into the queue
+and sent in the following round.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\textwidth]{buffercontrol}
+\caption{Slot data control: packets sent during the slot (blue) and pushed back on slot\_end (red).}
+\label{fig:buffercontrol}
+\end{figure}
 
 \begin{lstlisting}[language=C,
     caption={Back-pressure mechanism in the transmitter thread (\texttt{tx\_loop})},
