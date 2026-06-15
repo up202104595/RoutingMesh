@@ -154,17 +154,17 @@ Figure~\ref{fig:framework-miguel} presents the complete architecture of the syst
 in this work. The TDMA Core and its four internal threads (TX, RX, Event Handler, and
 Config), the Topology-Tracking module, and the RA-TDMAs+ synchronisation module are
 retained without modification from the framework of Almeida~\cite{almeida2023synchronization}.
-The Routing module is the central new component, described in detail in the sections that
-follow.
+The Routing module and the TCP Manager are the central new components added to the
+framework.
 
 \bigskip
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{frameworkmiguel}
-\caption{Final architecture of the TDMA framework extended with the Routing module.
-Local sockets (red) carry control events; shared memory (green) carries high-frequency
-data; the TUN interface (blue) connects the application layer to the TDMA Core; Netlink
-(black) installs forwarding rules in the kernel routing tables.}
+\caption{Final architecture of the TDMA framework extended with the Routing module and
+TCP Manager. Local sockets (red) carry control events; shared memory (green) carries
+high-frequency data; the TUN interface (blue) connects the application layer to the TDMA
+Core; Netlink (black) installs forwarding rules in the kernel routing tables.}
 \label{fig:framework-miguel}
 \end{figure}
 \bigskip
@@ -176,21 +176,27 @@ the slot assignment changes due to a node joining or leaving, carrying the updat
 identifier so the Core can reorganise the round before the next transmission.
 
 The Routing module reads two inputs from shared memory: the Spanning Tree produced by
-the Topology-Tracking module, and the per-link quality scores produced by the PDR
+the Topology-Tracking module, and the per-link quality scores maintained by the PDR
 sub-module. Because node identifiers in the framework correspond directly to the last octet
 of each node's IP address, no separate IP address distribution is required; the Routing
 module derives every destination IP from the node identifiers already present in the Spanning
 Tree. This contrasts with the Layer~2 approach of Morais~\cite{morais2024synchronization},
 which required distributing MAC addresses through the MATRIX beacon because MAC
-addresses cannot be derived from node identifiers.
+addresses cannot be derived from node identifiers. After computing next-hop decisions
+through a Depth-First Search over the Spanning Tree, the Routing module installs the
+resulting routes into the Linux kernel via Netlink, writing entries into two routing tables:
+the main table and a secondary policy table (table~200). The two-table approach allows
+application traffic and TDMA control traffic to follow separate forwarding paths, preventing
+routing loops between the wireless interface and the TUN interface.
 
-After computing next-hop decisions through a Depth-First Search over the Spanning Tree,
-the Routing module installs the resulting routes into the Linux kernel via \textbf{Netlink},
-writing entries into two routing tables: the main table and a secondary policy table
-(table~200). The two-table approach allows application traffic and TDMA control traffic
-to follow separate forwarding paths, preventing routing loops between the wireless
-interface and the TUN interface.
-% \end{figure}
+The TCP Manager groups three threads responsible for the data-plane connections to peer
+nodes: the TCP acceptor thread, which accepts incoming connections from neighbours; the
+TCP keepalive thread, which monitors active connections and reconnects dead peers; and one
+TCP receiver thread per connected peer, which processes incoming \texttt{MSG\_DATA} frames.
+All three threads interact directly with the Routing module through function calls within the
+same process: the TX thread queries the Routing module for the correct TCP socket before
+each transmission, and the per-peer receiver threads consult it to decide whether an arriving
+packet should be delivered locally via \texttt{tun0} or forwarded to the next hop.
 
 
 %% -----------------------------------------------------------------------
