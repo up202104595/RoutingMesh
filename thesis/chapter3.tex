@@ -615,6 +615,17 @@ received packets:
 The PDR value, an integer in $[0,\,100]$, is used as the edge weight in the MST computation.
 Because the MST minimises total edge weight, a link with lower PDR (higher loss rate) has
 a higher weight and is less likely to be selected when a more reliable alternative exists.
+Figure~\ref{fig:quality} illustrates the three-step process: the full network topology with
+PDR values is fed into Prim's MST algorithm, which produces a spanning tree retaining only
+the highest-quality links; a DFS over that tree then derives the routing table with the
+correct next-hop for each destination.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\textwidth]{quality}
+\caption{PDR-weighted MST routing: from network topology to routing table.}
+\label{fig:quality}
+\end{figure}
 
 
 
