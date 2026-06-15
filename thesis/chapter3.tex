@@ -198,35 +198,77 @@ packet should be delivered locally via \texttt{tun0} or forwarded to the next ho
 \label{sec:layer3-design}
 
 The forwarding mechanism operates at the network layer (Layer~3), in contrast to the
-Layer~2 ARP-manipulation approach of Morais~\cite{morais2024synchronization}. The central
-component is a TUN virtual network interface, \texttt{tun0}, which intercepts IP packets from
-the application before they reach the wireless interface and reinjects received packets directly
-into the kernel IP stack at the destination node. At each relay node, the Linux kernel's native
-IP forwarding capability routes transit packets to the correct outgoing interface without
-requiring any MAC-level manipulation.
+Layer~2 ARP-manipulation approach of Morais~\cite{morais2024synchronization}.
+Figure~\ref{fig:l2-vs-l3} illustrates the key structural difference between the two
+approaches.
 
-This design provides several practical advantages. Standard IP diagnostic tools such as
-\texttt{ping} and \texttt{traceroute} operate correctly because all forwarding decisions are
-visible at the IP level: each hop decrements the IP TTL and the complete relay path appears
-in \texttt{traceroute} output. Linux networking subsystems that operate at Layer~3, including
-traffic shaping with \texttt{tc}, firewall rules with \texttt{iptables}, and policy routing tables,
-interact normally with traffic passing through the system. Debugging is substantially easier
-than with the Layer~2 solution, where the relay path is invisible to all IP-level tools.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{layer2v3}
+\caption{Layer~2 vs Layer~3 routing: relay nodes process up to Data Link in L2 and up
+to Network in L3.}
+\label{fig:l2-vs-l3}
+\end{figure}
 
-% TODO FIGURE: Layer 2 vs Layer 3 comparison
-% Suggested image: two-panel diagram side by side.
-% Left panel (Layer 2 - Ana): shows ARP table manipulation at each hop, MAC address
-% rewriting, IP header unchanged end to end, traceroute seeing only source and destination.
-% Right panel (Layer 3 - this work): shows tun0 interception, IP TTL decremented at each
-% hop, kernel routing table consulted, traceroute seeing every intermediate hop.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.86\textwidth]{FILENAME}
-% \caption{Comparison of Layer~2 (left) and Layer~3 (right) routing approaches. In the
-% Layer~3 case the relay path is visible to \texttt{traceroute} and compatible with all
-% Linux IP-layer tools.}
-% \label{fig:l2-vs-l3}
-% \end{figure}
+\subsection{Layer~2 Approach (Morais, 2024)}
+
+In the Layer~2 solution of Morais~\cite{morais2024synchronization}, relay nodes forward
+packets by manipulating ARP tables and rewriting MAC addresses at the Data Link layer.
+Each relay node intercepts a frame, replaces the destination MAC address with the MAC of
+the next hop, and retransmits it on the wireless interface. The IP header is never modified:
+the source and destination IP addresses remain those of the originating and final nodes
+throughout the entire path.
+
+This approach has several limitations. First, it requires distributing MAC addresses across
+all nodes, which Morais solved by extending the MATRIX beacon to carry each node's MAC
+address, increasing beacon size and coupling the routing system tightly to the beacon
+format. Second, because forwarding happens below the IP layer, all IP-level tools are blind
+to the relay path: \texttt{traceroute} sees only the source and destination, intermediate
+hops are invisible, and \texttt{ping} cannot distinguish a broken relay from a broken
+direct link. Third, \texttt{iptables}, traffic shaping (\texttt{tc}), and policy routing
+tables cannot act on transit traffic because it never enters the kernel's IP stack on the
+relay node. Finally, ARP manipulation is performed via \texttt{ioctl} system calls on the
+wireless interface, an operation that is interface-specific and fragile under interface
+resets or channel changes.
+
+\subsection{Layer~3 Approach (This Work)}
+
+The central component of the Layer~3 design is a TUN virtual network interface,
+\texttt{tun\textit{id}}, which intercepts IP packets from the application before they
+reach the wireless interface and reinjects received packets directly into the kernel IP
+stack. At each relay node, the Linux kernel's native IP forwarding path routes transit
+packets to the correct outgoing interface without any MAC-level manipulation.
+
+The advantages over the Layer~2 approach are significant:
+
+\begin{itemize}
+\item \textbf{No MAC address distribution.} Node identifiers map directly to IP last
+  octets (10.0.0.\textit{id}), so the routing module derives every destination IP from
+  the Spanning Tree without any additional beacon field. The MATRIX beacon format is
+  unchanged from the base framework of Almeida~\cite{almeida2023synchronization}.
+
+\item \textbf{Full IP-layer visibility.} Each relay node decrements the IP TTL and
+  performs a full routing-table lookup. \texttt{traceroute} reports every intermediate
+  hop, and \texttt{ping} correctly identifies which segment of the path is failing.
+  Debugging multi-hop issues takes minutes rather than hours.
+
+\item \textbf{Compatibility with Linux networking subsystems.} Because transit traffic
+  passes through the kernel IP stack, \texttt{iptables} rules, traffic shaping with
+  \texttt{tc}, and policy routing tables (used in Section~\ref{sec:kernel-config}) apply
+  normally. This enables the two-table traffic separation (Table~100 and Table~200) that
+  isolates application traffic from TDMA control traffic.
+
+\item \textbf{Processing speed.} Kernel-native IP forwarding is performed entirely in
+  kernel space without additional system calls per packet. Route lookups use the kernel's
+  optimised FIB (Forwarding Information Base) trie structure. In contrast, the Layer~2
+  ARP manipulation required an \texttt{ioctl} call per forwarded frame, which involves a
+  context switch and is significantly slower for high packet rates.
+
+\item \textbf{Portability.} The TUN interface and Netlink API are standard Linux kernel
+  interfaces available on any Linux distribution and any wireless driver. The
+  \texttt{ioctl}-based ARP manipulation of the Layer~2 approach depends on
+  driver-specific behaviour of the wireless interface.
+\end{itemize}
 
 
 %% -----------------------------------------------------------------------
