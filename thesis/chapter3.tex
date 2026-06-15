@@ -233,8 +233,11 @@ than with the Layer~2 solution, where the relay path is invisible to all IP-leve
 \section{Thread Architecture}
 \label{sec:threads}
 
-The system runs eight concurrent threads per node. Table~\ref{tab:threads} summarises their
-roles and the protocols they use.
+The system runs seven fixed threads per node plus one dynamic TCP receiver thread per
+connected peer. Table~\ref{tab:threads} summarises their roles. The Receiver, Transmitter,
+and Event Handler threads are retained from the TDMA framework of
+Almeida~\cite{almeida2023synchronization}; the remaining threads are new contributions of
+this work.
 
 \begin{table}[H]
 \centering
@@ -251,7 +254,6 @@ Event handler     & \texttt{event\_handler\_loop()}   & Processes topology event
 TCP acceptor      & \texttt{tcp\_accept\_loop()}      & Accepts incoming TCP connections from peers \\
 TCP keepalive     & \texttt{tcp\_keepalive\_loop()}   & Monitors peer connections, reconnects dead ones \\
 TCP RX (per peer) & \texttt{tcp\_rx\_peer\_loop()}    & Receives MSG\_DATA from one connected peer \\
-Video feedback    & \texttt{video\_feedback\_loop()}  & Receives quality reports on UDP port 9002 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -398,65 +400,94 @@ groups and their interaction with the routing tables maintained by the Routing m
 
 \subsection{IP Forwarding and Interface Setup}
 
-Two kernel parameters are set at startup. \texttt{ip\_forward}
-(\texttt{/proc/sys/net/ipv4/ip\_forward}) is enabled so that the kernel forwards IP packets
-between interfaces; without it, packets arriving on \texttt{tun0} would be silently dropped
-instead of being routed towards \texttt{wlan0}. \texttt{rp\_filter} is disabled on
-\texttt{conf/all}, \texttt{conf/default}, and \texttt{conf/wlan0}: because relay traffic
-injected through \texttt{tun0} originates from the 10.0.0.0/24 prefix but exits on
-\texttt{wlan0}, the kernel's reverse-path check would reject these packets if left enabled.
+Two kernel parameters are set at startup. \texttt{ip\_forward} is enabled so that the
+kernel forwards IP packets between interfaces; without it, packets arriving on \texttt{tun0}
+would be silently dropped instead of being routed towards \texttt{wlan0}.
+\texttt{rp\_filter} is disabled on all relevant interfaces because relay traffic injected
+through \texttt{tun0} originates from the 10.0.0.0/24 prefix but exits on \texttt{wlan0};
+the kernel's reverse-path check would reject these packets if left enabled.
+Listing~\ref{lst:sysctl} shows the commands applied.
 
-The wireless interface \texttt{wlan0} is configured in IEEE~802.11 ad-hoc mode with ESSID
-\texttt{manet-mesh} on channel~6, and assigned the physical address
-\texttt{172.20.10.\textit{id}/28}. The virtual interface \texttt{tun\textit{id}} is assigned
-the logical address \texttt{10.0.0.\textit{id}/24}, which is the address space visible to
-applications. The two address spaces are intentionally kept separate: 172.20.10.x is used
-only for physical next-hop forwarding (table~200), while 10.0.0.x is the namespace
+\begin{lstlisting}[language=bash,
+    caption={Kernel forwarding parameters and interface initialisation},
+    label={lst:sysctl}]
+# enable IP forwarding and disable reverse-path filter
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
+echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter
+echo 0 > /proc/sys/net/ipv4/conf/wlan0/rp_filter
+
+# wlan0: IEEE 802.11 ad-hoc, ESSID manet-mesh, channel 6
+ip link set wlan0 down
+iwconfig wlan0 mode ad-hoc
+iwconfig wlan0 essid manet-mesh
+iwconfig wlan0 channel 6
+ip link set wlan0 up
+ip addr add 172.20.10.<id>/28 dev wlan0    # physical address
+
+# tun<id>: logical address + subnet route
+ip addr add 10.0.0.<id>/24  dev tun<id>
+ip route add 10.0.0.0/24 dev tun<id> src 10.0.0.<id>
+\end{lstlisting}
+
+The two address spaces are intentionally kept separate: \texttt{172.20.10.x} is used only
+for physical next-hop forwarding in table~200, while \texttt{10.0.0.x} is the namespace
 presented to the application and the routing algorithm.
 
 \subsection{Application Traffic Redirection (Table~100)}
 
 Application traffic addressed to the mesh (10.0.0.0/24) must be intercepted before it
 reaches \texttt{wlan0} and redirected through \texttt{tun0} so the TUN reader thread can
-capture it. Three rules achieve this:
+capture it. Listing~\ref{lst:table100} shows the three rules that implement this.
 
-\begin{enumerate}
-\item \textbf{iptables mangle OUTPUT}: marks every outgoing packet to 10.0.0.0/24 on
-  \texttt{wlan0} with \texttt{fwmark~1}. A second rule immediately clears the mark for
-  packets whose source UDP port is the TDMA beacon port ($7000 + \text{node\_id}$),
-  ensuring that MATRIX beacons are never diverted.
-\item \textbf{ip rule fwmark~1}: routes all marked packets through policy table~100 instead
-  of the main routing table.
-\item \textbf{Table~100 default route}: \texttt{default dev tun\textit{id}} is installed in
-  table~100, so every marked packet is unconditionally sent to \texttt{tun0}.
-\end{enumerate}
+\begin{lstlisting}[language=bash,
+    caption={Table~100: application traffic redirection to \texttt{tun0}},
+    label={lst:table100}]
+# mark app traffic to 10.0.0.0/24 with fwmark 1
+iptables -t mangle -A OUTPUT -o wlan0 -d 10.0.0.0/24 -j MARK --set-mark 1
+# clear mark for TDMA beacons (UDP source port 7000+<id>)
+iptables -t mangle -A OUTPUT -o wlan0 -p udp --sport <7000+id> -j MARK --set-mark 0
 
-The packet then appears at the \texttt{/dev/tun\textit{id}} file descriptor. The TUN reader
-thread reads it, determines the destination node identifier from the IP destination address,
-and pushes the packet into the transmission queue. During its TDMA slot, the transmitter
-thread pops the packet, queries the routing table for the correct next-hop peer ID, and sends
-the framed packet over the corresponding TCP connection.
+# policy rule: fwmark 1 -> table 100
+ip rule add fwmark 1 table 100
+# table 100: default route via tun<id>
+ip route add default dev tun<id> table 100
+\end{lstlisting}
+
+Every marked packet exits via \texttt{tun\textit{id}} and appears at the
+\texttt{/dev/tun\textit{id}} file descriptor. The TUN reader thread reads it, extracts the
+destination node identifier from the IP destination address, and pushes the packet into the
+transmission queue. During its TDMA slot, the transmitter thread pops the packet, queries
+the routing table for the next-hop peer ID, and sends the framed packet over the
+corresponding TCP connection.
 
 \subsection{Relay Forwarding Path (Table~200)}
 
 When a relay node receives a TCP packet destined for a further node, it injects the IP
 payload into \texttt{tun0} via \texttt{tun\_write()}. From the kernel's perspective the
 packet appears as traffic arriving on the TUN interface and requiring IP forwarding.
-Table~200 handles these relay packets:
+Table~200 handles these relay packets as shown in Listing~\ref{lst:table200}.
 
-\begin{enumerate}
-\item \textbf{ip rule iif tun\textit{id} priority~100}: routes all traffic whose ingress
-  interface is \texttt{tun\textit{id}} through table~200, taking precedence over the main
-  table.
-\item \textbf{Table~200 host routes}: for each reachable destination, the Routing module
-  installs \texttt{10.0.0.\textit{dest}/32 via 172.20.10.\textit{next\_hop} dev wlan0}.
-  The gateway is the physical address of the next-hop node, so the forwarded packet exits
-  directly onto the \texttt{wlan0} ad-hoc link without passing through \texttt{tun0} again.
-\item \textbf{iptables FORWARD}: rules \texttt{-i tun\textit{id} -o wlan0 ACCEPT} and
-  \texttt{-i wlan0 -o tun\textit{id} ACCEPT} permit the kernel to forward packets between
-  the two interfaces; without them the default-drop FORWARD policy silently discards all
-  relay traffic.
-\end{enumerate}
+\begin{lstlisting}[language=bash,
+    caption={Table~200: relay forwarding from \texttt{tun0} to \texttt{wlan0}},
+    label={lst:table200}]
+# policy rule: ingress on tun<id> -> table 200 (priority 100)
+ip rule add iif tun<id> lookup 200 priority 100
+
+# allow kernel to forward between tun and wlan0
+iptables -I FORWARD -i tun<id> -o wlan0 -j ACCEPT
+iptables -I FORWARD -i wlan0  -o tun<id> -j ACCEPT
+
+# per-destination host routes (installed at runtime by Routing module):
+ip route add 10.0.0.<dest>/32 via 172.20.10.<nexthop> dev wlan0 table 200
+\end{lstlisting}
+
+The \texttt{iif} rule takes precedence over the main table because its priority (100) is
+lower than the default (32766). Each \texttt{/32} host route in table~200 uses the
+physical address (\texttt{172.20.10.\textit{nexthop}}) of the next-hop node as the gateway,
+so the forwarded packet exits directly onto the \texttt{wlan0} ad-hoc link without passing
+through \texttt{tun0} again. The FORWARD rules are required because the Linux kernel's
+default FORWARD policy is DROP; without them all relay traffic is silently discarded.
 
 \subsection{Kernel Route Installation via Netlink}
 
@@ -464,32 +495,43 @@ Route entries in both the main table and table~200 are installed and removed usi
 sockets (\texttt{AF\_NETLINK}, \texttt{NETLINK\_ROUTE}) rather than by spawning
 \texttt{ip route} as a child process. Each Netlink message contains an \texttt{nlmsghdr}
 header (type \texttt{RTM\_NEWROUTE} or \texttt{RTM\_DELROUTE}), an \texttt{rtmsg}
-routing header specifying family, prefix length, table, protocol, scope, and route type, and
-a set of \texttt{rtattr} attributes carrying the destination address (\texttt{RTA\_DST}),
-gateway (\texttt{RTA\_GATEWAY}), and output interface index (\texttt{RTA\_OIF}). The full
-round-trip including the kernel ACK costs approximately 50\,\textmu s per route, compared
-to approximately 3\,ms for an equivalent \texttt{system("ip route ...")} call, a 60-fold
-reduction that is significant when updating routes for the entire mesh at topology-change
-time.
+routing header specifying the address family, prefix length, table identifier, protocol,
+scope, and route type, and a set of variable-length \texttt{rtattr} attributes carrying the
+destination address (\texttt{RTA\_DST}), gateway (\texttt{RTA\_GATEWAY}), and output
+interface index (\texttt{RTA\_OIF}). The full round-trip including the kernel ACK costs
+approximately 50\,\textmu s per route, compared to approximately 3\,ms for an equivalent
+\texttt{system("ip route ...")} call, a 60-fold reduction significant when updating routes
+for the entire mesh at topology-change time.
 
-Two functions implement this interface: \texttt{ip\_route\_add()} installs a route in the
-main table with flags \texttt{NLM\_F\_CREATE | NLM\_F\_REPLACE}, so a second call for the
-same destination silently replaces the existing entry; \texttt{ip\_route\_add\_t()} accepts
-an explicit table identifier and is called with \texttt{table\_id = 200} for relay routes.
-When a node leaves the mesh, \texttt{ip\_route\_del()} removes the main-table entry via
-\texttt{RTM\_DELROUTE}, and \texttt{ip\_route\_flush\_table(200)} purges all table-200
-entries in a single \texttt{system("ip route flush table 200")} call, acceptable at
-teardown time.
+Listing~\ref{lst:netlink-api} shows the four API calls used by the Routing module.
+
+\begin{lstlisting}[language=C,
+    caption={Netlink route management API used by the Routing module},
+    label={lst:netlink-api}]
+/* topology change: install two routes per destination */
+ip_route_add("10.0.0.3", "10.0.0.2", "tun1");         /* main table  */
+ip_route_add_t("10.0.0.3", "172.20.10.3", "wlan0", 200); /* table 200 */
+
+/* node departure: remove routes */
+ip_route_del("10.0.0.3", "tun1");   /* main table entry */
+ip_route_flush_table(200);           /* purge all table-200 entries */
+\end{lstlisting}
+
+\texttt{ip\_route\_add()} uses flags \texttt{NLM\_F\_CREATE | NLM\_F\_REPLACE}, so a
+repeated call for the same destination silently replaces the existing entry without error.
+At teardown, \texttt{ip\_route\_flush\_table(200)} issues a single
+\texttt{system("ip route flush table 200")} call to purge all relay routes at once.
 
 
 %% -----------------------------------------------------------------------
 \section{Slot Data Control}
 \label{sec:slot-control}
 
-A limitation of the previous routing work was the absence of any mechanism to limit the
-volume of data transmitted within a single TDMA slot. Without such a mechanism, a burst
-of queued packets could cause the transmitter thread to overstay its slot, causing its
-transmissions to overlap with the following node's slot and degrading synchronisation quality.
+A limitation of the routing work of Morais~\cite{morais2024synchronization} was the
+absence of any mechanism to limit the volume of data transmitted within a single TDMA slot.
+Without such a mechanism, a burst of queued packets could cause the transmitter thread to
+overstay its slot, causing its transmissions to overlap with the following node's slot and
+degrading synchronisation quality.
 
 This work introduces a per-slot byte budget, \texttt{MAX\_BYTES\_SLOT}, computed from the
 configured WiFi link rate and the slot duration. The transmitter thread tracks elapsed time
@@ -518,9 +560,10 @@ channel before its slot expires, regardless of queue depth or packet size.
 \section{Link Quality Monitoring}
 \label{sec:pdr}
 
-The routing decision in the previous work was based solely on the binary connectivity matrix,
-treating all present links as equivalent regardless of their reliability. This work introduces
-per-link Packet Delivery Ratio (PDR) monitoring through \texttt{pdr.c}.
+The routing decision in the work of Morais~\cite{morais2024synchronization} was based
+solely on the binary connectivity matrix, treating all present links as equivalent regardless
+of their reliability. This work introduces per-link Packet Delivery Ratio (PDR) monitoring
+through the PDR module.
 
 Each received \texttt{MSG\_DATA} packet carries a monotonically increasing sequence number
 in the TDMA header. The PDR module counts received packets and compares the sequence
@@ -537,18 +580,6 @@ The PDR value, an integer in $[0,\,100]$, is used as the edge weight in the MST 
 Because the MST minimises total edge weight, a link with lower PDR (higher loss rate) has
 a higher weight and is less likely to be selected when a more reliable alternative exists.
 
-\subsection{Video Quality Feedback and Hysteresis}
-
-An external video quality monitor can signal degradation by sending a \texttt{video\_poor}
-message to UDP port 9002. Upon reception, the video feedback thread sets a flag that forces
-the PDR of the affected relay link to zero, immediately triggering an MST recomputation and
-path switch.
-
-Recovery is governed by a hysteresis mechanism to prevent rapid oscillation between paths
-when link quality is near a threshold. The system re-enables the affected link only when the
-measured PDR has recovered above 60\,\% (\texttt{RECOVERY\_PDR\_MIN}) and eight seconds
-have elapsed since the degradation event (\texttt{RECOVERY\_GRACE\_US}). Both conditions
-must be satisfied simultaneously before the link is restored to the MST candidate set.
 
 
 %% -----------------------------------------------------------------------
@@ -599,12 +630,16 @@ delivery, the application receives a contiguous, gapless sequence of video frame
 \section{Summary}
 \label{sec:impl-summary}
 
-This chapter described the design and implementation of a Layer~3 routing system for
-RA-TDMAs+ mesh networks. The communication stack was separated into a UDP control
-plane for MATRIX beacons and a TCP data plane for application data, ensuring reliable
-video delivery without modifying the beacon mechanism. Layer~3 forwarding through the
-TUN interface makes the relay path visible to standard IP tools and compatible with Linux
-networking subsystems. Per-link PDR monitoring weights the MST computation so that
-unreliable links are avoided when alternatives exist. A slot byte budget with back-pressure
-prevents the transmitter from overrunning its slot. The following chapter presents the
-experimental evaluation of this system on physical robotic hardware.
+This chapter described the design and implementation of a Layer~3 routing system built on
+top of the RA-TDMAs+ framework of Almeida~\cite{almeida2023synchronization}. The
+communication stack was separated into a UDP control plane for MATRIX beacons and a TCP
+data plane for application data, ensuring reliable delivery without modifying the beacon
+mechanism inherited from the base framework. Layer~3 forwarding through the TUN interface
+replaces the Layer~2 ARP manipulation of Morais~\cite{morais2024synchronization}, making
+the relay path visible to standard IP tools. Kernel policy routing tables (table~100 and
+table~200) and iptables mangle rules separate application traffic from TDMA control
+traffic, while Netlink sockets provide low-latency route installation. Per-link PDR
+monitoring weights the MST computation so that unreliable links are avoided when
+alternatives exist. A per-slot byte budget with back-pressure prevents the transmitter from
+overrunning its slot. The following chapter presents the experimental evaluation of this
+system on physical robotic hardware.
