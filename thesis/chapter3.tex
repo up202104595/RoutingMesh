@@ -397,6 +397,14 @@ the TCP socket for transmission.
 Correct operation of the Layer~3 forwarding path requires a set of kernel network rules
 established once at startup by the TUN module. This section describes the four configuration
 groups and their interaction with the routing tables maintained by the Routing module.
+Figure~\ref{fig:trafico} shows the two traffic paths and the routing tables that govern them.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\textwidth]{trafico}
+\caption{Separation of application traffic (Table~100) and relay traffic (Table~200).}
+\label{fig:trafico}
+\end{figure}
 
 \subsection{IP Forwarding and Interface Setup}
 
