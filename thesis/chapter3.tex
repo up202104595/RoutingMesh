@@ -215,50 +215,36 @@ to Network in L3.}
 The work of Morais~\cite{morais2024synchronization} successfully demonstrated multi-hop
 routing within the RA-TDMAs+ framework by operating at the Data Link layer. Relay nodes
 forward packets by rewriting the destination MAC address of each frame to that of the next
-hop, retransmitting it on the wireless interface. The IP header is never modified: source and
-destination IP addresses remain those of the originating and final nodes throughout the
-entire path, which is the correct behaviour for transparent Layer~2 forwarding.
+hop and retransmitting on the wireless interface, leaving the IP header untouched throughout
+the entire path. This approach proved effective in the experimental context of that work,
+requiring no changes to the kernel IP stack and keeping the implementation compact.
 
-This approach proved effective in the experimental context of that work. It required no
-changes to the kernel IP stack and no TUN interface, keeping the implementation compact.
 To enable MAC-based forwarding, Morais extended the MATRIX beacon to distribute each
 node's MAC address across the mesh, a clean solution that kept all necessary information
-within the existing beacon infrastructure.
+within the existing beacon infrastructure. A notable advantage of this design is that
+topology changes require only a lightweight update to the ARP table entries, with no
+interaction with the kernel routing subsystem. This makes route recomputation fast and
+with low overhead, which is particularly beneficial in dynamic mesh topologies where nodes
+join and leave frequently.
 
 \subsection{Layer~3 Approach (This Work)}
 
 The present work adopts a different design strategy, operating at the Network layer through
-a TUN virtual interface (\texttt{tun\textit{id}}). This choice was driven primarily by the
-adoption of TCP as the data transport: because TCP connections are identified by IP
-addresses and port numbers, the forwarding path must be visible at the IP layer. Attempting
-to combine TCP with Layer~2 MAC rewriting would require the relay node to maintain
-per-flow TCP state, which is architecturally complex and fragile.
+a TUN virtual interface (\texttt{tun\textit{id}}). The primary motivation was the adoption
+of TCP as the data transport: because TCP connections are identified by IP addresses and
+port numbers, the forwarding path must be visible at the IP layer. Combining TCP with
+Layer~2 MAC rewriting would require each relay node to maintain per-flow TCP state, which
+would be architecturally complex.
 
-Operating at Layer~3 brings additional properties that complement the TCP data plane:
-
-\begin{itemize}
-\item \textbf{No MAC address distribution required.} Node identifiers map directly to IP
-  last octets (10.0.0.\textit{id}), so the routing module derives every destination IP
-  from the Spanning Tree without extending the MATRIX beacon. The beacon format is
-  unchanged from the base framework of Almeida~\cite{almeida2023synchronization}.
-
-\item \textbf{Full IP-layer visibility.} Each relay node decrements the IP TTL and
-  performs a routing-table lookup. \texttt{traceroute} reports every intermediate hop and
-  \texttt{ping} correctly identifies which segment of the path is failing, which simplifies
-  debugging considerably.
-
-\item \textbf{Compatibility with Linux networking subsystems.} Transit traffic passes
-  through the kernel IP stack, so \texttt{iptables} rules, traffic shaping with \texttt{tc},
-  and policy routing tables apply normally. This enables the two-table traffic separation
-  described in Section~\ref{sec:kernel-config}.
-
-\item \textbf{Kernel-native forwarding speed.} IP forwarding is performed entirely in
-  kernel space using the optimised FIB trie structure, without additional per-packet system
-  calls.
-
-\item \textbf{Portability.} The TUN interface and Netlink API are standard Linux interfaces
-  available across all distributions and wireless drivers.
-\end{itemize}
+By operating at Layer~3, the system gains compatibility with the Linux kernel networking
+stack: \texttt{iptables}, policy routing tables, and \texttt{traceroute} all function
+correctly over the relay path. This is what enables the two-table traffic separation
+described in Section~\ref{sec:kernel-config} and the use of Netlink for route management.
+The trade-off is that each topology change requires installing and removing host routes via
+Netlink, which is more expensive than an ARP table update. This cost is mitigated by the
+use of Netlink sockets directly (approximately 50\,\textmu s per route) rather than
+spawning \texttt{ip route} as a child process, but it remains a higher overhead than the
+Layer~2 approach for frequent topology changes.
 
 
 %% -----------------------------------------------------------------------
