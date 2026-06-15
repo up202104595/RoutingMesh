@@ -202,13 +202,15 @@ Layer~2 ARP-manipulation approach of Morais~\cite{morais2024synchronization}.
 Figure~\ref{fig:l2-vs-l3} illustrates the key structural difference between the two
 approaches.
 
+\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=1.0\textwidth]{layer2v3}
+\includegraphics[width=0.95\linewidth]{layer2v3}
 \caption{Layer~2 vs Layer~3 routing: relay nodes process up to Data Link in L2 and up
 to Network in L3.}
 \label{fig:l2-vs-l3}
 \end{figure}
+\end{landscape}
 
 \subsection{Layer~2 Approach (Morais, 2024)}
 
@@ -620,12 +622,14 @@ PDR values is fed into Prim's MST algorithm, which produces a spanning tree reta
 the highest-quality links; a DFS over that tree then derives the routing table with the
 correct next-hop for each destination.
 
+\begin{landscape}
 \begin{figure}[H]
 \centering
-\includegraphics[width=1.0\textwidth]{quality}
+\includegraphics[width=0.95\linewidth]{quality}
 \caption{PDR-weighted MST routing: from network topology to routing table.}
 \label{fig:quality}
 \end{figure}
+\end{landscape}
 
 
 
