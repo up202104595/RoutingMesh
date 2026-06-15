@@ -586,9 +586,26 @@ a higher weight and is less likely to be selected when a more reliable alternati
 \section{End-to-End Packet Flow}
 \label{sec:pkt-flow}
 
-This section traces a video packet from source application to destination through a
-three-node relay topology to illustrate how all components interact.
-Figure~\ref{fig:endtoend} shows the complete data path.
+This section traces a video packet from source application to destination, covering both
+the direct case (two nodes) and the relay case (three nodes).
+
+\paragraph{Direct delivery.}
+Figure~\ref{fig:endtoend2} shows the direct case where source and destination are
+neighbours. The source application writes an IP packet to \texttt{tun0}; the TUN reader
+captures it and pushes it to the transmission queue; during its TDMA slot the transmitter
+sends it over the TCP connection directly to the destination. The destination's
+\texttt{tcp\_rx\_peer} thread receives it, calls \texttt{tun\_write()}, and the kernel
+delivers it to the destination application via \texttt{tun0}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{EndtoEnd2}
+\caption{Direct packet delivery between two neighbouring nodes.}
+\label{fig:endtoend2}
+\end{figure}
+
+\paragraph{Relay delivery.}
+Figure~\ref{fig:endtoend} shows the three-node relay case.
 
 \begin{figure}[H]
 \centering
