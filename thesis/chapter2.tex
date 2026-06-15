@@ -1103,8 +1103,15 @@ the underlying TDMA framework.
 \label{sec:background-summary}
 
 This chapter surveyed the technical context in which the routing mechanism described in this
-dissertation was developed. The previous work by Morais~\cite{morais2024synchronization}
-constituted a valuable first step, but the implementation was incomplete, exhibited runtime
-instability, and required significant changes before it could serve as a production-ready
-foundation. The absence of the source code made incremental improvement impractical,
-motivating the development of a new system from scratch, described in the following chapters.
+dissertation was developed. The RA-TDMAs+ protocol provides every node with a
+continuously updated, globally consistent view of the network topology through the MATRIX
+beacon, making proactive MST-based routing a natural fit that requires no additional control
+traffic. The previous work by Morais~\cite{morais2024synchronization} constituted a valuable
+first step, successfully demonstrating multi-hop video streaming over a three-node topology
+and establishing the MST approach as viable within the framework. However, the Layer~2
+ARP-manipulation architecture presents inherent observability limitations, lacks per-link
+quality awareness, and does not accommodate TCP as the data transport, since TCP
+connections are identified at the IP layer. The source code was not made available,
+making incremental improvement impractical and motivating a new implementation built from
+scratch on top of Almeida's TDMA framework, adopting a Layer~3 forwarding model and a
+split UDP/TCP communication stack, as described in the following chapter.

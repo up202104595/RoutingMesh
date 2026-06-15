@@ -81,10 +81,18 @@ is perceived as interrupted by the operator. Third, the forwarding of
 transit packets must be implemented efficiently: user-space forwarding planes
 introduce additional latency and complexity, while kernel-level approaches
 offer proven performance, standard observability, and seamless integration with
-the operating system's networking stack. Fourth, a metric is needed to quantify link quality
-within the TDMA context, since classical metrics such as hop count or received
-signal strength do not capture the slot-level packet delivery behaviour that is
-most relevant here.
+the operating system's networking stack. Fourth, a metric is needed to quantify
+link quality within the TDMA context, since classical metrics such as hop count
+or received signal strength do not capture the slot-level packet delivery
+behaviour that is most relevant here. Fifth, the transport protocol for
+application data must be carefully chosen: the original framework used UDP for
+all inter-node communication, which is well suited to periodic topology beacons
+but provides no retransmission mechanism for video frames, causing lost datagrams
+to appear as visible artefacts at the receiver. Adopting TCP as the data
+transport addresses this problem, but it requires the forwarding path to be
+visible at the IP layer, since TCP connections are identified by IP endpoint
+addresses and port numbers. This interaction between transport protocol and
+forwarding architecture is a central design constraint of the present work.
 
 A previous attempt to address the routing problem in RA-TDMAs+ was carried
 out by Morais~\cite{morais2024synchronization}, who implemented a routing
@@ -140,9 +148,10 @@ This primary objective decomposes into the following specific objectives:
     transit packets are forwarded by the kernel's own IP forwarding engine
     without user-space intervention;
 
-    \item Implement a \textbf{video quality feedback loop} in which the base
-    station signals video loss to the robot node, triggering immediate link
-    quality degradation and route recomputation to activate the relay;
+    \item Separate the communication stack into a \textbf{UDP control plane}
+    for MATRIX topology beacons and a \textbf{TCP data plane} for application
+    data, providing reliable in-order delivery of video frames without modifying
+    the beacon mechanism inherited from the base framework;
 
     \item \textbf{Validate} the complete system through practical
     experimentation, measuring routing convergence time after a link failure,
@@ -170,9 +179,10 @@ This dissertation makes the following contributions:
     the Linux kernel networking stack, using standard operating system
     interfaces and leveraging the kernel's built-in IP forwarding;
 
-    \item Implementation of a video quality feedback loop that allows the
-    base station to signal stream loss to the robot, triggering immediate
-    relay activation independently of the TDMA topology convergence cycle;
+    \item Separation of the communication stack into a UDP control plane and
+    a TCP data plane, with per-peer TCP connections and a complete socket
+    configuration for low-latency, failure-resilient operation in a mobile
+    mesh network;
 
     \item Reconstruction of the Layer~2 routing approach described by
     Morais~\cite{morais2024synchronization} from published documentation,
@@ -201,11 +211,12 @@ The remainder of this document is organised as follows:
     related work on Layer 2 routing in RA-TDMAs+ networks.
 
     \item \textbf{Chapter~\ref{chap:implementation}} describes the design and
-    implementation of the proposed system. It covers the MATRIX protocol and
-    the link quality metric, the MST computation and next-hop derivation, the
-    Netlink-based kernel route installation, the dual routing table architecture
-    for relay forwarding, the video quality feedback mechanism, and the thread
-    model that coordinates these components within the TDMA slot structure.
+    implementation of the proposed system. It covers the separation of control
+    and data planes into UDP and TCP transports, the MST computation and
+    next-hop derivation, the Netlink-based kernel route installation, the dual
+    routing table architecture for traffic separation, the per-link PDR quality
+    metric, and the thread model that coordinates these components within the
+    TDMA slot structure.
 
     \item \textbf{Chapter~\ref{chap:evaluation}} presents the experimental
     evaluation. It describes the hardware platform, the three-node test

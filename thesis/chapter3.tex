@@ -695,16 +695,54 @@ delivery, the application receives a contiguous, gapless sequence of video frame
 \section{Summary}
 \label{sec:impl-summary}
 
-This chapter described the design and implementation of a Layer~3 routing system built on
-top of the RA-TDMAs+ framework of Almeida~\cite{almeida2023synchronization}. The
-communication stack was separated into a UDP control plane for MATRIX beacons and a TCP
-data plane for application data, ensuring reliable delivery without modifying the beacon
-mechanism inherited from the base framework. Layer~3 forwarding through the TUN interface
-replaces the Layer~2 ARP manipulation of Morais~\cite{morais2024synchronization}, making
-the relay path visible to standard IP tools. Kernel policy routing tables (table~100 and
-table~200) and iptables mangle rules separate application traffic from TDMA control
-traffic, while Netlink sockets provide low-latency route installation. Per-link PDR
-monitoring weights the MST computation so that unreliable links are avoided when
-alternatives exist. A per-slot byte budget with back-pressure prevents the transmitter from
-overrunning its slot. The following chapter presents the experimental evaluation of this
-system on physical robotic hardware.
+This chapter described the complete design and implementation of a Layer~3 routing system
+built on top of the RA-TDMAs+ framework of Almeida~\cite{almeida2023synchronization}.
+
+The first design decision was the separation of the communication stack into two planes.
+The control plane retains UDP for MATRIX topology beacons, whose periodic and redundant
+nature makes loss inconsequential. The data plane adopts TCP for all application traffic,
+providing guaranteed in-order delivery of video frames through the kernel's retransmission
+and acknowledgement mechanism. Per-peer TCP connections are configured with
+\texttt{TCP\_NODELAY} to prevent Nagle buffering from delaying small packets within the
+TDMA slot window, and with aggressive keep-alive parameters to detect broken links within
+seconds rather than hours.
+
+The second decision was to operate at the Network layer (Layer~3) rather than the Data
+Link layer used by Morais~\cite{morais2024synchronization}. Forwarding is performed by
+the Linux kernel's own IP forwarding engine through a TUN virtual interface, making the
+relay path fully visible to standard IP tools. Two kernel routing tables govern traffic
+separation: table~100 captures application-generated packets via an iptables fwmark rule
+and redirects them through \texttt{tun\textit{id}}, while table~200 handles relay-forwarded
+packets by routing them directly onto \texttt{wlan0} toward the physical next-hop address.
+Route entries in both tables are installed and removed via Netlink sockets, reducing the
+per-route kernel interaction from approximately 3\,ms (child process) to approximately
+50\,\textmu s.
+
+The routing algorithm follows the MST-based proactive approach established by
+Morais~\cite{morais2024synchronization}, consuming the Spanning Tree already computed by
+the Topology-Tracking module without requiring additional graph computation. A DFS over
+the Spanning Tree derives per-destination next-hop decisions, stored in the routing linked
+list inherited from the previous work. The algorithm is event-driven: it wakes on
+topology-change notifications, performs an incremental update of the linked list and the
+kernel routes, and returns to sleep, so no computation occurs during stable periods.
+
+Per-link Packet Delivery Ratio monitoring weights the MST edge costs with observed link
+reliability: a link with high loss receives a higher cost and is avoided when a more
+reliable alternative exists in the spanning tree. This addresses the limitation of the
+binary connectivity matrix used in the previous work, where a weak but nominally
+connected link was treated identically to a strong one.
+
+A per-slot byte budget with a back-pressure mechanism prevents the transmitter thread from
+overrunning its TDMA slot. If the slot boundary is reached before the transmission queue
+is empty, the current packet is returned to the queue for the following round, ensuring
+that slot boundaries are never violated regardless of queue depth.
+
+The system runs seven fixed threads per node plus one dynamic TCP receiver thread per
+connected peer. The Receiver, Transmitter, and Event Handler threads are retained from
+the base framework; all other threads are new contributions of this work. Four
+synchronisation primitives protect shared state accessed concurrently by multiple threads.
+
+The following chapter presents the experimental evaluation of this complete system on
+physical robotic hardware, measuring routing convergence time, end-to-end latency,
+throughput, and video stream continuity under both direct and relay communication
+conditions.
