@@ -586,8 +586,16 @@ a higher weight and is less likely to be selected when a more reliable alternati
 \section{End-to-End Packet Flow}
 \label{sec:pkt-flow}
 
-This section traces a video packet from source application to destination through a three-node
-relay topology to illustrate how all components interact.
+This section traces a video packet from source application to destination through a
+three-node relay topology to illustrate how all components interact.
+Figure~\ref{fig:endtoend} shows the complete data path.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Endtoend}
+\caption{End-to-end packet flow through a three-node relay topology.}
+\label{fig:endtoend}
+\end{figure}
 
 \paragraph{Source node.}
 The video application writes IP packets addressed to the destination into \texttt{tun0}. The
@@ -609,21 +617,6 @@ The \texttt{tcp\_rx\_peer\_loop} thread receives the packet and writes it to \te
 The kernel delivers the IP datagram to the application. Because TCP has ensured in-order
 delivery, the application receives a contiguous, gapless sequence of video frames.
 
-% TODO FIGURE: End-to-end packet flow diagram
-% Suggested image: horizontal diagram with three boxes (Source, Relay, Destination).
-% Inside each box show the relevant threads/components as smaller labelled boxes.
-% Arrows between boxes show the TCP connections. Inside source: application -> tun0 ->
-% tun_reader -> tx_queue -> tx_loop -> TCP out. Inside relay: TCP in -> tcp_rx_peer ->
-% pdr_update -> tun_write -> tun0 -> kernel forward -> tx_queue -> tx_loop -> TCP out.
-% Inside destination: TCP in -> tcp_rx_peer -> tun_write -> tun0 -> application.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.92\textwidth]{FILENAME}
-% \caption{End-to-end packet flow through a three-node relay topology. Each labelled block
-% corresponds to a thread or kernel component; arrows show the data path from the video
-% source application to the destination application.}
-% \label{fig:pkt-flow}
-% \end{figure}
 
 
 %% -----------------------------------------------------------------------
