@@ -150,29 +150,46 @@ decisions long after the link had effectively failed.
 \section{Architecture Overview}
 \label{sec:arch-overview}
 
-The overall system extends the TDMA framework with four new modules: the
-\textbf{Routing module}, which computes next-hop forwarding decisions from the Minimum
-Spanning Tree; the \textbf{PDR module}, which tracks per-link Packet Delivery Ratio; the
-\textbf{TUN module}, which manages the TUN virtual network interface; and the
-\textbf{Transmission Queue}, a thread-safe circular buffer that decouples packet capture from
-slot-timed transmission. The existing Topology-Tracking module and Synchroniser module are
-retained without modification. Communication between all components continues to use
-AF\_UNIX local sockets for control events and shared memory for high-frequency data
-exchange, consistent with the original framework architecture.
+Figure~\ref{fig:framework-miguel} presents the complete architecture of the system developed
+in this work. The TDMA Core and its four internal threads (TX, RX, Event Handler, and
+Config), the Topology-Tracking module, and the RA-TDMAs+ synchronisation module are
+retained without modification from the framework of Almeida~\cite{almeida2023synchronization}.
+The Routing module is the central new component, described in detail in the sections that
+follow.
 
-% TODO FIGURE: Updated framework architecture diagram
-% Suggested image: same layout style as the Diogo framework diagram in chapter 2, but with
-% the new modules added. Show: TDMA_Core in the centre, matrix.c and sync.c as before,
-% plus the new routing.c (reads Spanning Tree SHM, writes kernel routing table),
-% pdr.c (reads per-peer PDR from SHM), tun.c (reads/writes tun0), tx_queue.c (between
-% tun.c and TDMA_Core). Mark UDP path for MATRIX and TCP connections to peers.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.84\textwidth]{FILENAME}
-% \caption{Updated TDMA framework architecture with the new routing, PDR, TUN, and
-% transmission queue modules. MATRIX beacons use the existing UDP broadcast path;
-% application data travels over dedicated per-peer TCP streams.}
-% \label{fig:arch-new}
+\bigskip
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{frameworkmiguel}
+\caption{Final architecture of the TDMA framework extended with the Routing module.
+Local sockets (red) carry control events; shared memory (green) carries high-frequency
+data; the TUN interface (blue) connects the application layer to the TDMA Core; Netlink
+(black) installs forwarding rules in the kernel routing tables.}
+\label{fig:framework-miguel}
+\end{figure}
+\bigskip
+
+The Topology-Tracking module continues to maintain the connectivity matrix and runs
+Prim's algorithm to compute the Minimum Spanning Tree, storing the result in a
+shared-memory region. It notifies the TDMA Core Event Handler via a local socket whenever
+the slot assignment changes due to a node joining or leaving, carrying the updated slot
+identifier so the Core can reorganise the round before the next transmission.
+
+The Routing module reads two inputs from shared memory: the Spanning Tree produced by
+the Topology-Tracking module, and the per-link quality scores produced by the PDR
+sub-module. Because node identifiers in the framework correspond directly to the last octet
+of each node's IP address, no separate IP address distribution is required; the Routing
+module derives every destination IP from the node identifiers already present in the Spanning
+Tree. This contrasts with the Layer~2 approach of Morais~\cite{morais2024synchronization},
+which required distributing MAC addresses through the MATRIX beacon because MAC
+addresses cannot be derived from node identifiers.
+
+After computing next-hop decisions through a Depth-First Search over the Spanning Tree,
+the Routing module installs the resulting routes into the Linux kernel via \textbf{Netlink},
+writing entries into two routing tables: the main table and a secondary policy table
+(table~200). The two-table approach allows application traffic and TDMA control traffic
+to follow separate forwarding paths, preventing routing loops between the wireless
+interface and the TUN interface.
 % \end{figure}
 
 
