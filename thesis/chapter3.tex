@@ -430,94 +430,56 @@ Figure~\ref{fig:trafico} shows the two traffic paths and the routing tables that
 
 \subsection{IP Forwarding and Interface Setup}
 
-Two kernel parameters are set at startup. \texttt{ip\_forward} is enabled so that the
-kernel forwards IP packets between interfaces; without it, packets arriving on \texttt{tun0}
-would be silently dropped instead of being routed towards \texttt{wlan0}.
-\texttt{rp\_filter} is disabled on all relevant interfaces because relay traffic injected
-through \texttt{tun0} originates from the 10.0.0.0/24 prefix but exits on \texttt{wlan0};
-the kernel's reverse-path check would reject these packets if left enabled.
-Listing~\ref{lst:sysctl} shows the commands applied.
+Two kernel parameters are set at startup. \texttt{net.ipv4.ip\_forward} is enabled so
+that the kernel forwards IP packets between interfaces; without it, packets arriving on
+\texttt{tun\textit{id}} would be silently dropped instead of being routed towards
+\texttt{wlan0}. \texttt{net.ipv4.conf.*.rp\_filter} is disabled on all relevant interfaces
+because relay traffic injected through \texttt{tun\textit{id}} originates from the
+10.0.0.0/24 prefix but exits on \texttt{wlan0}; the kernel's reverse-path check would
+reject these packets if left enabled.
 
-\begin{lstlisting}[language=bash,
-    caption={Kernel forwarding parameters and interface initialisation},
-    label={lst:sysctl}]
-# enable IP forwarding and disable reverse-path filter
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
-echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter
-echo 0 > /proc/sys/net/ipv4/conf/wlan0/rp_filter
-
-# wlan0: IEEE 802.11 ad-hoc, ESSID manet-mesh, channel 6
-ip link set wlan0 down
-iwconfig wlan0 mode ad-hoc
-iwconfig wlan0 essid manet-mesh
-iwconfig wlan0 channel 6
-ip link set wlan0 up
-ip addr add 172.20.10.<id>/28 dev wlan0    # physical address
-
-# tun<id>: logical address + subnet route
-ip addr add 10.0.0.<id>/24  dev tun<id>
-ip route add 10.0.0.0/24 dev tun<id> src 10.0.0.<id>
-\end{lstlisting}
-
-The two address spaces are intentionally kept separate: \texttt{172.20.10.x} is used only
-for physical next-hop forwarding in table~200, while \texttt{10.0.0.x} is the namespace
-presented to the application and the routing algorithm.
+The wireless interface \texttt{wlan0} is placed in IEEE~802.11 ad-hoc mode with a fixed
+ESSID and channel, then assigned a physical address in the \texttt{172.20.10.0/28} subnet.
+The TUN interface \texttt{tun\textit{id}} is assigned the logical address
+\texttt{10.0.0.\textit{id}/24}, and a subnet route for \texttt{10.0.0.0/24} is added
+pointing to it. The two address spaces are intentionally kept separate: the
+\texttt{172.20.10.x} addresses are used exclusively for physical next-hop forwarding in
+table~200, while the \texttt{10.0.0.x} namespace is the one exposed to applications and
+to the routing algorithm.
 
 \subsection{Application Traffic Redirection (Table~100)}
 
 Application traffic addressed to the mesh (10.0.0.0/24) must be intercepted before it
-reaches \texttt{wlan0} and redirected through \texttt{tun0} so the TUN reader thread can
-capture it. Listing~\ref{lst:table100} shows the three rules that implement this.
+reaches \texttt{wlan0} and redirected through \texttt{tun\textit{id}} so the TUN reader
+thread can capture it. This is achieved through three iptables and policy routing rules.
+First, an \texttt{iptables} mangle rule in the OUTPUT chain marks all outgoing
+\texttt{wlan0} packets destined for \texttt{10.0.0.0/24} with \texttt{fwmark~1}. A second
+rule immediately clears the mark for TDMA beacon packets, identified by their fixed UDP
+source port (\texttt{7000\,+\,\textit{id}}), so that the framework's own control traffic
+never enters the TUN path. Finally, a policy routing rule directs all packets with
+\texttt{fwmark~1} to table~100, which holds a single default route via
+\texttt{tun\textit{id}}.
 
-\begin{lstlisting}[language=bash,
-    caption={Table~100: application traffic redirection to \texttt{tun0}},
-    label={lst:table100}]
-# mark app traffic to 10.0.0.0/24 with fwmark 1
-iptables -t mangle -A OUTPUT -o wlan0 -d 10.0.0.0/24 -j MARK --set-mark 1
-# clear mark for TDMA beacons (UDP source port 7000+<id>)
-iptables -t mangle -A OUTPUT -o wlan0 -p udp --sport <7000+id> -j MARK --set-mark 0
-
-# policy rule: fwmark 1 -> table 100
-ip rule add fwmark 1 table 100
-# table 100: default route via tun<id>
-ip route add default dev tun<id> table 100
-\end{lstlisting}
-
-Every marked packet exits via \texttt{tun\textit{id}} and appears at the
-\texttt{/dev/tun\textit{id}} file descriptor. The TUN reader thread reads it, extracts the
-destination node identifier from the IP destination address, and pushes the packet into the
-transmission queue. During its TDMA slot, the transmitter thread pops the packet, queries
-the routing table for the next-hop peer ID, and sends the framed packet over the
-corresponding TCP connection.
+Every marked packet exits via \texttt{tun\textit{id}} and appears at the corresponding
+file descriptor. The TUN reader thread reads it, extracts the destination node identifier
+from the IP destination address, and pushes the packet into the transmission queue. During
+its TDMA slot, the transmitter thread pops the packet, queries the routing table for the
+next-hop peer ID, and sends the framed packet over the corresponding TCP connection.
 
 \subsection{Relay Forwarding Path (Table~200)}
 
 When a relay node receives a TCP packet destined for a further node, it injects the IP
-payload into \texttt{tun0} via \texttt{tun\_write()}. From the kernel's perspective the
-packet appears as traffic arriving on the TUN interface and requiring IP forwarding.
-Table~200 handles these relay packets as shown in Listing~\ref{lst:table200}.
-
-\begin{lstlisting}[language=bash,
-    caption={Table~200: relay forwarding from \texttt{tun0} to \texttt{wlan0}},
-    label={lst:table200}]
-# policy rule: ingress on tun<id> -> table 200 (priority 100)
-ip rule add iif tun<id> lookup 200 priority 100
-
-# allow kernel to forward between tun and wlan0
-iptables -I FORWARD -i tun<id> -o wlan0 -j ACCEPT
-iptables -I FORWARD -i wlan0  -o tun<id> -j ACCEPT
-
-# per-destination host routes (installed at runtime by Routing module):
-ip route add 10.0.0.<dest>/32 via 172.20.10.<nexthop> dev wlan0 table 200
-\end{lstlisting}
-
-The \texttt{iif} rule takes precedence over the main table because its priority (100) is
-lower than the default (32766). Each \texttt{/32} host route in table~200 uses the
-physical address (\texttt{172.20.10.\textit{nexthop}}) of the next-hop node as the gateway,
-so the forwarded packet exits directly onto the \texttt{wlan0} ad-hoc link without passing
-through \texttt{tun0} again. The FORWARD rules are required because the Linux kernel's
-default FORWARD policy is DROP; without them all relay traffic is silently discarded.
+payload into \texttt{tun\textit{id}} via \texttt{tun\_write()}. From the kernel's
+perspective the packet appears as traffic arriving on the TUN interface and requiring IP
+forwarding. A policy rule with priority~100 — lower than the default table priority of
+32766 — directs all packets ingressing on \texttt{tun\textit{id}} to table~200, where
+the Routing module installs a \texttt{/32} host route per destination. Each host route
+specifies the physical \texttt{172.20.10.\textit{x}} address of the next-hop node as the
+gateway and \texttt{wlan0} as the outgoing interface, so forwarded packets exit directly
+onto the ad-hoc link without re-entering \texttt{tun\textit{id}}. Two \texttt{iptables}
+FORWARD rules explicitly permit traffic in both directions between \texttt{tun\textit{id}}
+and \texttt{wlan0}, since the Linux kernel's default FORWARD policy is DROP and relay
+traffic would otherwise be silently discarded.
 
 \subsection{Kernel Route Installation via Netlink}
 
