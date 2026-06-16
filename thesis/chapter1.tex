@@ -85,14 +85,22 @@ the operating system's networking stack. Fourth, a metric is needed to quantify
 link quality within the TDMA context, since classical metrics such as hop count
 or received signal strength do not capture the slot-level packet delivery
 behaviour that is most relevant here. Fifth, the transport protocol for
-application data must be carefully chosen: the original framework used UDP for
-all inter-node communication, which is well suited to periodic topology beacons
-but provides no retransmission mechanism for video frames, causing lost datagrams
-to appear as visible artefacts at the receiver. Adopting TCP as the data
-transport addresses this problem, but it requires the forwarding path to be
-visible at the IP layer, since TCP connections are identified by IP endpoint
-addresses and port numbers. This interaction between transport protocol and
-forwarding architecture is a central design constraint of the present work.
+application data must be carefully chosen. The original framework used UDP for
+all TDMA inter-node messages, which is appropriate for the periodic MATRIX
+beacons but provides no retransmission mechanism for video frames, causing lost
+packets to appear as visible artefacts at the receiver. Prior work by
+Morais~\cite{morais2024synchronization} showed that adopting TCP at the
+application layer eliminates loss artefacts, but that default TCP socket
+settings introduce buffering delays and visible glitching in real-time video:
+Nagle's algorithm delays small packets until a full TCP segment accumulates, and
+default keep-alive timers take hours to detect dead connections, both of which
+are incompatible with TDMA slot timing. Integrating TCP connection management
+directly into the TDMA framework, with per-peer sockets configured for
+low-latency real-time delivery, resolves these problems but requires the
+forwarding path to be visible at the IP layer, since TCP connections are
+identified by endpoint addresses and port numbers. This interaction between
+transport protocol and forwarding architecture is a central design constraint of
+the present work.
 
 A previous attempt to address the routing problem in RA-TDMAs+ was carried
 out by Morais~\cite{morais2024synchronization}, who implemented a routing

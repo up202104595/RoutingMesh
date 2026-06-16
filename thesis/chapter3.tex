@@ -17,16 +17,23 @@ each design decision and its implementation in detail.
 \section{Protocol Architecture: Separating Control and Data Planes}
 \label{sec:proto-split}
 
-The original TDMA framework and the Layer~2 routing implementation of
-Morais~\cite{morais2024synchronization} used UDP datagrams for all inter-node communication:
+The original TDMA framework used UDP datagrams for all inter-node communication:
 both the MATRIX topology beacons and the application data packets were transmitted through
 the same UDP socket. UDP is appropriate for the MATRIX control traffic because the periodic
 nature of the beacon means that a lost packet is simply replaced by the next one, one round
-later, without any lasting effect on the shared topology state. It is, however, fundamentally
-unsuitable as the sole transport for video streaming: each lost datagram causes visible
-artefacts at the destination, and UDP provides no retransmission mechanism to recover lost
-frames. In a TDMA network where slots can occasionally be missed due to synchronisation
-transients or interference, this results in perceptible degradation in the received video.
+later, without any lasting effect on the shared topology state. It is, however, unsuitable
+as the sole transport for video streaming: each lost datagram causes visible artefacts at
+the destination, and UDP provides no retransmission mechanism to recover lost frames.
+
+Prior work by Morais~\cite{morais2024synchronization} tested TCP at the application layer
+as an alternative video transport. While TCP eliminates packet-loss artefacts through its
+retransmission mechanism, that work observed that default TCP socket settings introduce
+unacceptable delays for real-time streaming over TDMA: Nagle's algorithm buffers
+outgoing data until a full TCP segment accumulates or an in-flight segment is acknowledged,
+introducing latency of up to 200\,ms per hop, and default keep-alive timers of two hours
+leave dead connections undetected for the duration of a mission. The present work moves TCP
+connection management into the TDMA framework itself, with per-peer sockets explicitly
+configured to avoid these issues, as described in the following subsection.
 
 To address this, the present work separates the communication stack into two planes, each
 with a transport protocol matched to its requirements.
