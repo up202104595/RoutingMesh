@@ -5,97 +5,191 @@
 
 \section{Introduction}
 
-This chapter presents the experimental evaluation of the routing mechanism
-described in Chapter~\ref{chap:implementation}. The evaluation was conducted
-on physical hardware using a three-node testbed representative of the target
-scenario: a mobile robot communicating with a stationary base station, with
-a relay node available to bridge the two when a direct link is unavailable.
-Section~\ref{sec:setup} describes the hardware platform and test
-configuration. Section~\ref{sec:metrics} defines the metrics used to
-characterise system behaviour. Section~\ref{sec:experiments} describes the
-experimental procedures. Section~\ref{sec:results} presents and discusses
-the results. Section~\ref{sec:eval-summary} summarises the findings.
+This chapter presents the experimental evaluation of the routing system
+described in Chapter~\ref{chap:implementation}. The evaluation was carried
+out on physical hardware in a three-node testbed that reproduces the target
+operational scenario: a mobile robot transmitting a live video stream to a
+stationary base station, with an intermediate relay node available to
+maintain connectivity after a direct link failure.
+
+The chapter is organised as follows. Section~\ref{sec:setup} describes the
+hardware platform, the per-node network and software configuration, the video
+pipeline, and the link-failure methodology. Section~\ref{sec:metrics} defines
+the performance metrics and their measurement formulas.
+Section~\ref{sec:experiments} describes the four experiments performed.
+Section~\ref{sec:results} presents and analyses the results for each
+experiment, including inter-arrival time histograms that characterise the
+TDMA burst structure under direct and relay conditions.
+Section~\ref{sec:comparison} discusses the comparison with the Layer~2
+routing approach of Morais~\cite{morais2024synchronization}.
+Section~\ref{sec:eval-summary} summarises the findings.
 
 
 %% -----------------------------------------------------------------------
-\section{Hardware Platform and Test Setup}
+\section{Experimental Setup}
 \label{sec:setup}
 
-\subsection{Testbed Configuration}
+\subsection{Hardware Platform}
+\label{subsec:hardware}
 
-The testbed comprised three nodes assigned fixed roles throughout all
-experiments:
+The testbed comprised three nodes, each assigned a fixed role throughout
+all experiments. Table~\ref{tab:hardware} lists the hardware components of
+each node.
 
-\begin{itemize}
-  \item \textbf{Node 1 (N1) --- Robot}: An AlphaBot2-Pi mobile robot
-  equipped with a Raspberry Pi 4 Model B (4\,GB RAM), a Raspberry Pi
-  Camera Module~v2 for video capture, and a USB Wi-Fi adapter operating in
-  ad-hoc (IBSS) mode. N1 runs the RA-TDMAs+ node software, the
-  \texttt{alphabot\_node.py} teleoperation server, and the video capture
-  and encoding pipeline described in Section~\ref{subsec:video-pipeline}.
+\begin{table}[h]
+\centering
+\caption{Hardware components of each testbed node}
+\label{tab:hardware}
+\begin{tabular}{llll}
+\toprule
+\textbf{Component} & \textbf{N1 (Robot)} & \textbf{N2 (Relay)} & \textbf{N3 (Base Station)} \\
+\midrule
+Platform        & AlphaBot2-Pi    & Raspberry Pi 4B & Laptop (Ubuntu 22.04) \\
+Processor       & RPi 4B, 4\,GB   & RPi 4B, 4\,GB   & Intel Core i7 \\
+Wireless        & USB Wi-Fi (ad-hoc) & USB Wi-Fi (ad-hoc) & USB Wi-Fi (ad-hoc) \\
+Camera          & Pi Camera v2    & ---             & --- \\
+Motor driver    & TB6612FNG       & ---             & --- \\
+Servo controller & PCA9685 (I\textsuperscript{2}C) & --- & --- \\
+Gamepad         & ---             & ---             & DualShock 4 (USB) \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-  \item \textbf{Node 2 (N2) --- Relay}: A Raspberry Pi 4 Model B with a
-  USB Wi-Fi adapter, operating as a stationary relay node. N2 runs only
-  the RA-TDMAs+ node software; it does not originate or consume
-  application data.
+\textbf{Node 1 (N1) --- Robot.} N1 is an AlphaBot2-Pi differential-drive
+robot equipped with a Raspberry Pi 4 Model B (4\,GB RAM). A Raspberry Pi
+Camera Module~v2 is mounted at the front of the chassis for live video
+capture. A USB Wi-Fi adapter provides wireless connectivity in IEEE~802.11
+ad-hoc (IBSS) mode. The robot's two DC motors are driven by a TB6612FNG
+H-bridge motor driver controlled via PWM from the Raspberry Pi GPIO header.
+A PCA9685 16-channel PWM controller on the I\textsuperscript{2}C bus drives
+the pan servo for camera orientation. N1 runs the RA-TDMAs+ node software
+and the \texttt{alphabot\_node.py} teleoperation server, which manages video
+streaming, motor control, and telemetry.
 
-  \item \textbf{Node 3 (N3) --- Base Station}: A laptop computer running
-  Ubuntu 22.04, connected to the mesh via a USB Wi-Fi adapter in ad-hoc
-  mode. N3 runs the RA-TDMAs+ node software and the
-  \texttt{base\_station.py} operator interface, which decodes and displays
-  the incoming video stream.
-\end{itemize}
+\textbf{Node 2 (N2) --- Relay.} N2 is a Raspberry Pi 4 Model B (4\,GB RAM)
+with a USB Wi-Fi adapter. It acts as a stationary relay node and runs only
+the RA-TDMAs+ node software; it does not originate or consume application
+data.
 
-All three nodes were placed on a laboratory bench within mutual radio
-range, so that any pair could communicate directly. The TDMA frame was
-configured with a period of 150\,ms and three slots of 50\,ms each,
-assigned in order N1, N2, N3.
+\textbf{Node 3 (N3) --- Base Station.} N3 is a laptop running Ubuntu~22.04,
+connected to the mesh via a USB Wi-Fi adapter. N3 runs the RA-TDMAs+ node
+software and the \texttt{base\_station.py} operator interface, which displays
+the incoming video stream and translates DualShock~4 gamepad inputs into
+teleoperation commands.
 
-Each node operated a TUN interface addressed in the
-\texttt{10.0.0.0/24} subnet (N1: \texttt{10.0.0.1}, N2: \texttt{10.0.0.2},
-N3: \texttt{10.0.0.3}), while the physical Wi-Fi interface used the
-\texttt{172.20.10.0/24} subnet (N1: \texttt{172.20.10.1},
-N2: \texttt{172.20.10.2}, N3: \texttt{172.20.10.3}). Application traffic
-flowed exclusively over the TUN interface addresses, making the routing
-layer transparent to the application. All network traffic was
-captured on N3 using \texttt{tcpdump -i any} for post-experiment analysis.
+All three nodes were placed on a laboratory bench within mutual radio range
+so that any pair could communicate directly without a relay. This placement
+allows link failures to be induced by software rather than by physical
+movement, ensuring full reproducibility.
 
 \subsection{AlphaBot2-Pi Platform}
 \label{subsec:alphabot}
 
-The AlphaBot2-Pi is a compact differential-drive robot designed for
-educational robotics. In its configuration for this work, it carries a
-Raspberry Pi 4 Model B as its on-board computer, a Pi Camera Module~v2
-mounted at the front for visual feedback, and a USB Wi-Fi adapter for
-wireless communication. The Raspberry Pi interfaces with the robot's
-motor driver board via the GPIO header, and the \texttt{alphabot\_node.py}
-server receives movement commands from the base station and translates
-them into motor signals. The platform was chosen because it matches the
-hardware used in the prior work by Morais~\cite{morais2024synchronization},
-allowing direct comparison of the two routing approaches under identical
-physical conditions.
+The AlphaBot2-Pi is an educational differential-drive robot designed for use
+with a Raspberry Pi single-board computer. Its mechanical chassis carries two
+independently driven wheels and a front-mounted camera gimbal. The Raspberry
+Pi 4 Model B provides four ARM Cortex-A72 cores at 1.8\,GHz, 4\,GB of
+LPDDR4 RAM, a 40-pin GPIO header, and an I\textsuperscript{2}C bus, all of
+which are exploited by this work.
+
+Motor control uses the TB6612FNG dual H-bridge driver. Each motor channel
+accepts a PWM signal on the enable pin and two direction signals on the input
+pins. \texttt{alphabot\_node.py} drives these signals at 500\,Hz via the
+\texttt{RPi.GPIO} library, with duty cycle proportional to the commanded
+speed in the range $[-1.0, +1.0]$. The PCA9685 servo controller is accessed
+over I\textsuperscript{2}C at address \texttt{0x40} and configured for a
+50\,Hz PWM frequency. Channel~0 drives the pan servo, with a calibrated
+centre position of 100° corresponding to a pulse width of approximately
+1.5\,ms. Infrared line sensors (left and right) and an HC-SR04 ultrasonic
+distance sensor are also read by the teleoperation server and reported to
+N3 as telemetry at 5\,Hz.
+
+The platform was chosen because it matches the hardware used in the prior
+work by Morais~\cite{morais2024synchronization}, enabling a direct comparison
+of the two routing approaches under identical physical conditions.
+
+\subsection{Network and Software Configuration}
+\label{subsec:netconfig}
+
+Each node was configured individually before each experiment session. The
+configuration steps are grouped below by node.
+
+\paragraph{Common configuration (all nodes).}
+Each node set its USB Wi-Fi adapter to IEEE~802.11 ad-hoc (IBSS) mode on the
+same SSID and channel, assigned a physical address in the
+\texttt{172.20.10.0/24} subnet, and brought the interface up. A TUN virtual
+interface was created and assigned a mesh address in the \texttt{10.0.0.0/24}
+subnet. IP forwarding and reverse-path filter settings were applied as
+described in Section~\ref{sec:kernel-config}. Table~\ref{tab:netconfig}
+summarises the address assignments.
+
+\begin{table}[h]
+\centering
+\caption{Network address assignments}
+\label{tab:netconfig}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Interface} & \textbf{N1 (Robot)} & \textbf{N2 (Relay)} & \textbf{N3 (Base Station)} \\
+\midrule
+\texttt{wlan0} (physical) & \texttt{172.20.10.1/28} & \texttt{172.20.10.2/28} & \texttt{172.20.10.3/28} \\
+\texttt{tun\textit{id}} (mesh)   & \texttt{10.0.0.1/24}    & \texttt{10.0.0.2/24}    & \texttt{10.0.0.3/24}    \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{N1 (Robot).}
+After the common configuration, \texttt{alphabot\_node.py} was started. The
+script waits 10\,s for the TDMA node software to establish synchronisation
+before launching the video pipeline.
+
+\paragraph{N2 (Relay).}
+The relay node required no application-level configuration beyond the common
+network setup. Kernel IP forwarding and the \texttt{iptables} FORWARD rules
+described in Section~\ref{sec:kernel-config} were applied to permit transit
+packets between \texttt{tun\textit{id}} and \texttt{wlan0}.
+
+\paragraph{N3 (Base Station).}
+\texttt{base\_station.py} was started, which launches \texttt{ffplay} for
+video display and begins listening for UDP video datagrams on port~5000 and
+telemetry on port~9001. For traffic capture, \texttt{tcpdump -i any} was
+started before each experiment run to record all packets for
+post-experiment analysis.
+
+For link-failure experiments, the following \texttt{iptables} rules were
+applied on N3 at the moment of the simulated failure:
+
+\begin{itemize}
+  \item \texttt{iptables -I INPUT 1 -s 172.20.10.1 -j DROP}
+  \item \texttt{iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP}
+\end{itemize}
+
+These rules cause all frames from and to N1's physical address to be
+silently discarded at the firewall level, making the direct link invisible
+to the TDMA beacon receiver and to the TCP data-plane connection, without
+any physical movement of nodes. Rules were cleared between repetitions
+with \texttt{iptables -F}.
 
 \subsection{Video Pipeline and Application Parameters}
 \label{subsec:video-pipeline}
 
-The video pipeline on N1 consists of two processes connected by a Unix pipe.
-\texttt{rpicam-vid} captures raw frames from the Pi Camera Module~v2 in YUV
-4:2:0 format and writes them to standard output. \texttt{ffmpeg} reads the
-raw stream, encodes it with the \texttt{libx264} encoder, wraps the output
-in MPEG-TS containers, and sends the result as UDP datagrams to the mesh
-address of N3 (\texttt{10.0.0.3:5000}). The TDMA framework transparently
-transports these datagrams across the mesh through its TCP data plane.
+The video pipeline on N1 connects two processes through a Unix pipe.
+\texttt{rpicam-vid} captures raw frames from the Pi Camera Module~v2 in
+YUV~4:2:0 format and streams them to standard output. \texttt{ffmpeg} reads
+this raw stream, encodes it with \texttt{libx264}, wraps the output in
+MPEG-TS containers, and sends each transport-stream packet as a UDP datagram
+to N3's mesh address (\texttt{10.0.0.3:5000}). Because the destination is
+a TUN interface address, the datagram enters the TDMA routing layer
+transparently: the TDMA framework reads it from \texttt{tun\textit{id}} and
+delivers it to N3 via the TCP data plane, either directly or through N2
+depending on the current routing table.
 
-On N3, a Python proxy in \texttt{base\_station.py} receives the UDP stream on
-port~5000, records timestamps for inter-arrival and throughput analysis, and
-forwards each datagram to \texttt{ffplay} listening on the local port~5001.
-\texttt{ffplay} is started with the \texttt{nobuffer}, \texttt{discardcorrupt},
-\texttt{low\_delay}, and \texttt{framedrop} flags to minimise display latency.
-Movement commands from the operator's DualShock~4 gamepad are sent as JSON
-datagrams at 20\,Hz to N1's command port, and N1 replies with telemetry
-(speed, distance, IR sensor readings) at 5\,Hz.
-
-Table~\ref{tab:app-params} lists all configurable application parameters.
+On N3, a Python proxy thread in \texttt{base\_station.py} receives each
+UDP datagram on port~5000, records its arrival timestamp for measurement
+purposes, and forwards it unchanged to \texttt{ffplay} listening on the
+loopback port~5001. \texttt{ffplay} is configured for minimum display latency
+using the \texttt{nobuffer}, \texttt{discardcorrupt}, \texttt{low\_delay},
+and \texttt{framedrop} options. Table~\ref{tab:app-params} lists all
+application parameters.
 
 \begin{table}[h]
 \centering
@@ -103,131 +197,153 @@ Table~\ref{tab:app-params} lists all configurable application parameters.
 \label{tab:app-params}
 \begin{tabular}{lll}
 \toprule
-\textbf{Parameter} & \textbf{Value} & \textbf{Source} \\
+\textbf{Parameter} & \textbf{Value} & \textbf{Constant / source} \\
 \midrule
 \multicolumn{3}{l}{\textit{Video capture and encoding (N1)}} \\
-Capture tool        & \texttt{rpicam-vid}                  & \texttt{alphabot\_node.py} \\
-Capture format      & YUV 4:2:0 (raw)                      & \texttt{alphabot\_node.py} \\
-Encoder             & FFmpeg / \texttt{libx264}             & \texttt{alphabot\_node.py} \\
-Resolution          & $640 \times 480$\,px                  & \texttt{VIDEO\_WIDTH/HEIGHT} \\
-Frame rate          & 15\,fps                               & \texttt{VIDEO\_FPS} \\
-Target bitrate      & 500\,kbps                             & \texttt{VIDEO\_BITRATE} \\
-Encoder preset      & \texttt{ultrafast}                    & \texttt{alphabot\_node.py} \\
-Encoder tune        & \texttt{zerolatency}                  & \texttt{alphabot\_node.py} \\
-GOP size (\texttt{-g}) & 1 (all-intra)                    & \texttt{alphabot\_node.py} \\
-Container           & MPEG-TS                               & \texttt{alphabot\_node.py} \\
-MPEG-TS packet size & 1316\,bytes ($7 \times 188$)          & \texttt{pkt\_size=1316} \\
-Stream protocol     & UDP                                   & \texttt{alphabot\_node.py} \\
-Stream destination  & \texttt{10.0.0.3:5000}               & \texttt{BASE\_IP:VIDEO\_PORT} \\
+Capture tool        & \texttt{rpicam-vid}              & \texttt{alphabot\_node.py} \\
+Capture format      & YUV 4:2:0 raw                    & \texttt{--codec yuv420} \\
+Encoder             & FFmpeg / \texttt{libx264}         & \texttt{alphabot\_node.py} \\
+Resolution          & $640 \times 480$\,px              & \texttt{VIDEO\_WIDTH / HEIGHT} \\
+Frame rate          & 15\,fps                           & \texttt{VIDEO\_FPS} \\
+Target bitrate      & 500\,kbps                         & \texttt{VIDEO\_BITRATE} \\
+Encoder preset      & \texttt{ultrafast}                & \texttt{alphabot\_node.py} \\
+Encoder tune        & \texttt{zerolatency}              & \texttt{alphabot\_node.py} \\
+GOP size            & 1 (all-intra, no inter-prediction) & \texttt{-g 1} \\
+Container           & MPEG-TS                           & \texttt{-f mpegts} \\
+MPEG-TS packet size & 1316\,bytes ($7 \times 188$)      & \texttt{pkt\_size=1316} \\
+Stream protocol     & UDP                               & \texttt{alphabot\_node.py} \\
+Stream destination  & \texttt{10.0.0.3:5000}           & \texttt{BASE\_IP:VIDEO\_PORT} \\
 \midrule
 \multicolumn{3}{l}{\textit{Video reception (N3)}} \\
-Player              & \texttt{ffplay}                       & \texttt{base\_station.py} \\
+Player              & \texttt{ffplay}                   & \texttt{base\_station.py} \\
 Player flags        & \texttt{nobuffer}, \texttt{discardcorrupt}, \texttt{low\_delay}, \texttt{framedrop} & \texttt{base\_station.py} \\
-Receive port        & UDP 5000                              & \texttt{VIDEO\_PORT} \\
+Receive port        & UDP 5000                          & \texttt{VIDEO\_PORT} \\
 \midrule
-\multicolumn{3}{l}{\textit{Control channel}} \\
-Command port        & UDP 9000                              & \texttt{CMD\_PORT} \\
-Command rate        & 20\,Hz                                & \texttt{CMD\_INTERVAL = 0.05\,s} \\
-Telemetry port      & UDP 9001                              & \texttt{TEL\_PORT} \\
-Telemetry rate      & 5\,Hz                                 & \texttt{TELEMETRY\_INTERVAL = 0.2\,s} \\
+\multicolumn{3}{l}{\textit{Control channel (bidirectional)}} \\
+Command port (N1)   & UDP 9000                          & \texttt{CMD\_PORT} \\
+Command rate        & 20\,Hz                            & \texttt{CMD\_INTERVAL = 0.05\,s} \\
+Telemetry port (N3) & UDP 9001                          & \texttt{TEL\_PORT} \\
+Telemetry rate      & 5\,Hz                             & \texttt{TELEMETRY\_INTERVAL = 0.2\,s} \\
 \midrule
-\multicolumn{3}{l}{\textit{Motor and servo control (N1)}} \\
-Motor PWM frequency & 500\,Hz                               & \texttt{GPIO.PWM(..., 500)} \\
-Speed modes         & 30\,\% / 55\,\% / 80\,\%             & \texttt{SPEED\_MODES} \\
-Servo centre (pan)  & 100°                                  & \texttt{SERVO\_PAN\_CENTER} \\
+\multicolumn{3}{l}{\textit{Motor and servo (N1)}} \\
+Motor PWM frequency & 500\,Hz                           & \texttt{GPIO.PWM(..., 500)} \\
+Speed modes         & 30\,\% / 55\,\% / 80\,\%         & \texttt{SPEED\_MODES} \\
+Servo centre (pan)  & 100°                              & \texttt{SERVO\_PAN\_CENTER} \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-\subsection{Link Failure Methodology}
-\label{subsec:link-failure}
-
-Rather than relying on physical obstruction to break the radio link, link
-failures were induced in a fully controlled and reproducible manner using
-\texttt{iptables} rules applied on N3. Dropping all traffic to and from
-N1's physical address at the firewall level simulates the effect of a
-radio link failure from N3's perspective: the TDMA beacon reception from
-N1 ceases immediately, and the TCP connection carrying the video stream is
-interrupted. The commands applied were:
-
-\begin{itemize}
-  \item \texttt{iptables -I INPUT 1 -s 172.20.10.1 -j DROP}
-  \item \texttt{iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP}
-\end{itemize}
-
-This approach avoids the variability introduced by physically moving nodes
-or blocking the radio path and ensures that each repetition presents
-exactly the same stimulus to the routing layer.
 
 
 %% -----------------------------------------------------------------------
 \section{Metrics}
 \label{sec:metrics}
 
-The following metrics were used to characterise system performance:
+\paragraph{Round-trip time (RTT).}
+The RTT of the $k$-th echo exchange is the elapsed time from the moment N3
+transmits a UDP echo request to the moment the corresponding reply from N1
+is received:
+\begin{equation}
+\mathrm{RTT}_k = t^{\mathrm{rx}}_k - t^{\mathrm{tx}}_k
+\label{eq:rtt}
+\end{equation}
+The mean RTT over $N$ samples is:
+\begin{equation}
+\overline{\mathrm{RTT}} = \frac{1}{N}\sum_{k=1}^{N}\mathrm{RTT}_k
+\label{eq:rtt-mean}
+\end{equation}
+RTT captures the end-to-end latency of the mesh and, in a TDMA network,
+reflects the slot structure: a request sent at an arbitrary moment within
+the frame must wait until N1's slot before the reply can depart.
 
-\begin{description}
-  \item[Round-trip time (RTT)] The elapsed time from the transmission of a
-  control-plane echo request by N3 to the receipt of the corresponding
-  echo reply from N1, measured over the UDP control channel. RTT captures
-  the end-to-end latency of the mesh and reflects the TDMA slot structure.
+\paragraph{Packet delivery ratio (PDR).}
+PDR quantifies the reliability of the control channel:
+\begin{equation}
+\mathrm{PDR} = \frac{N_{\mathrm{rx}}}{N_{\mathrm{tx}}} \times 100\,\%
+\label{eq:pdr}
+\end{equation}
+where $N_{\mathrm{tx}}$ is the number of echo requests sent and
+$N_{\mathrm{rx}}$ is the number of replies received within a timeout window.
 
-  \item[Packet delivery ratio (PDR)] The fraction of control echo requests
-  for which a reply was received within a timeout window. PDR quantifies
-  reliability of the control channel.
+\paragraph{Jitter.}
+Jitter is the mean absolute deviation of consecutive RTT samples, measuring
+the variability of the control-plane delay:
+\begin{equation}
+J = \frac{1}{N-1}\sum_{k=2}^{N}\bigl|\mathrm{RTT}_k - \mathrm{RTT}_{k-1}\bigr|
+\label{eq:jitter}
+\end{equation}
 
-  \item[Jitter] The mean absolute deviation of successive RTT samples,
-  characterising the variability of the control-plane delay.
+\paragraph{Throughput.}
+Video stream throughput at N3 is computed from the total bytes received
+during an observation window of duration $\Delta t$:
+\begin{equation}
+T = \frac{8 \times B_{\mathrm{total}}}{\Delta t} \quad \text{[kbps]}
+\label{eq:throughput}
+\end{equation}
+where $B_{\mathrm{total}}$ is the sum of all UDP payload bytes recorded
+by the \texttt{tcpdump} capture.
 
-  \item[Throughput] The average bitrate of the video stream as measured at
-  N3 from PCAP timestamps and byte counts. Reported in kbps.
+\paragraph{Convergence time.}
+Convergence time quantifies how quickly the system recovers from a direct
+link failure and re-establishes the video stream via the relay:
+\begin{equation}
+t_{\mathrm{conv}} = t_{\mathrm{first\,relay}} - t_{\mathrm{last\,direct}}
+\label{eq:convergence}
+\end{equation}
+where $t_{\mathrm{last\,direct}}$ is the PCAP timestamp of the last video
+packet received via the direct path and $t_{\mathrm{first\,relay}}$ is the
+timestamp of the first packet received via N2.
 
-  \item[Convergence time] The elapsed time from the instant the direct
-  link to N1 is severed until the first video packet arrives at N3 via the
-  relay path. Measured from PCAP timestamps.
-
-  \item[Inter-arrival time (IA)] The time between consecutive video packets
-  arriving at N3, measured from PCAP timestamps. The IA distribution
-  reveals the burst structure imposed by the TDMA slot timing and allows
-  verification that relay forwarding preserves this structure.
-\end{description}
+\paragraph{Inter-arrival time (IA).}
+The inter-arrival time between consecutive video packets is:
+\begin{equation}
+\mathrm{IA}_k = t_{k+1} - t_k
+\label{eq:ia}
+\end{equation}
+where $t_k$ is the PCAP arrival timestamp of the $k$-th packet. The
+distribution of $\mathrm{IA}_k$ reveals the burst structure imposed by
+the TDMA slot schedule and allows verification that relay forwarding
+preserves this structure unchanged.
 
 
 %% -----------------------------------------------------------------------
 \section{Experiments}
 \label{sec:experiments}
 
-Four experiments were conducted to evaluate the system across its primary
-operating conditions.
-
 \textbf{Experiment 1 --- Control-channel RTT and PDR.}
-N3 sent UDP echo requests to N1 at 10\,Hz for 60\,s under steady-state
-direct-link conditions. RTT, PDR, and jitter were recorded. This
-experiment characterises the base latency and reliability of the mesh in
-the absence of link failures.
+N3 sent UDP echo requests to N1's mesh address (\texttt{10.0.0.1}) at
+10\,Hz for 60\,s under steady-state direct-link conditions, producing 600
+samples. For each request, N1's node software replied immediately via the
+same UDP socket. The RTT, PDR, minimum, maximum, and standard deviation
+were computed from the 600 recorded samples. This experiment characterises
+the baseline latency and reliability of the mesh and verifies that the
+measured mean RTT is consistent with the TDMA slot ordering.
 
 \textbf{Experiment 2 --- Video stream throughput.}
-N1 streamed video to N3 continuously for two minutes under both
-direct-link and relay conditions. Throughput was computed from PCAP
-captures at N3. Two runs were performed for each condition, with the
-relay condition activated by applying the \texttt{iptables} rules
-described in Section~\ref{subsec:link-failure} after the stream had been
-running for at least 30\,s.
+N1 streamed video continuously to N3 for approximately two minutes under
+both direct-link and relay conditions. Two independent runs were performed
+for each condition. Throughput was computed from the PCAP capture at N3
+using Equation~\ref{eq:throughput} over the full capture duration. For
+the relay condition, the \texttt{iptables} rules described in
+Section~\ref{subsec:netconfig} were applied after the stream had been
+running stably for at least 30\,s, and measurements were taken only after
+the routing system had converged onto the relay path.
 
 \textbf{Experiment 3 --- Routing convergence.}
-Six link-failure events were induced across two independent test runs
-(three repetitions per run). Each repetition followed the same procedure:
-the stream was allowed to stabilise in direct-link mode, the
-\texttt{iptables} rules were applied to cut the direct link, and the PCAP
-capture was used to measure convergence time. Repetitions that failed due
-to extraneous conditions (battery depletion, residual firewall state) were
-recorded separately but excluded from the timing statistics.
+Six link-failure events were induced across two independent test runs,
+with three repetitions per run. Each repetition followed the same
+procedure: the video stream was allowed to stabilise under direct-link
+conditions for at least 30\,s, the \texttt{iptables} rules were applied
+to simulate a link failure, and the PCAP capture was used to measure the
+convergence time using Equation~\ref{eq:convergence}. Repetitions affected
+by extraneous conditions were excluded from the timing statistics but
+reported separately with their cause.
 
-\textbf{Experiment 4 --- Video inter-arrival timing.}
+\textbf{Experiment 4 --- Packet inter-arrival timing.}
 Inter-arrival times were extracted from the same PCAP captures used in
-Experiment 2, separately for the direct-link and relay phases. The
-resulting distributions were compared to verify that relay forwarding does
-not alter the burst structure of the video stream.
+Experiment 2, separately for the direct-link and relay phases.
+Histograms of the IA distribution were produced for both conditions and
+compared to verify that relay forwarding preserves the TDMA burst
+structure of the video stream.
 
 
 %% -----------------------------------------------------------------------
@@ -235,51 +351,52 @@ not alter the burst structure of the video stream.
 \label{sec:results}
 
 \subsection{Control-Channel Latency}
+\label{subsec:res-rtt}
 
-Table~\ref{tab:rtt} summarises the RTT statistics obtained over 600 echo
-requests sent at 10\,Hz under steady-state direct-link conditions.
+Table~\ref{tab:rtt} summarises the RTT statistics obtained from the 600
+echo samples of Experiment~1.
 
 \begin{table}[h]
 \centering
-\caption{Control-channel round-trip time statistics (N3 $\to$ N1, direct link, $n=600$)}
+\caption{Control-channel RTT statistics (N3 $\to$ N1, direct link, $n = 600$)}
 \label{tab:rtt}
 \begin{tabular}{lc}
 \toprule
 \textbf{Metric} & \textbf{Value} \\
 \midrule
-Mean RTT        & 50.33\,ms \\
-Minimum RTT     & 17\,ms    \\
-Maximum RTT     & 125\,ms   \\
+Mean RTT ($\overline{\mathrm{RTT}}$) & 50.33\,ms \\
+Minimum RTT  & 17\,ms  \\
+Maximum RTT  & 125\,ms \\
 Standard deviation & 6.2\,ms \\
-Jitter          & 4\,ms     \\
-PDR             & 100\%     \\
+Jitter ($J$) & 4\,ms   \\
+PDR          & 100\,\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The mean RTT of approximately 50\,ms is consistent with the expected
-behaviour of the TDMA frame structure. In the slot ordering
-[N1, N2, N3], an echo request sent by N3 must wait until N1's slot opens
-before receiving a reply. Given a 150\,ms frame period and N1's slot
-occupying the first 50\,ms of the frame, the expected average wait time
-from an arbitrary send instant is approximately 50\,ms, which matches the
-observed mean closely.
-
-The observed minimum of approximately 17\,ms arises when N3 sends the
-request just before N1's slot begins. The maximum of 125\,ms corresponds
-to requests sent just after N1's slot has closed, requiring a wait of
-nearly a full frame. The jitter of 4\,ms is low and reflects primarily
-the processing latency variability at N1, since the slot boundaries
-themselves are fixed by the TDMA schedule.
-
-The PDR of 100\% over 600 consecutive requests confirms that the control
-channel is fully reliable under the laboratory conditions of this
-experiment. No echo request was lost, demonstrating that the UDP control
-plane operates correctly within the TDMA timing budget.
+The mean RTT of approximately 50\,ms is fully consistent with the TDMA
+slot structure. In the slot ordering $[\text{N1}, \text{N2}, \text{N3}]$,
+N1 transmits during the first 50\,ms of each 150\,ms frame. An echo
+request sent by N3 at a uniformly random instant within the frame must
+wait, on average, one full slot duration of 50\,ms before N1 can reply.
+The expected mean wait is therefore:
+\begin{equation}
+\mathbb{E}[\text{wait}] = \frac{T_{\mathrm{slot}}}{2} + \frac{T_{\mathrm{slot}}}{2}
+= T_{\mathrm{slot}} = 50\,\text{ms}
+\label{eq:expected-rtt}
+\end{equation}
+which matches the observed mean exactly. The minimum of 17\,ms arises
+when the request is sent just before N1's slot begins; the maximum of
+125\,ms corresponds to a request sent just after N1's slot has closed,
+requiring a wait of nearly one full frame. The jitter of 4\,ms is low and
+reflects processing variability at N1 rather than any timing instability
+in the TDMA schedule. The PDR of 100\% confirms that the UDP control
+channel is fully reliable under these conditions.
 
 \subsection{Video Stream Throughput}
+\label{subsec:res-throughput}
 
-Table~\ref{tab:throughput} presents the measured video stream throughput
+Table~\ref{tab:throughput} presents the video stream throughput measured
 at N3 under direct-link and relay conditions across two independent runs.
 
 \begin{table}[h]
@@ -293,41 +410,37 @@ at N3 under direct-link and relay conditions across two independent runs.
 Direct & 583.3 & 589.2 & 586.2 \\
 Relay  & 570.1 & 580.5 & 575.3 \\
 \midrule
-\textbf{Difference} & \multicolumn{3}{c}{$-$1.9\% (relay vs.\ direct)} \\
+\textbf{Difference} & \multicolumn{3}{c}{$-1.9\%$ (relay vs.\ direct)} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The direct-link throughput of approximately 586\,kbps slightly exceeds
-the 500\,kbps encoder target. This difference is expected: the GStreamer
-pipeline encapsulates the H.264 bitstream in MPEG-TS containers, which
-introduce a packetisation overhead of approximately 15\%. Additionally,
-the encoder was configured with \texttt{-g 1}, which disables inter-frame
-prediction and forces all-intra encoding; without temporal compression,
-each frame is encoded independently at a constant quantiser level,
-yielding a higher average bitrate than a configuration with B-frames or
-P-frames.
+The direct-link mean of 586\,kbps slightly exceeds the 500\,kbps encoder
+target. Two factors account for this difference. First, the MPEG-TS
+container adds approximately 15\% of overhead: every 188-byte
+transport-stream packet carries a 4-byte header, and the ffmpeg pipeline
+groups seven packets per UDP datagram (\texttt{pkt\_size=1316}), so
+container overhead is unavoidable. Second, the encoder is configured with
+\texttt{-g~1}, which disables inter-frame prediction; every frame is
+encoded as an independent intra frame (I-frame), producing a higher and
+more constant bitrate than a configuration that uses P-frames or B-frames.
 
-Under relay conditions, throughput is 575\,kbps on average, representing
-a reduction of approximately 1.9\% relative to the direct-link case. This
-difference is within run-to-run variability caused by the H.264 encoder
-operating on scene content, and no systematic throughput degradation is
-attributable to the relay hop itself. The relay slot of 50\,ms per frame
-provides approximately 0.05\,s\,$\times$\,54\,Mbps\,(Wi-Fi\,g)\,=\,2.7\,Mb
-of theoretical capacity per frame, of which the video stream consumes
-approximately 575\,kbps\,$\times$\,0.15\,s\,=\,86\,kb per frame --- well
-within the available budget.
+Under relay conditions the mean throughput is 575\,kbps, a reduction of
+1.9\% relative to the direct case. This difference is within the
+run-to-run variability introduced by the H.264 encoder as scene content
+changes, and no systematic degradation attributable to the relay hop
+itself is observed. The relay's 50\,ms slot provides approximately
+$0.05 \times 54 \times 10^3 = 2700$\,kb of theoretical capacity per frame,
+of which the video stream consumes only $575 \times 0.150 = 86$\,kb per
+frame --- well within the available budget.
 
 \subsection{Routing Convergence}
-\label{subsec:convergence}
+\label{subsec:res-convergence}
 
-Table~\ref{tab:convergence} presents the convergence times measured across
-all link-failure experiments. Two of the six repetitions were affected by
-extraneous conditions: one repetition in Run~1 was interrupted by a
-battery depletion event on the AlphaBot, and one repetition in Run~2
-experienced a residual \texttt{iptables} rule from a previous session that
-interfered with the relay path. These two repetitions are noted in the
-table but excluded from the aggregate statistics.
+Table~\ref{tab:convergence} presents the convergence times recorded across
+all six link-failure repetitions of Experiment~3. Two repetitions were
+excluded from the aggregate statistics due to extraneous conditions
+unrelated to the routing mechanism.
 
 \begin{table}[h]
 \centering
@@ -335,81 +448,95 @@ table but excluded from the aggregate statistics.
 \label{tab:convergence}
 \begin{tabular}{cccc}
 \toprule
-\textbf{Run} & \textbf{Rep.} & \textbf{Convergence (ms)} & \textbf{Notes} \\
+\textbf{Run} & \textbf{Rep.} & \textbf{$t_{\mathrm{conv}}$ (ms)} & \textbf{Notes} \\
 \midrule
-1 & 1 & 2847 & -- \\
-1 & 2 & 1801 & excluded (battery event) \\
-1 & 3 & 2847 & -- \\
+1 & 1 & 2847 & --- \\
+1 & 2 & 1801 & excluded (battery depletion on N1) \\
+1 & 3 & 2847 & --- \\
 \midrule
-2 & 1 & 2847 & -- \\
-2 & 2 & 2848 & -- \\
-2 & 3 & -- & excluded (iptables conflict) \\
+2 & 1 & 2847 & --- \\
+2 & 2 & 2848 & --- \\
+2 & 3 & ---  & excluded (residual \texttt{iptables} rule) \\
 \midrule
-\multicolumn{2}{l}{\textbf{Mean (valid runs)}} & \textbf{2847} & Std:\,1\,ms \\
+\multicolumn{2}{l}{\textbf{Mean (valid runs)}} & \textbf{2847} & Std: 1\,ms \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 The mean convergence time over the four valid repetitions is approximately
-2847\,ms, with a standard deviation of 1\,ms, indicating a highly
+2847\,ms with a standard deviation of 1\,ms, indicating a highly
 deterministic recovery process. This value corresponds to approximately
-19 TDMA frames of 150\,ms each.
-
-The convergence delay is explained by the chain of events that must
-complete after the direct link is severed:
+19 TDMA frames of 150\,ms each. The convergence chain after the direct
+link is severed comprises the following sequential steps:
 
 \begin{enumerate}
-  \item \textbf{Beacon loss detection.} RA-TDMAs+ detects a link failure
-  after a configurable number of consecutive missed beacons. With the
-  detection threshold set to three missed beacons at 150\,ms each, the
-  failure is declared after approximately 450\,ms.
+  \item \textbf{Beacon loss detection (approx.\ 450\,ms).}
+  RA-TDMAs+ declares a link failure after three consecutive missed beacons.
+  With a frame period of 150\,ms, this takes $3 \times 150 = 450$\,ms.
 
-  \item \textbf{MST recomputation.} Once the link quality metric for the
-  N1--N3 link drops to zero, the routing module recomputes the minimum
-  spanning tree over the updated quality graph. This step completes in
-  tens of microseconds.
+  \item \textbf{MST recomputation (tens of $\mu$s).}
+  The PDR for the N1--N3 link drops to zero, triggering a rerun of Prim's
+  algorithm over the updated quality graph. This completes in microseconds
+  on the small three-node graph.
 
-  \item \textbf{Netlink route installation.} The new next-hop routes are
-  pushed into the kernel routing tables via Netlink sockets. This step
-  completes in approximately 50\,$\mu$s per route.
+  \item \textbf{Netlink route installation (approx.\ 100\,$\mu$s).}
+  Two host routes are installed in the kernel routing tables via Netlink
+  sockets at approximately 50\,$\mu$s each.
 
-  \item \textbf{TCP reconnection via relay.} The TCP connection between N1
-  and N3 is re-established over the relay path. The TCP three-way
-  handshake traverses two TDMA hops and completes within one to two TDMA
-  frames (150--300\,ms).
+  \item \textbf{TCP teardown and reconnection via relay (approx.\ 2.4\,s).}
+  The TCP connection between N1 and N3 was established over the direct path.
+  Once that path is severed, the kernel must wait for the TCP keep-alive
+  probes to time out before the connection is declared dead, after which
+  a new three-way handshake is initiated over the relay path
+  (N1\,$\to$\,N2\,$\to$\,N3). The reconnection traverses two TDMA slots
+  and completes within one to two frames (150--300\,ms), but the preceding
+  teardown accounts for the bulk of the 2.4\,s delay.
 
-  \item \textbf{First video packet via relay.} Once the TCP connection is
-  established, N1 resumes video transmission, and the first packet reaches
-  N3 via N2.
+  \item \textbf{First video packet via relay.}
+  N1 resumes transmission over the new TCP connection; the first packet
+  reaches N3 via N2.
 \end{enumerate}
 
-The remaining 2.4\,s beyond the 450\,ms detection window is attributed
-primarily to the TCP connection teardown and re-establishment sequence,
-which spans multiple TDMA frames as the kernel waits for
-acknowledgements from the now-unreachable direct-link endpoint before
-timing out and allowing a reconnection over the new route. Reducing the
-TCP keep-alive and connection timeout parameters would reduce this
-component of the convergence delay.
+The dominant contribution to convergence time is TCP teardown and
+reconnection, not routing computation or route installation. The
+keep-alive parameters (\texttt{TCP\_KEEPIDLE = 5\,s},
+\texttt{TCP\_KEEPINTVL = 2\,s}, \texttt{TCP\_KEEPCNT = 3}) set a
+worst-case detection time of $5 + 3 \times 2 = 11$\,s; the observed
+2.4\,s teardown time suggests that the kernel's retransmission timeout
+triggered the connection reset before the keep-alive probes exhausted
+their count. Reducing \texttt{TCP\_KEEPIDLE} and the retransmission
+timeout further would shorten this component of the convergence delay.
 
-\subsection{Video Inter-Arrival Timing}
-\label{subsec:ia}
+\subsection{Packet Inter-Arrival Distribution}
+\label{subsec:res-ia}
 
-Figure~\ref{fig:ia-hist} shows the distribution of inter-arrival times
-between consecutive video packets at N3, measured separately for the
-direct-link and relay phases of the same experiment.
+Figures~\ref{fig:ia-direct} and~\ref{fig:ia-relay} show the inter-arrival
+time histograms of video packets at N3 under direct-link and relay
+conditions, respectively, extracted from the PCAP captures of Experiment~4.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
-% Placeholder: replace with actual histogram figure
-\fbox{\parbox{0.8\textwidth}{\centering\vspace{3cm}
-Inter-arrival time histogram (direct vs.\ relay)\\
-[insert figure here]
-\vspace{3cm}}}
-\caption{Video packet inter-arrival time distribution at N3 under
-direct-link and relay conditions. The bimodal structure (short gaps
-within a burst, long gaps between bursts) is identical in both cases,
-confirming that relay forwarding preserves the TDMA timing pattern.}
-\label{fig:ia-hist}
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{3.5cm}
+[Wireshark IA histogram --- direct link]
+\vspace{3.5cm}}}
+\caption{Inter-arrival time histogram of video packets at N3 under
+direct-link conditions. The distribution is strongly bimodal: the left
+peak ($<10$\,ms) corresponds to consecutive packets within the same TDMA
+burst; the right peak ($\approx 130$--$150$\,ms) corresponds to the
+inter-burst gap while N2 and N3 hold the channel.}
+\label{fig:ia-direct}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{3.5cm}
+[Wireshark IA histogram --- relay]
+\vspace{3.5cm}}}
+\caption{Inter-arrival time histogram of video packets at N3 under relay
+conditions. The bimodal structure is preserved identically, confirming
+that N2's kernel IP forwarding introduces no additional inter-packet delay
+at the burst level.}
+\label{fig:ia-relay}
 \end{figure}
 
 Table~\ref{tab:ia} presents the summary statistics for both conditions.
@@ -422,52 +549,97 @@ Table~\ref{tab:ia} presents the summary statistics for both conditions.
 \toprule
 \textbf{Metric} & \textbf{Direct} & \textbf{Relay} \\
 \midrule
-Mean IA (ms)     & 17.43  & 16.33  \\
-Median IA (ms)   & 0.71   & 0.43   \\
-Maximum IA (ms)  & 149.90 & 154.96 \\
-P95 IA (ms)      & 144.43 & 144.78 \\
+Mean IA (ms)    & 17.43  & 16.33  \\
+Median IA (ms)  & 0.71   & 0.43   \\
+Maximum IA (ms) & 149.90 & 154.96 \\
+P95 IA (ms)     & 144.43 & 144.78 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The distribution is strongly bimodal. Approximately 88\% of inter-arrival
-intervals fall in the 0--10\,ms range, corresponding to consecutive
-packets within the same transmission burst. The remaining 11\% fall in
-the 130--150\,ms range, corresponding to the inter-burst gap during which
-N1 is not transmitting. This structure arises directly from the TDMA
-schedule: N1 accumulates data during the 100\,ms in which N2 and N3 hold
-the channel, then transmits a burst of approximately 8--9 packets during
-its own 50\,ms slot. At 580\,kbps with packets of approximately 1200
-bytes, each frame's worth of data (\(580{,}000 \times 0.15 / 8 /
-1200 \approx 9\) packets) fits within a single slot.
+The distribution is strongly bimodal in both conditions. Approximately
+88\% of inter-arrival intervals fall below 10\,ms, corresponding to
+packets within the same TDMA transmission burst. The remaining 11\% fall
+in the 130--150\,ms range, corresponding to the inter-burst gap during
+which N2 and N3 hold the channel and N1 cannot transmit. This structure
+arises directly from the TDMA schedule: N1 accumulates data for
+approximately 100\,ms, then transmits a burst of 8--9 packets during its
+50\,ms slot. At 580\,kbps with a MPEG-TS packet size of 1316 bytes,
+each frame's worth of data contains:
+\begin{equation}
+n_{\mathrm{pkts}} = \frac{580{,}000 \times 0.150}{8 \times 1316} \approx 8.3
+\label{eq:pkts-per-slot}
+\end{equation}
+packets per slot, consistent with the observed burst size.
 
-The relay distribution is statistically indistinguishable from the
-direct-link distribution. The median, P95, and maximum inter-arrival
-values differ by at most 5\,ms between the two conditions, and the
-bimodal shape is preserved identically. This result confirms that N2's
-kernel IP forwarding engine (activated by \texttt{ip\_forward}) forwards
-packets within the same slot in which it receives them, introducing no
-additional inter-packet delay at the burst level. The relay hop shifts
-the absolute arrival time of each burst by approximately one TDMA slot
-(50\,ms), but does not alter the intra-burst or inter-burst timing
-structure observable at N3.
+The relay histogram is statistically indistinguishable from the direct
+histogram. The median, P95, and maximum inter-arrival values differ by at
+most 5\,ms between the two conditions. The relay hop shifts the absolute
+arrival time of each burst by approximately one TDMA slot (50\,ms), but
+leaves the intra-burst and inter-burst timing structure unchanged. This
+confirms that the kernel IP forwarding engine at N2 forwards packets
+within the same slot in which it receives them, adding no observable
+jitter at the burst level.
+
+
+%% -----------------------------------------------------------------------
+\section{Comparison with Layer~2 Routing}
+\label{sec:comparison}
+
+A direct quantitative comparison between the Layer~3 routing system
+developed in this work and the Layer~2 approach of
+Morais~\cite{morais2024synchronization} is planned as part of the
+experimental evaluation but was not completed within the scope of this
+dissertation. The comparison would use the same three-node testbed and
+identical experimental procedures (RTT, throughput, convergence, and
+inter-arrival timing) applied to a clean-slate reimplementation of the
+Layer~2 ARP-manipulation architecture described in
+Chapter~\ref{chap:background}. The architectural differences between the
+two approaches lead to the following predicted differences in experimental
+behaviour:
+
+\begin{itemize}
+  \item \textbf{Convergence time}: The Layer~2 approach is expected to
+  converge faster after a link failure because the TCP connection
+  established at the application level survives route changes transparently;
+  ARP table updates at the relay take effect within a single TDMA frame
+  without requiring a TCP reconnection. The Layer~3 system must tear down
+  and re-establish the TCP connection, contributing approximately 2.4\,s
+  to the observed convergence time.
+
+  \item \textbf{Throughput and inter-arrival timing}: Both approaches
+  operate within the same TDMA slot constraints and are expected to produce
+  equivalent throughput and burst-timing characteristics.
+
+  \item \textbf{Observability}: The Layer~3 system is verifiable with
+  standard tools (\texttt{ping}, \texttt{traceroute}, \texttt{ip route})
+  that reflect the actual relay path, whereas the Layer~2 approach makes
+  the relay path invisible at the IP layer.
+
+  \item \textbf{Stability}: The Layer~2 implementation described by
+  Morais exhibited runtime failures of undetermined origin. A
+  reimplementation may or may not reproduce this behaviour.
+\end{itemize}
+
+Completing this comparison and quantifying these differences experimentally
+is identified as the primary direction for future work.
 
 
 %% -----------------------------------------------------------------------
 \section{Summary}
 \label{sec:eval-summary}
 
-The experimental evaluation demonstrates that the proposed routing
-mechanism meets its primary objectives. The control channel achieves
-a mean RTT of 50\,ms consistent with the TDMA slot structure and 100\%
-PDR under steady-state conditions. Video throughput under relay conditions
-is within 2\% of the direct-link baseline, confirming that the relay
-slot provides sufficient capacity for the target stream. Routing
-convergence after a link failure averages approximately 2847\,ms across
-four controlled experiments, a highly deterministic value dominated by
+This chapter evaluated the routing system across four experiments on
+physical hardware. The control channel achieves a mean RTT of 50\,ms
+consistent with the TDMA slot structure and 100\% PDR under steady-state
+conditions. Video throughput under relay conditions is within 2\% of the
+direct-link baseline, confirming that the relay slot provides sufficient
+capacity for the target stream at 500\,kbps. Routing convergence after a
+link failure averages 2847\,ms, a highly deterministic value dominated by
 TCP connection teardown and re-establishment rather than by routing
-computation or route installation, both of which complete in
-microseconds. Finally, the inter-arrival timing analysis confirms that
-kernel IP forwarding at the relay node preserves the TDMA burst structure
-of the video stream exactly, adding no observable jitter at the frame
-level.
+computation or route installation, both of which complete in microseconds.
+The inter-arrival timing analysis confirms that kernel IP forwarding at N2
+preserves the TDMA burst structure of the video stream exactly, adding no
+observable jitter at the burst level. A quantitative comparison with the
+Layer~2 approach of Morais~\cite{morais2024synchronization} is identified as
+the main direction for future work.
