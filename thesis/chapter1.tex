@@ -71,30 +71,34 @@ provide is a routing layer: a mechanism that translates topology information
 into forwarding decisions that allow arbitrary IP traffic to traverse multi-hop
 paths transparently.
 
-Several specific problems arise when adding such a routing layer to a TDMA
-mesh network for robotic applications. First, the routing mechanism must
-operate within the strict timing constraints imposed by the TDMA slot
-structure, computing and installing routes without disrupting the medium-access
-schedule. Second, it must detect link failures rapidly and trigger relay
-activation before the ongoing application stream (in this case a video feed)
-is perceived as interrupted by the operator. Third, the forwarding of
-transit packets must be implemented efficiently: user-space forwarding planes
-introduce additional latency and complexity, while kernel-level approaches
-offer proven performance, standard observability, and seamless integration with
-the operating system's networking stack. Fourth, a metric is needed to quantify
-link quality within the TDMA context, since classical metrics such as hop count
-or received signal strength do not capture the slot-level packet delivery
-behaviour that is most relevant here. Fifth, the transport protocol for
-application data must be carefully chosen. The original framework used UDP for
-all inter-node communication, which is well suited to the periodic topology
-beacons but provides no retransmission mechanism for video frames, causing lost
-datagrams to produce visible artefacts at the receiver. Prior work demonstrated
-that adopting TCP at the application layer eliminates these artefacts, but that
-using TCP with default protocol settings introduces buffering delays that are
-incompatible with real-time streaming over a TDMA network. Properly integrating
-TCP into the communication stack requires the forwarding path to be visible at
-the IP layer, since TCP connections are identified by endpoint addresses and
-port numbers. This interaction between transport protocol and forwarding
+Several challenges arise when adding such a routing layer to a TDMA mesh
+network for robotic applications. The routing mechanism must operate within the
+strict timing constraints imposed by the TDMA slot structure, computing and
+installing forwarding decisions without disrupting the medium-access schedule.
+It must also detect link failures rapidly enough to trigger relay activation
+before the operator perceives an interruption in the video feed.
+
+How transit packets are forwarded is equally important. User-space forwarding
+planes introduce latency and implementation complexity, whereas a kernel-level
+approach offers proven performance, standard observability through tools such
+as \texttt{ping} and \texttt{traceroute}, and seamless integration with the
+operating system networking stack. A related consideration is the choice of
+link quality metric: classical measures such as hop count or received signal
+strength do not capture the slot-level packet delivery behaviour that is most
+relevant in a TDMA context, so a dedicated metric is needed to drive both route
+selection and relay activation.
+
+The choice of transport protocol for application data raises a further
+challenge. The original framework used UDP for all inter-node communication,
+which is well suited to the periodic topology beacons but provides no
+retransmission mechanism for video frames, causing lost datagrams to produce
+visible artefacts at the receiver. Prior work demonstrated that adopting TCP at
+the application layer eliminates these artefacts, but that using TCP with
+default protocol settings introduces buffering delays that are incompatible
+with real-time streaming over a TDMA network. Properly integrating TCP into
+the communication stack requires the forwarding path to be visible at the IP
+layer, since TCP connections are identified by endpoint addresses and port
+numbers. This interaction between transport protocol and forwarding
 architecture is a central design constraint of the present work.
 
 A previous attempt to address the routing problem in RA-TDMAs+ was carried
