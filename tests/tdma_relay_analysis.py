@@ -5,6 +5,11 @@ tdma_relay_analysis.py — Análise de timing do relay TDMA
 Analisa QUANDO os pacotes de vídeo são transmitidos/recebidos
 em relação ao frame TDMA de 150ms.
 
+O relay é transparente ao IP (o kernel faz ip-forward via TUN),
+por isso os pacotes chegam sempre com src=nó_origem. A prova do
+relay está no TIMING: pacotes chegando no slot de N2 (50-100ms)
+foram re-transmitidos por N2.
+
 Lê .pcap/.pcapng diretamente (sem dependências externas).
 Suporta link types: Ethernet (1), Linux SLL (113), Linux SLL2 (276).
 
@@ -36,8 +41,17 @@ IP_TO_NODE = {
     '10.0.0.1':    1, '10.0.0.2':    2, '10.0.0.3':    3,
 }
 NODE_COLORS = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
+NODE_NAMES  = {1: 'N1', 2: 'N2', 3: 'N3'}
 SLOT_START  = {1: 0.0, 2: 50.0, 3: 100.0}
 TDMA_PORTS  = {7001, 7002, 7003}
+
+
+def infer_relay_node(frame_pos):
+    """Devolve o nó relay inferido pela posição no frame TDMA (ou 0 se ambíguo)."""
+    for node, start in SLOT_START.items():
+        if start <= frame_pos < start + SLOT_MS:
+            return node
+    return 0
 
 
 # ── Stripping L2 ───────────────────────────────────────────────────────────────
@@ -231,16 +245,29 @@ def load_pcap(path, video_port=None):
 
 # ── Carregamento CSV ──────────────────────────────────────────────────────────
 def load_csv(path):
+    """
+    Carrega pacotes do CSV exportado pelo Wireshark.
+
+    Estratégia de dois planos:
+      - Plano de dados  (10.0.0.x / MPEG TS / UDP): só pacotes de vídeo (len > 107).
+        O src IP permanece o do originador mesmo após relay transparente via TUN.
+        O relay de N2 é INFERIDO pela posição no frame TDMA (slot 50-100ms).
+      - Plano de controlo (172.20.10.x / RX): beacons TDMA — mostram quando cada
+        nó está activo no seu slot, incluindo N2 que não aparece como src de vídeo.
+    """
     print(f"[INFO] A ler CSV: {path}")
-    records = []
-    t0 = None
-    skip = 0
+    records  = []
+    t0       = None
+    n_video  = 0
+    n_beacon = 0
+    skip     = 0
 
     with open(path, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         norm = {h.strip().lower(): h for h in (reader.fieldnames or [])}
         tc = norm.get('time'); sc = norm.get('source')
         lc = norm.get('length'); pc = norm.get('protocol')
+        dc = norm.get('destination')
         if not tc or not sc:
             print("ERRO: colunas Time/Source não encontradas"); sys.exit(1)
 
@@ -250,56 +277,125 @@ def load_csv(path):
                 src = row[sc].strip()
             except (ValueError, KeyError):
                 continue
-            if pc and row[pc].strip().upper() not in ('UDP', 'RX', 'MPEG TS'):
-                continue
+
+            proto = row[pc].strip().upper() if pc else ''
             try:
-                if lc and int(row[lc].strip()) <= 107:
-                    skip += 1; continue
+                plen = int(row[lc].strip()) if lc else 0
             except ValueError:
-                pass
+                plen = 0
+
             node = IP_TO_NODE.get(src, 0)
             if node == 0:
                 skip += 1; continue
+
+            is_ctrl_plane = src.startswith('172.20.')
+
+            if is_ctrl_plane:
+                # Beacons RX do plano de controlo TDMA — mostram actividade do slot
+                if proto != 'RX':
+                    skip += 1; continue
+                pkt_type = 'beacon'
+                n_beacon += 1
+            else:
+                # Plano de dados — só vídeo (filtra beacons pequenos)
+                if proto not in ('UDP', 'MPEG TS'):
+                    skip += 1; continue
+                if plen <= 107:
+                    skip += 1; continue
+                pkt_type = 'video'
+                n_video += 1
+
             if t0 is None:
                 t0 = ts
-            ts_ms = (ts - t0) * 1000.0
-            records.append({'ts_ms': ts_ms, 'frame_pos': ts_ms % FRAME_MS,
-                             'node': node, 'ip_src': src, 'dport': 0, 'plen': 0})
+            ts_ms     = (ts - t0) * 1000.0
+            frame_pos = ts_ms % FRAME_MS
 
-    print(f"[INFO] {len(records)} pacotes carregados ({skip} ignorados)")
+            records.append({
+                'ts_ms':      ts_ms,
+                'frame_pos':  frame_pos,
+                'node':       node,
+                'ip_src':     src,
+                'ip_dst':     row[dc].strip() if dc else '',
+                'plen':       plen,
+                'pkt_type':   pkt_type,
+                'relay_node': infer_relay_node(frame_pos) if pkt_type == 'video' else node,
+            })
+
+    print(f"[INFO] {n_video} pacotes de vídeo + {n_beacon} beacons carregados ({skip} ignorados)")
     return records
 
 
 # ── Estatísticas ───────────────────────────────────────────────────────────────
 def compute_stats(records):
-    by_node = defaultdict(list)
+    # Separa vídeo de beacons
+    by_node_video   = defaultdict(list)  # frame_pos dos pacotes de vídeo (por src node)
+    by_node_beacon  = defaultdict(list)  # frame_pos dos beacons de controlo
+    by_relay_node   = defaultdict(list)  # frame_pos dos pacotes de vídeo por relay inferido
+
     for r in records:
-        by_node[r['node']].append(r['frame_pos'])
+        if r['pkt_type'] == 'video':
+            by_node_video[r['node']].append(r['frame_pos'])
+            if r['relay_node']:
+                by_relay_node[r['relay_node']].append(r['frame_pos'])
+        else:
+            by_node_beacon[r['node']].append(r['frame_pos'])
 
     print("\n─── Timing do vídeo relay no frame TDMA ──────────────────────────────────")
-    print(f"  {'Nó':>4}  {'IP origem':>16}  {'N pkts':>7}  "
+    print(f"  {'Nó src':>6}  {'IP origem':>16}  {'N pkts':>7}  "
           f"{'μ (ms)':>8}  {'σ (ms)':>7}  {'% no slot':>10}")
-    print("  " + "─" * 60)
+    print("  " + "─" * 62)
 
     ip_by_node = defaultdict(set)
     for r in records:
-        ip_by_node[r['node']].add(r['ip_src'])
+        if r['pkt_type'] == 'video':
+            ip_by_node[r['node']].add(r['ip_src'])
 
     results = {}
-    for node in sorted(by_node):
-        pos  = np.array(by_node[node])
+    all_video_nodes = sorted(set(by_node_video) | set(by_relay_node))
+    for node in all_video_nodes:
+        pos  = np.array(by_node_video.get(node, []))
+        if len(pos) == 0:
+            continue
         mu   = np.mean(pos)
         sig  = np.std(pos)
         sl_s = SLOT_START.get(node, -1)
         pct  = 100.0 * np.sum((pos >= sl_s) & (pos < sl_s + SLOT_MS)) / len(pos) \
                if sl_s >= 0 else 0.0
         ips  = ', '.join(sorted(ip_by_node[node]))
-        print(f"  N{node}    {ips:>16}  {len(pos):>7}  "
+        print(f"  N{node}      {ips:>16}  {len(pos):>7}  "
               f"{mu:>8.2f}  {sig:>7.2f}  {pct:>9.1f}%")
-        results[f'N{node}'] = {'n': len(pos), 'mean_ms': round(mu, 2),
-                                'std_ms': round(sig, 2), 'pct_in_slot': round(pct, 1)}
-    print("  " + "─" * 60)
-    return results, by_node
+        results[f'N{node}_video'] = {'n': len(pos), 'mean_ms': round(mu, 2),
+                                      'std_ms': round(sig, 2), 'pct_in_slot': round(pct, 1)}
+
+    print("\n─── Relay inferido por slot TDMA (vídeo recebido em cada slot) ───────────")
+    print(f"  {'Slot/Nó':>7}  {'N pkts':>7}  {'μ (ms)':>8}  {'σ (ms)':>7}  {'Intervalo slot':>16}")
+    print("  " + "─" * 55)
+    for node in sorted(by_relay_node):
+        pos  = np.array(by_relay_node[node])
+        mu   = np.mean(pos)
+        sig  = np.std(pos)
+        sl_s = SLOT_START[node]
+        print(f"  N{node} slot  {len(pos):>7}  {mu:>8.2f}  {sig:>7.2f}  "
+              f"  {sl_s:.0f}–{sl_s+SLOT_MS:.0f} ms")
+        results[f'N{node}_relay_slot'] = {'n': len(pos), 'mean_ms': round(mu, 2),
+                                           'std_ms': round(sig, 2)}
+
+    print("\n─── Actividade beacons TDMA (plano de controlo 172.20.x.x) ──────────────")
+    print(f"  {'Nó':>4}  {'N beacons':>9}  {'μ (ms)':>8}  {'σ (ms)':>7}  {'% no slot':>10}")
+    print("  " + "─" * 50)
+    for node in sorted(by_node_beacon):
+        pos  = np.array(by_node_beacon[node])
+        mu   = np.mean(pos)
+        sig  = np.std(pos)
+        sl_s = SLOT_START.get(node, -1)
+        pct  = 100.0 * np.sum((pos >= sl_s) & (pos < sl_s + SLOT_MS)) / len(pos) \
+               if sl_s >= 0 else 0.0
+        print(f"  N{node}    {len(pos):>9}  {mu:>8.2f}  {sig:>7.2f}  {pct:>9.1f}%")
+        results[f'N{node}_beacon'] = {'n': len(pos), 'mean_ms': round(mu, 2),
+                                       'std_ms': round(sig, 2), 'pct_in_slot': round(pct, 1)}
+    print("  " + "─" * 50)
+
+    return results, by_node_video, by_node_beacon, by_relay_node
 
 
 # ── Plot histograma ────────────────────────────────────────────────────────────
