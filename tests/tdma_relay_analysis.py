@@ -254,48 +254,74 @@ def _align_offset(rows):
     return 0.0, 'raw capture t0 (no reference)'
 
 
+# categorias de pacotes para colorir o slot alignment
+SLOT_CATS = [
+    ('Video (TCP/MPEG TS)', '#4CAF50'),
+    ('TDMA control (RX beacons/acks)', '#FF9800'),
+    ('TCP ACK / control', '#90A4AE'),
+    ('Other', '#BDBDBD'),
+]
+
+
+def _packet_category(r):
+    """Classifica um pacote numa das SLOT_CATS."""
+    if (r['ptype'] == 'tdma_tcp' and r['plen'] > 200) or r['ptype'] == 'video_udp':
+        return 'Video (TCP/MPEG TS)'
+    if r['proto'] == 'RX':
+        return 'TDMA control (RX beacons/acks)'
+    if r['proto'] == 'TCP':
+        return 'TCP ACK / control'
+    return 'Other'
+
+
 def _plot_n3_slot_alignment(direct, relay, out_path):
     """
-    Histograma da posição de TODOS os pacotes dentro do frame de 150ms — mostra
-    a estrutura TDMA completa (cada nó transmite no seu slot).
+    Histograma da posição de TODOS os pacotes dentro do frame de 150ms,
+    COLORIDO POR CATEGORIA (vídeo, controlo TDMA, ACKs TCP, outros) — mostra a
+    estrutura TDMA completa e o que ocupa cada slot.
 
     Cada captura é alinhada com a SUA própria referência (beacon do N1), porque
     são capturas independentes com t0 diferentes. Os dois painéis ficam lado a
     lado, cada um com o seu eixo X, para comparação directo vs relay.
     """
-    d_all = np.array([r['ts_ms'] for r in direct])
-    r_all = np.array([r['ts_ms'] for r in relay])
     d_off, d_note = _align_offset(direct)
     r_off, r_note = _align_offset(relay)
-    d_pos = (d_all + d_off) % FRAME_MS
-    r_pos = (r_all + r_off) % FRAME_MS
 
     bins = np.arange(0, FRAME_MS + 3, 3)
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
     fig.suptitle('TDMA Frame Slot Alignment at N3\n'
-                 'All packets — position within 150 ms frame (each capture aligned independently)',
+                 'All packets by category — position within 150 ms frame (each capture aligned independently)',
                  fontsize=14, fontweight='bold')
 
     slots = [(0, 50, 'N1 slot\n(0–50 ms)', '#2196F3'),
              (50, 100, 'N2 slot\n(50–100 ms)', '#7E57C2'),
              (100, 150, 'N3 slot\n(100–150 ms)', '#F44336')]
 
-    for ax, pos, title, color, note in [
-        (axes[0], d_pos, f'Direct Link  (n = {len(d_pos):,} packets)', '#2196F3', d_note),
-        (axes[1], r_pos, f'Relay via ip_forward  (n = {len(r_pos):,} packets)', '#4CAF50', r_note),
+    for ax, rows, off, title, note in [
+        (axes[0], direct, d_off, f'Direct Link  (n = {len(direct):,} packets)', d_note),
+        (axes[1], relay,  r_off, f'Relay via ip_forward  (n = {len(relay):,} packets)', r_note),
     ]:
+        # posições por categoria
+        by_cat = defaultdict(list)
+        for r in rows:
+            by_cat[_packet_category(r)].append((r['ts_ms'] + off) % FRAME_MS)
+        data   = [by_cat[c] for c, _ in SLOT_CATS]
+        colors = [col for _, col in SLOT_CATS]
+
         for a, b, lab, scol in slots:
             ax.axvspan(a, b, alpha=0.06, color=scol)
             ax.axvline(b, color='gray', ls='--', lw=1, alpha=0.6)
             ax.text((a + b) / 2, 0.97, lab, transform=ax.get_xaxis_transform(),
                     ha='center', va='top', fontsize=9, color=scol,
                     bbox=dict(boxstyle='round', facecolor='white', edgecolor=scol, alpha=0.9))
-        ax.hist(pos, bins=bins, color=color, alpha=0.9, edgecolor='none')
+        ax.hist(data, bins=bins, stacked=True, color=colors,
+                label=[c for c, _ in SLOT_CATS], edgecolor='none')
         ax.set_xlabel('Position within TDMA frame (ms)', fontsize=11)
         ax.set_ylabel('Packet count', fontsize=11)
-        ax.set_title(title, fontsize=12, fontweight='bold', color=color)
+        ax.set_title(title, fontsize=12, fontweight='bold')
         ax.grid(axis='y', alpha=0.2)
         ax.set_xlim(0, FRAME_MS)
+        ax.legend(fontsize=8, loc='upper center')
         ax.text(0.99, 0.02, f'* {note}', transform=ax.transAxes, ha='right',
                 fontsize=8, style='italic', color='gray')
 
