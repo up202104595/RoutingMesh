@@ -475,6 +475,7 @@ void* tx_loop(void *arg) {
            node->node_id, rp_ms, SLOT_DURATION_US/1000, GUARD_US/1000);
 
     uint64_t last_round  = 0;
+    uint64_t last_tx_round = (uint64_t)-1;   /* garante 1 transmissão por round */
     uint64_t start_time  = get_time_us();
     #define STARTUP_GRACE_US  10000000ULL  /* 10s sem detecção */
 
@@ -495,7 +496,15 @@ void* tx_loop(void *arg) {
         uint64_t time_in_frame = now % node->frame_duration_us;
         int      current_slot  = (int)(time_in_frame / SLOT_DURATION_US);
 
-        if (current_slot != (node->node_id - 1)) {
+        /*
+         * SINCRONIZAÇÃO RELATIVA (laço fechado):
+         * o slot de transmissão é o slot AJUSTADO PELOS BEACONS (sync_in_slot /
+         * g_slot), não mais o slot fixo por node_id + relógio absoluto. O
+         * sync_adjust_slot() (algoritmo do Diogo) corrige g_slot a cada round
+         * com base nos delays medidos, tornando o sistema imune a desvios de
+         * relógio entre nós.
+         */
+        if (!sync_in_slot(now, rp_ms)) {
             uint64_t round_us  = (uint64_t)rp_ms * 1000;
             uint64_t cur_round = now / round_us;
             if (cur_round != last_round) {
@@ -539,14 +548,30 @@ void* tx_loop(void *arg) {
             continue;
         }
 
+        /* só transmite UMA vez por round (o slot dura ~45ms; evita reenvio) */
+        uint64_t round_us_g = (uint64_t)rp_ms * 1000;
+        uint64_t cur_round_tx = now / round_us_g;
+        if (cur_round_tx == last_tx_round) {
+            usleep(2000);
+            continue;
+        }
+        last_tx_round = cur_round_tx;
+
         uint64_t slot_start_us = now;
         (void)slot_start_us;
         /* BUG 5 FIX: removeDeadLinks() era chamado aqui E dentro de
          * serializeMatrix(), causando dupla remoção por slot.
          * serializeMatrix() já trata disto internamente. */
-        uint64_t slot_end = (now - time_in_frame) +
-                            ((uint64_t)(current_slot + 1) * SLOT_DURATION_US)
-                            - GUARD_US;
+        /* slot_end a partir do slot AJUSTADO PELOS BEACONS (g_slot), com
+         * tratamento de wrap-around no limite do frame. */
+        slot_limits_t sl_end     = sync_get_slot();
+        uint64_t      frame_start = now - (now % round_us_g);
+        uint64_t      slot_end;
+        if (sl_end.end_ms > sl_end.begin_ms)
+            slot_end = frame_start + (uint64_t)sl_end.end_ms * 1000;
+        else  /* slot atravessa o limite do frame */
+            slot_end = frame_start + round_us_g + (uint64_t)sl_end.end_ms * 1000;
+        if (slot_end > GUARD_US) slot_end -= GUARD_US;
 
         /* MATRIX broadcast via UDP */
         int payload_len = 0;
