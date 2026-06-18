@@ -52,7 +52,7 @@ NUM_NODES  = 3
 # O Wireshark captura tráfego bidirecional, portanto usamos srcport.
 
 NODE_COLORS = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
-NODE_LABELS = {1: 'N1 (slot 0–50ms)', 2: 'N2 (slot 50–100ms)', 3: 'N3 (slot 100–150ms)'}
+NODE_LABELS = {1: 'N1 (slot 0–50 ms)', 2: 'N2 (slot 50–100 ms)', 3: 'N3 (slot 100–150 ms)'}
 SLOT_START  = {1: 0.0, 2: 50.0, 3: 100.0}
 
 # ── Leitura CSV do Wireshark ───────────────────────────────────────────────────
@@ -191,9 +191,9 @@ def plot_scatter(wrapped, out_path):
     ax.set_ylim(0.5, NUM_NODES + 0.5)
     ax.set_yticks([1, 2, 3])
     ax.set_yticklabels(['N1', 'N2', 'N3'])
-    ax.set_xlabel('Posição dentro do frame TDMA (ms)', fontsize=11)
-    ax.set_ylabel('Nó emissor', fontsize=11)
-    ax.set_title('Sincronização TDMA — posição de transmissão no frame de 150ms', fontsize=12)
+    ax.set_xlabel('Position within TDMA frame (ms)', fontsize=11)
+    ax.set_ylabel('Transmitting node', fontsize=11)
+    ax.set_title('TDMA Synchronization — transmission position within 150 ms frame', fontsize=12)
     ax.legend(loc='upper right', fontsize=9)
     ax.grid(axis='x', alpha=0.3)
 
@@ -223,17 +223,17 @@ def plot_histogram(wrapped, out_path):
         ax.axvspan(slot_s, slot_s + SLOT_MS, alpha=0.12,
                    color=NODE_COLORS[node], label=f'Slot N{node}')
 
-        ax.set_ylabel(f'N{node}\n(pkts)', fontsize=9)
+        ax.set_ylabel(f'N{node}\n(packets)', fontsize=9)
         ax.legend(loc='upper right', fontsize=8)
         ax.grid(axis='x', alpha=0.3)
 
         if positions:
             mean_pos = np.mean(positions)
             ax.axvline(x=mean_pos, color='orange', linewidth=1.5,
-                       linestyle='-', alpha=0.9, label=f'μ={mean_pos:.1f}ms')
+                       linestyle='-', alpha=0.9, label=f'mean = {mean_pos:.1f} ms')
 
-    axes[-1].set_xlabel('Posição dentro do frame TDMA (ms)', fontsize=11)
-    axes[0].set_title('Distribuição de transmissões por slot (histograma 1ms)', fontsize=12)
+    axes[-1].set_xlabel('Position within TDMA frame (ms)', fontsize=11)
+    axes[0].set_title('Transmission distribution per slot (1 ms histogram)', fontsize=12)
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
@@ -303,11 +303,11 @@ def _classify_proto(row):
 
     # Beacons TDMA de controlo (RX protocol, 172.20.x.x)
     if proto == 'RX' and plen <= 120:
-        return 'Beacon TDMA\n(RX ctrl)'
+        return 'TDMA Beacon\n(RX ctrl)'
 
     # Dados vídeo encapsulados em TCP TDMA — porta 8001-8003
     if proto == 'TCP' and src.startswith('172.20.') and dst.startswith('172.20.'):
-        return 'TCP TDMA\n(vídeo encapsulado)'
+        return 'TCP TDMA\n(encapsulated video)'
 
     # Vídeo raw via ip_forward — porta 5000 UDP/MPEG TS
     if proto in ('UDP', 'MPEG TS') and plen > 200:
@@ -321,7 +321,7 @@ def _proto_analysis(files):
     Analisa 1 ou 2 CSVs e mostra distribuição de protocolos.
     Com 2 ficheiros: compara directo vs relay lado a lado.
     """
-    labels = ['Directo (N1→N3)', 'Relay (N1→N2→N3)'] if len(files) == 2 else [os.path.basename(files[0])]
+    labels = ['Direct (N1→N3)', 'Relay (N1→N2→N3)'] if len(files) == 2 else [os.path.basename(files[0])]
     datasets = [_load_full_csv(f) for f in files]
 
     # conta por protocolo classificado
@@ -368,26 +368,26 @@ def _proto_analysis(files):
 
         ax.set_xticks(x)
         ax.set_xticklabels([k.replace('\n', '\n') for k in keys], fontsize=8)
-        ax.set_ylabel('Nº de pacotes')
+        ax.set_ylabel('Number of packets')
         ax.set_title(lbl, fontsize=10, fontweight='bold')
         ax.grid(axis='y', alpha=0.3)
 
         # box explicativo
         if 'Relay' in lbl or col_i == 1:
             ax.text(0.5, 0.92,
-                    'UDP/MPEG TS = ip_forward\nbypassa encapsulamento TDMA',
+                    'UDP/MPEG TS = ip_forward\nbypasses TDMA encapsulation',
                     transform=ax.transAxes, ha='center', fontsize=7,
                     color='#4CAF50',
                     bbox=dict(boxstyle='round', facecolor='#E8F5E9', alpha=0.8))
         else:
             ax.text(0.5, 0.92,
-                    'TCP = vídeo encapsulado\nno protocolo TDMA',
+                    'TCP = video encapsulated\nin TDMA protocol',
                     transform=ax.transAxes, ha='center', fontsize=7,
                     color='#2196F3',
                     bbox=dict(boxstyle='round', facecolor='#E3F2FD', alpha=0.8))
 
-    fig.suptitle('Protocolo recebido em N3: Directo vs Relay\n'
-                 'Em relay o protocolo muda de TCP (TDMA) para UDP/MPEG TS (ip_forward)',
+    fig.suptitle('Protocol received at N3: Direct vs. Relay\n'
+                 'In relay the protocol changes from TCP (TDMA) to UDP/MPEG TS (ip_forward)',
                  fontsize=10, fontweight='bold')
     plt.tight_layout()
 
