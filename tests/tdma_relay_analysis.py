@@ -19,15 +19,18 @@ O CSV deve ser exportado do Wireshark com:
 
 Porquê o protocolo muda em N3?
   - Directo:  N1 envia via TDMA TCP (172.20.10.1 → 172.20.10.3  TCP  porta 8003)
-  - Relay:    N2 faz ip_forward do pacote UDP original
-              (172.20.10.2 → 172.20.10.3  UDP/MPEG TS  porta 5000)
+  - Relay:    N2 faz ip_forward do pacote original — o relay é TRANSPARENTE
+              (sem NAT), por isso o pacote mantém os IPs TUN originais
+              (10.0.0.1 → 10.0.0.3) e aparece como MPEG TS porta 5000.
   O ip_forward bypassa o encapsulamento TDMA — o pacote raw MPEG TS vai directo
   para wlan0, sem passar pelo tx_queue nem pelo tx_loop do protocolo.
 
-O que medir em N2 (capturar wlan0 em N2 durante relay):
-  - ENTRADA: 172.20.10.1 → 172.20.10.2  TCP  porta 8002  (vídeo encapsulado TDMA)
-  - SAÍDA:   172.20.10.2 → 172.20.10.3  UDP  porta 5000  (ip_forward raw MPEG TS)
-  - Δt = t_saída_UDP − t_entrada_TCP  → latência do ip_forward kernel (~0ms)
+O que medir em N2 (capturar em N2 durante relay):
+  - ENTRADA: 172.20.10.1 → 172.20.10.2  TCP  porta 800x  (vídeo encapsulado TDMA)
+  - SAÍDA:   10.0.0.1 → 10.0.0.3  MPEG TS/UDP  porta 5000  (ip_forward transparente)
+             NOTA: como o relay NÃO faz NAT, o src continua a ser 10.0.0.1 (N1),
+             e NÃO 172.20.10.2 (N2). O pacote é reencaminhado tal e qual.
+  - Δt = t_saída_MPEGTS − t_entrada_TCP  → latência do ip_forward kernel (~0ms)
 """
 
 import sys, os, csv, argparse
@@ -110,10 +113,10 @@ def load_csv(path):
                 ptype = 'tdma_tcp'
             elif proto == 'MPEG TS':
                 ptype = 'video_udp'  # MPEG TS relay via ip_forward (TUN IPs)
-            elif proto == 'UDP' and (dport in VIDEO_UDP_PORTS or src in IP_TUN):
-                ptype = 'video_udp'
             elif dport in CTRL_UDP_PORTS or proto == 'RX':
-                ptype = 'ctrl'
+                ptype = 'ctrl'  # beacons/telemetria — verificar ANTES do vídeo UDP
+            elif proto == 'UDP' and dport in VIDEO_UDP_PORTS:
+                ptype = 'video_udp'
             else:
                 ptype = 'other'
 
@@ -301,15 +304,19 @@ def analyse_n2(n2_csv, out_prefix):
     rows = load_csv(n2_csv)
 
     # separa os dois fluxos
+    # ENTRADA: vídeo encapsulado em TDMA TCP que chega de N1 (172.20.10.1→172.20.10.2)
     tcp_in  = [r for r in rows
                if r['src_node'] == 1 and r['dst_node'] == 2 and r['proto'] == 'TCP']
+    # SAÍDA: o relay é TRANSPARENTE (ip_forward sem NAT) — o vídeo reencaminhado
+    # mantém os IPs originais (src=10.0.0.1 N1, dst=10.0.0.3 N3) e aparece como
+    # MPEG TS / UDP porta 5000. NÃO sai como 172.20.10.2→172.20.10.3.
     udp_out = [r for r in rows
-               if r['src_node'] == 2 and r['dst_node'] == 3
-               and r['proto'] in ('UDP', 'MPEG TS')]
+               if r['ptype'] == 'video_udp'
+               and r['src_node'] == 1 and r['dst_node'] == 3]
 
     print("\n─── N2: Fluxos durante relay ───────────────────────────────────────────")
-    print(f"  TCP entrada  (N1→N2, TDMA encapsulado):  {len(tcp_in):>5} pacotes")
-    print(f"  UDP saída    (N2→N3, ip_forward raw):     {len(udp_out):>5} pacotes")
+    print(f"  TCP entrada  (N1→N2, TDMA encapsulado):       {len(tcp_in):>5} pacotes")
+    print(f"  MPEG TS saída (N1→N3 via ip_forward transparente): {len(udp_out):>5} pacotes")
 
     if tcp_in and udp_out:
         # estimativa de latência: para cada UDP de saída, encontra o TCP de entrada
@@ -346,8 +353,8 @@ def _plot_n2_relay(tcp_in, udp_out, out_path):
         return
 
     fig, axes = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
-    fig.suptitle('N2 — Transformação do relay: TCP (TDMA) → UDP (ip_forward)\n'
-                 'N2 recebe vídeo encapsulado em TDMA TCP e reencaminha como UDP raw via ip_forward',
+    fig.suptitle('N2 — Transformação do relay: TCP (TDMA) → MPEG TS (ip_forward transparente)\n'
+                 'N2 recebe vídeo encapsulado em TDMA TCP e reencaminha como MPEG TS raw (src/dst originais 10.0.0.1→10.0.0.3)',
                  fontsize=10, fontweight='bold')
 
     # subplot 1: TCP de entrada (N1→N2)
@@ -368,7 +375,7 @@ def _plot_n2_relay(tcp_in, udp_out, out_path):
         sizes = [r['plen'] for r in udp_out]
         ax.vlines(ts, 0, sizes, color='#4CAF50', alpha=0.7, linewidth=1.2)
         ax.set_ylabel('Tamanho (B)', fontsize=9)
-        ax.set_title(f'SAÍDA de N2: UDP/MPEG TS para N3 (172.20.10.2→172.20.10.3, ip_forward)  n={len(udp_out)}',
+        ax.set_title(f'SAÍDA de N2: MPEG TS para N3 (10.0.0.1→10.0.0.3, ip_forward transparente)  n={len(udp_out)}',
                      fontsize=9)
     ax.set_xlabel('Tempo (ms)', fontsize=10)
     ax.grid(axis='x', alpha=0.3)
