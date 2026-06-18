@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """
-tdma_sync_plot.py — Visualização de sincronização TDMA wrapped a 150ms
+tdma_sync_plot.py — Visualização de sincronização TDMA + análise de protocolo
 
-Uso:
-  1. Capturar no Wireshark: filtro  udp portrange 7001-7003
-  2. Exportar: File → Export Packet Dissections → As CSV
-  3. python3 tdma_sync_plot.py <ficheiro.csv>
+Modos:
+  1. Sincronização TDMA (beacons 7001-7003):
+       python3 tdma_sync_plot.py <ficheiro.csv>
 
-Produz dois plots (como Ana Morais Fig. 4.34/4.35):
-  - Scatter: posição de cada pacote dentro do frame de 150ms
-  - Histograma: distribuição por bin de 1ms dentro do frame
+  2. Análise de protocolo directo vs relay (captura wlan0 completa):
+       python3 tdma_sync_plot.py --proto <ficheiro.csv>
+       python3 tdma_sync_plot.py --proto direct.csv relay.csv
+
+     Mostra: em directo N3 recebe TCP (TDMA encapsulado);
+             em relay   N3 recebe UDP/MPEG TS (ip_forward raw de N2)
+
+Como capturar:
+  - Beacons TDMA:  filtro Wireshark  udp portrange 7001-7003
+  - Protocolo:     capturar wlan0 SEM filtro → exportar CSV completo
 """
 
 import sys
@@ -260,19 +266,160 @@ def print_stats(wrapped):
     print("─" * 68)
     return results
 
+# ── Análise de protocolo: TCP (directo) vs UDP/MPEG TS (relay) ────────────────
+def _load_full_csv(path):
+    """Lê CSV Wireshark SEM filtro — devolve lista de dicts com todos os campos."""
+    rows = []
+    with open(path, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        norm = {h.strip().strip('"').lower(): h for h in (reader.fieldnames or [])}
+        tc = norm.get('time'); sc = norm.get('source'); dc = norm.get('destination')
+        pc = norm.get('protocol'); lc = norm.get('length'); ic = norm.get('info')
+        if not tc or not sc:
+            print(f"ERRO: CSV sem colunas Time/Source: {path}"); sys.exit(1)
+        t0 = None
+        for row in reader:
+            try:
+                ts    = float(row[tc].strip().strip('"'))
+                src   = row[sc].strip().strip('"')
+                dst   = row[dc].strip().strip('"') if dc else ''
+                proto = row[pc].strip().strip('"').upper() if pc else ''
+                plen  = int(row[lc].strip().strip('"')) if lc else 0
+            except (ValueError, KeyError):
+                continue
+            if t0 is None:
+                t0 = ts
+            rows.append({'ts_ms': (ts-t0)*1000, 'src': src, 'dst': dst,
+                         'proto': proto, 'plen': plen})
+    return rows
+
+
+def _classify_proto(row):
+    """
+    Classifica o tipo de pacote relevante para a análise de relay.
+    Retorna uma string legível ou None para ignorar.
+    """
+    src, dst, proto, plen = row['src'], row['dst'], row['proto'], row['plen']
+
+    # Beacons TDMA de controlo (RX protocol, 172.20.x.x)
+    if proto == 'RX' and plen <= 120:
+        return 'Beacon TDMA\n(RX ctrl)'
+
+    # Dados vídeo encapsulados em TCP TDMA — porta 8001-8003
+    if proto == 'TCP' and src.startswith('172.20.') and dst.startswith('172.20.'):
+        return 'TCP TDMA\n(vídeo encapsulado)'
+
+    # Vídeo raw via ip_forward — porta 5000 UDP/MPEG TS
+    if proto in ('UDP', 'MPEG TS') and plen > 200:
+        return 'UDP / MPEG TS\n(ip_forward raw)'
+
+    return None
+
+
+def _proto_analysis(files):
+    """
+    Analisa 1 ou 2 CSVs e mostra distribuição de protocolos.
+    Com 2 ficheiros: compara directo vs relay lado a lado.
+    """
+    labels = ['Directo (N1→N3)', 'Relay (N1→N2→N3)'] if len(files) == 2 else [os.path.basename(files[0])]
+    datasets = [_load_full_csv(f) for f in files]
+
+    # conta por protocolo classificado
+    def count_protos(rows):
+        from collections import Counter
+        c = Counter()
+        for r in rows:
+            k = _classify_proto(r)
+            if k:
+                c[k] += 1
+        return c
+
+    counts = [count_protos(d) for d in datasets]
+    all_keys = sorted(set(k for c in counts for k in c))
+
+    # imprime tabela
+    print("\n─── Distribuição de protocolos ─────────────────────────────────────────")
+    print(f"  {'Tipo de pacote':<32}", end='')
+    for lbl in labels:
+        print(f"  {lbl[:20]:>20}", end='')
+    print()
+    print("  " + "─" * (32 + 22 * len(labels)))
+    for k in all_keys:
+        print(f"  {k.replace(chr(10), ' '):<32}", end='')
+        for c in counts:
+            print(f"  {c.get(k, 0):>20}", end='')
+        print()
+
+    # gráfico
+    fig, axes = plt.subplots(1, len(files), figsize=(6 * len(files), 5), squeeze=False)
+    colors = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
+
+    for col_i, (ax, c, lbl) in enumerate(zip(axes[0], counts, labels)):
+        keys = all_keys
+        vals = [c.get(k, 0) for k in keys]
+        x    = np.arange(len(keys))
+        bars = ax.bar(x, vals, color=colors[:len(keys)], alpha=0.85, edgecolor='white')
+
+        # anotação do valor em cima de cada barra
+        for bar, v in zip(bars, vals):
+            if v > 0:
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(vals)*0.01,
+                        str(v), ha='center', va='bottom', fontsize=9)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([k.replace('\n', '\n') for k in keys], fontsize=8)
+        ax.set_ylabel('Nº de pacotes')
+        ax.set_title(lbl, fontsize=10, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # box explicativo
+        if 'Relay' in lbl or col_i == 1:
+            ax.text(0.5, 0.92,
+                    'UDP/MPEG TS = ip_forward\nbypassa encapsulamento TDMA',
+                    transform=ax.transAxes, ha='center', fontsize=7,
+                    color='#4CAF50',
+                    bbox=dict(boxstyle='round', facecolor='#E8F5E9', alpha=0.8))
+        else:
+            ax.text(0.5, 0.92,
+                    'TCP = vídeo encapsulado\nno protocolo TDMA',
+                    transform=ax.transAxes, ha='center', fontsize=7,
+                    color='#2196F3',
+                    bbox=dict(boxstyle='round', facecolor='#E3F2FD', alpha=0.8))
+
+    fig.suptitle('Protocolo recebido em N3: Directo vs Relay\n'
+                 'Em relay o protocolo muda de TCP (TDMA) para UDP/MPEG TS (ip_forward)',
+                 fontsize=10, fontweight='bold')
+    plt.tight_layout()
+
+    base  = os.path.splitext(files[0])[0]
+    opath = base + '_proto_comparison.png'
+    plt.savefig(opath, dpi=150)
+    plt.close()
+    print(f"\n[PLOT] {opath}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        print("Uso: python3 tdma_sync_plot.py <ficheiro.csv|ficheiro.pcap>")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('files', nargs='+',
+                        help='CSV(s) Wireshark — 1 ficheiro (sync) ou 2 (direct relay)')
+    parser.add_argument('--proto', action='store_true',
+                        help='Modo análise de protocolo TCP vs MPEG TS (directo vs relay)')
+    args = parser.parse_args()
 
-    path = sys.argv[1]
-    if not os.path.exists(path):
-        print(f"ERRO: ficheiro não encontrado: {path}")
-        sys.exit(1)
+    for f in args.files:
+        if not os.path.exists(f):
+            print(f"ERRO: ficheiro não encontrado: {f}"); sys.exit(1)
 
-    # Carrega pacotes
+    if args.proto:
+        # ── Modo protocolo ──────────────────────────────────────────────────
+        _proto_analysis(args.files)
+        return
+
+    # ── Modo sincronização (comportamento original) ─────────────────────────
+    path = args.files[0]
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.pcap', '.pcapng'):
         print(f"[INFO] A ler pcap: {path}")
@@ -282,19 +429,16 @@ def main():
         packets = load_wireshark_csv(path)
 
     if not packets:
-        print("ERRO: nenhum pacote UDP 7001-7003 encontrado no ficheiro.")
-        print("Verifique que capturou com filtro: udp portrange 7001-7003")
+        print("ERRO: nenhum pacote beacon TDMA encontrado.")
+        print("  Para beacons: capturar com filtro  udp portrange 7001-7003")
+        print("  Para protocolo: usar flag --proto")
         sys.exit(1)
 
     print(f"[INFO] {len(packets)} pacotes carregados ({len(set(n for _,n in packets))} nós)")
 
-    # Wrap a 150ms
     wrapped = wrap_to_frame(packets)
+    stats   = print_stats(wrapped)
 
-    # Estatísticas
-    stats = print_stats(wrapped)
-
-    # Plots
     base = os.path.splitext(path)[0]
     plot_scatter   (wrapped, base + '_scatter.png')
     plot_histogram (wrapped, base + '_histogram.png')
