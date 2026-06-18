@@ -176,8 +176,10 @@ def analyse_n3(direct_csv, relay_csv, out_prefix):
         sig = _significance(src, proto)
         print(f"  {src:>16}  {proto:>12}  {n:>7}  {sig}")
 
-    _plot_n3_comparison(d_counts, r_counts, out_prefix + '_n3_protocol.png')
-    _plot_interarrival_comparison(direct, relay, out_prefix + '_n3_interarrival.png')
+    _plot_n3_slot_alignment(direct, relay, out_prefix + '_n3_slot_alignment.png')
+    _plot_n3_performance(direct, relay, out_prefix + '_n3_performance.png')
+    _plot_n3_throughput(direct, relay, out_prefix + '_n3_throughput.png')
+    _plot_n3_composition(direct, relay, out_prefix + '_n3_composition.png')
 
 
 def _significance(src, proto):
@@ -194,99 +196,215 @@ def _significance(src, proto):
     return ''
 
 
-def _plot_n3_comparison(d_counts, r_counts, out_path):
-    """Gráfico de barras: protocolos que chegam a N3 directo vs relay."""
-    # agrupa por protocolo
-    def proto_bytes(counts):
-        pg = defaultdict(int)
-        for (src, proto), n in counts.items():
-            label = f"{proto}\n({src})"
-            pg[label] += n
-        return pg
+# ── Helpers de classificação de vídeo em N3 ───────────────────────────────────
+def _is_video(r):
+    """
+    Pacotes de vídeo que chegam a N3, independentemente do caminho:
+      - directo: TDMA TCP com dados (plen > 200B, não ACKs)
+      - relay:   MPEG TS / UDP raw via ip_forward
+    """
+    return (r['ptype'] == 'tdma_tcp' and r['plen'] > 200) or r['ptype'] == 'video_udp'
 
-    d_pg = proto_bytes(d_counts)
-    r_pg = proto_bytes(r_counts)
 
-    all_labels = sorted(set(d_pg) | set(r_pg))
+def _video_stream(rows):
+    """Devolve (timestamps_ms_ordenados, tamanhos) dos pacotes de vídeo."""
+    vid = sorted((r for r in rows if _is_video(r)), key=lambda r: r['ts_ms'])
+    ts  = np.array([r['ts_ms'] for r in vid])
+    plen = np.array([r['plen'] for r in vid])
+    return ts, plen
 
-    x  = np.arange(len(all_labels))
-    w  = 0.35
-    dv = [d_pg.get(l, 0) for l in all_labels]
-    rv = [r_pg.get(l, 0) for l in all_labels]
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    bars_d = ax.bar(x - w/2, dv, w, label='Directo (N1→N3)', color='#2196F3', alpha=0.85)
-    bars_r = ax.bar(x + w/2, rv, w, label='Relay (N1→N2→N3)', color='#4CAF50', alpha=0.85)
+# ── 1) Alinhamento de slots TDMA ──────────────────────────────────────────────
+def _plot_n3_slot_alignment(direct, relay, out_path):
+    """Histograma da posição de cada pacote de vídeo dentro do frame de 150ms."""
+    d_ts, _ = _video_stream(direct)
+    r_ts, _ = _video_stream(relay)
+    d_pos = d_ts % FRAME_MS
+    r_pos = r_ts % FRAME_MS
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(all_labels, fontsize=9)
-    ax.set_ylabel('Nº de pacotes')
-    ax.set_title('N3 — Protocolo recebido: Directo vs Relay\n'
-                 'Em relay o src muda para N2 (172.20.10.2) e o protocolo passa a UDP/MPEG TS',
-                 fontsize=10)
-    ax.legend()
-    ax.grid(axis='y', alpha=0.3)
+    bins = np.arange(0, FRAME_MS + 3, 3)
+    fig, axes = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
+    fig.suptitle('TDMA Frame Slot Alignment at N3\n'
+                 'Direct vs. Relay — packet position within 150 ms frame',
+                 fontsize=14, fontweight='bold')
 
-    # anotação explicativa
-    ax.annotate('TDMA encapsulado\n(protocolo do mesh)',
-                xy=(0, 0), xytext=(0.18, 0.85), textcoords='axes fraction',
-                fontsize=8, color='#2196F3',
-                arrowprops=None)
-    ax.annotate('ip_forward raw\n(bypass TDMA)',
-                xy=(0, 0), xytext=(0.62, 0.85), textcoords='axes fraction',
-                fontsize=8, color='#4CAF50',
-                arrowprops=None)
+    slots = [(0, 50, 'N1 slot\n(0–50 ms)', '#2196F3'),
+             (50, 100, 'N2 slot\n(50–100 ms)', '#7E57C2'),
+             (100, 150, 'N3 slot\n(100–150 ms)', '#F44336')]
 
+    for ax, pos, title, color in [
+        (axes[0], d_pos, f'Direct Link  (n = {len(d_pos):,} packets)', '#2196F3'),
+        (axes[1], r_pos, f'Relay via ip_forward  (n = {len(r_pos):,} packets)', '#4CAF50'),
+    ]:
+        # regiões dos slots
+        for a, b, lab, scol in slots:
+            ax.axvspan(a, b, alpha=0.06, color=scol)
+            ax.axvline(b, color='gray', ls='--', lw=1, alpha=0.6)
+            ax.text((a + b) / 2, 0.88, lab, transform=ax.get_xaxis_transform(),
+                    ha='center', va='top', fontsize=9, color=scol,
+                    bbox=dict(boxstyle='round', facecolor='white', edgecolor=scol, alpha=0.9))
+        ax.hist(pos, bins=bins, color=color, alpha=0.9, edgecolor='none')
+        ax.set_ylabel('Packet count', fontsize=11)
+        ax.set_title(title, fontsize=12, fontweight='bold', color=color)
+        ax.grid(axis='y', alpha=0.2)
+        ax.set_xlim(0, FRAME_MS)
+
+    axes[1].text(0.99, 0.04, '* Peak near 150 ms wraps into N1 slot of next frame',
+                 transform=axes[1].transAxes, ha='right', fontsize=9,
+                 style='italic', color='gray')
+    axes[-1].set_xlabel('Position within TDMA frame (ms)', fontsize=12)
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"[PLOT] {out_path}")
 
 
-def _plot_interarrival_comparison(direct, relay, out_path):
-    """Histograma de inter-arrivals: directo vs relay sobrepostos."""
-    def ias(rows):
-        # directo: TCP de N1 (172.20.10.1) — TDMA encapsulado, plen > 200B (dados, não ACKs)
-        # relay:   MPEG TS de TUN (10.0.0.1) — ip_forward raw
-        video = sorted([r['ts_ms'] for r in rows
-                        if r['ptype'] in ('video_udp', 'tdma_tcp') and r['plen'] > 200])
-        return [video[i] - video[i-1] for i in range(1, len(video))]
+# ── 2) Comparação de performance ──────────────────────────────────────────────
+def _video_metrics(rows):
+    """Métricas agregadas do fluxo de vídeo numa captura."""
+    ts, plen = _video_stream(rows)
+    if len(ts) < 2:
+        return dict(packets=len(ts), duration=0, throughput=0, avg_ia=0, p95_ia=0)
+    duration = (ts[-1] - ts[0]) / 1000.0
+    throughput = plen.sum() * 8 / 1000.0 / duration if duration > 0 else 0
+    ia = np.diff(ts)
+    return dict(packets=len(ts), duration=duration, throughput=throughput,
+                avg_ia=float(np.mean(ia)), p95_ia=float(np.percentile(ia, 95)))
 
-    d_ia = ias(direct)
-    r_ia = ias(relay)
 
-    if not d_ia or not r_ia:
-        print("[WARN] Inter-arrivals insuficientes para comparação")
-        return
+def _plot_n3_performance(direct, relay, out_path):
+    """Barras agrupadas comparando métricas directo vs relay."""
+    dm = _video_metrics(direct)
+    rm = _video_metrics(relay)
 
-    bins = np.arange(0, 320, 5)
-    fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
-    fig.suptitle('Inter-arrival dos pacotes de vídeo em N3\nDirecto vs Relay — padrão TDMA preservado',
-                 fontsize=11, fontweight='bold')
+    labels = ['Video packets\nreceived', 'Capture\nduration (s)',
+              'Avg throughput\n(kbps)', 'Avg inter-arrival\n(ms)',
+              'P95 inter-arrival\n(ms)']
+    dv = [dm['packets'], dm['duration'], dm['throughput'], dm['avg_ia'], dm['p95_ia']]
+    rv = [rm['packets'], rm['duration'], rm['throughput'], rm['avg_ia'], rm['p95_ia']]
 
-    for ax, ia, label, color in [
-        (axes[0], d_ia, 'Directo (N1→N3)', '#2196F3'),
-        (axes[1], r_ia, 'Relay (N1→N2→N3 via ip_forward)', '#4CAF50'),
+    x = np.arange(len(labels))
+    w = 0.38
+    fig, ax = plt.subplots(figsize=(13, 6))
+    bd = ax.bar(x - w/2, dv, w, label='Direct (N1→N3)', color='#2196F3')
+    br = ax.bar(x + w/2, rv, w, label='Relay (N1→N2→N3)', color='#4CAF50')
+
+    for bars in (bd, br):
+        for b in bars:
+            h = b.get_height()
+            ax.annotate(f'{h:.1f}' if h < 1000 else f'{h:.0f}',
+                        xy=(b.get_x() + b.get_width()/2, h),
+                        xytext=(0, 4), textcoords='offset points',
+                        ha='center', fontsize=10, fontweight='bold')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.set_ylabel('Value', fontsize=12)
+    ax.set_title('Performance Comparison — Direct Link vs. Relay Path at Node 3',
+                 fontsize=14, fontweight='bold')
+    ax.legend(fontsize=11)
+    ax.grid(axis='y', alpha=0.2)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"[PLOT] {out_path}")
+
+
+# ── 3) Throughput ao longo do tempo ───────────────────────────────────────────
+def _throughput_series(rows, bin_s=1.0):
+    """Throughput (kbps) por janela de bin_s segundos."""
+    ts, plen = _video_stream(rows)
+    if len(ts) == 0:
+        return np.array([]), np.array([])
+    t_s = ts / 1000.0
+    t0, t1 = t_s[0], t_s[-1]
+    edges = np.arange(t0, t1 + bin_s, bin_s)
+    bytes_per_bin, _ = np.histogram(t_s, bins=edges, weights=plen)
+    kbps = bytes_per_bin * 8 / 1000.0 / bin_s
+    centers = (edges[:-1] + edges[1:]) / 2 - t0
+    return centers, kbps
+
+
+def _plot_n3_throughput(direct, relay, out_path):
+    """Linha do throughput observado ao longo do tempo."""
+    dt, dk = _throughput_series(direct)
+    rt, rk = _throughput_series(relay)
+
+    fig, ax = plt.subplots(figsize=(13, 5.5))
+    if len(dt):
+        davg = dk.mean()
+        ax.plot(dt, dk, color='#2196F3', lw=1.8,
+                label=f'Direct — TDMA TCP stream  (avg {davg:.0f} kbps)')
+        ax.fill_between(dt, dk, alpha=0.12, color='#2196F3')
+        ax.axhline(davg, color='#2196F3', ls=':', lw=1, alpha=0.7)
+    if len(rt):
+        ravg = rk.mean()
+        ax.plot(rt, rk, color='#2E7D32', lw=1.8,
+                label=f'Relay — Raw MPEG TS via ip_forward  (avg {ravg:.0f} kbps)')
+        ax.fill_between(rt, rk, alpha=0.12, color='#2E7D32')
+        ax.axhline(ravg, color='#2E7D32', ls=':', lw=1, alpha=0.7)
+
+    ax.set_xlabel('Time (s)', fontsize=12)
+    ax.set_ylabel('Throughput (kbps)', fontsize=12)
+    ax.set_title('Observed Throughput at N3 — Direct Link vs. Relay Path',
+                 fontsize=14, fontweight='bold')
+    ax.set_ylim(bottom=0)
+    ax.set_xlim(left=0)
+    ax.legend(fontsize=11, loc='center')
+    ax.grid(alpha=0.2)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"[PLOT] {out_path}")
+
+
+# ── 4) Composição de tráfego ──────────────────────────────────────────────────
+def _traffic_composition(rows):
+    """Conta pacotes por categoria na captura."""
+    cats = {'TDMA TCP\n(encapsulated video)': 0, 'TDMA Beacons\n(control)': 0,
+            'UDP / MPEG TS\n(ip_forward raw)': 0, 'TCP ACKs /\ncontrol': 0}
+    for r in rows:
+        if r['ptype'] == 'tdma_tcp' and r['plen'] > 200:
+            cats['TDMA TCP\n(encapsulated video)'] += 1
+        elif r['ptype'] == 'video_udp':
+            cats['UDP / MPEG TS\n(ip_forward raw)'] += 1
+        elif r['proto'] == 'RX':
+            cats['TDMA Beacons\n(control)'] += 1
+        elif r['proto'] == 'TCP':
+            cats['TCP ACKs /\ncontrol'] += 1
+    return cats
+
+
+def _plot_n3_composition(direct, relay, out_path):
+    """Dois subplots de barras: composição de tráfego directo vs relay."""
+    dc = _traffic_composition(direct)
+    rc = _traffic_composition(relay)
+    labels = list(dc.keys())
+    colors = ['#2196F3', '#78909C', '#2E7D32', '#B0BEC5']
+
+    ymax = max(max(dc.values()), max(rc.values())) * 1.15
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    fig.suptitle('Traffic Composition at N3: Direct vs. Relay',
+                 fontsize=14, fontweight='bold')
+
+    for ax, counts, title, hl in [
+        (axes[0], dc, 'Direct Link  (N1 → N3)', '#2196F3'),
+        (axes[1], rc, 'Relay Path  (N1 → N2 → N3)', '#2E7D32'),
     ]:
-        ax.hist(ia, bins=bins, color=color, alpha=0.8, edgecolor='none')
-        # marcas TDMA
-        for ms in [50, 100, 150, 200, 250, 300]:
-            ax.axvline(x=ms, color='black', lw=0.8, linestyle='--', alpha=0.5)
-        ax.axvspan(130, 160, alpha=0.08, color='orange', label='Zona frame ~150ms')
-        n = len(ia)
-        burst = sum(1 for x in ia if x < 15)
-        ax.set_ylabel('Pacotes')
-        ax.set_title(f'{label}   n={n}   rajada(<15ms): {burst} ({100*burst/n:.0f}%)',
-                     fontsize=9)
-        ax.legend(fontsize=8)
-        ax.grid(axis='x', alpha=0.3)
-
-        mu = np.mean(ia); p95 = np.percentile(ia, 95)
-        ax.text(0.98, 0.92, f'μ={mu:.1f}ms  P95={p95:.0f}ms',
-                transform=ax.transAxes, ha='right', fontsize=8,
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
-
-    axes[-1].set_xlabel('Inter-arrival (ms)', fontsize=11)
+        vals = [counts[l] for l in labels]
+        # destaca o fluxo de vídeo dominante de cada modo
+        bcolors = list(colors)
+        bars = ax.bar(range(len(labels)), vals, color=bcolors)
+        for b, v in zip(bars, vals):
+            ax.annotate(f'{v:,}', xy=(b.get_x() + b.get_width()/2, v),
+                        xytext=(0, 4), textcoords='offset points',
+                        ha='center', fontsize=11, fontweight='bold')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.set_title(title, fontsize=12, fontweight='bold', color=hl)
+        ax.set_ylim(0, ymax)
+        ax.grid(axis='y', alpha=0.2)
+    axes[0].set_ylabel('Number of Packets', fontsize=12)
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
