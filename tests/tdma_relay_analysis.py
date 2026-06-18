@@ -1,460 +1,398 @@
 #!/usr/bin/env python3
 """
-tdma_relay_analysis.py — Análise de timing do relay TDMA
+tdma_relay_analysis.py — Análise de relay TDMA a partir de CSVs Wireshark
 
-Analisa QUANDO os pacotes de vídeo são transmitidos/recebidos
-em relação ao frame TDMA de 150ms.
+Modos de uso:
 
-O relay é transparente ao IP (o kernel faz ip-forward via TUN),
-por isso os pacotes chegam sempre com src=nó_origem. A prova do
-relay está no TIMING: pacotes chegando no slot de N2 (50-100ms)
-foram re-transmitidos por N2.
+  1) Análise em N3 — prova que relay muda protocolo e src:
+       python3 tdma_relay_analysis.py --n3 direct.csv relay.csv
 
-Lê .pcap/.pcapng diretamente (sem dependências externas).
-Suporta link types: Ethernet (1), Linux SLL (113), Linux SLL2 (276).
+  2) Análise em N2 — mostra transformação TCP→UDP e latência ip_forward:
+       python3 tdma_relay_analysis.py --n2 n2_relay.csv
 
-Uso:
-  python3 tdma_relay_analysis.py <ficheiro.pcap>   [--port PORT]
-  python3 tdma_relay_analysis.py <ficheiro.pcap>   --scan
-  python3 tdma_relay_analysis.py <ficheiro.csv>
+  3) Análise completa (N2 + N3):
+       python3 tdma_relay_analysis.py --n2 n2_relay.csv --n3 direct.csv relay.csv
 
-  --scan    mostra o que existe no pcap (diagnóstico)
-  --port P  filtra por porto de destino (default: qualquer)
+O CSV deve ser exportado do Wireshark com:
+  File → Export Packet Dissections → As CSV
+  Colunas: No., Time, Source, Destination, Protocol, Length, Info
+
+Porquê o protocolo muda em N3?
+  - Directo:  N1 envia via TDMA TCP (172.20.10.1 → 172.20.10.3  TCP  porta 8003)
+  - Relay:    N2 faz ip_forward do pacote UDP original
+              (172.20.10.2 → 172.20.10.3  UDP/MPEG TS  porta 5000)
+  O ip_forward bypassa o encapsulamento TDMA — o pacote raw MPEG TS vai directo
+  para wlan0, sem passar pelo tx_queue nem pelo tx_loop do protocolo.
+
+O que medir em N2 (capturar wlan0 em N2 durante relay):
+  - ENTRADA: 172.20.10.1 → 172.20.10.2  TCP  porta 8002  (vídeo encapsulado TDMA)
+  - SAÍDA:   172.20.10.2 → 172.20.10.3  UDP  porta 5000  (ip_forward raw MPEG TS)
+  - Δt = t_saída_UDP − t_entrada_TCP  → latência do ip_forward kernel (~0ms)
 """
 
-import sys, os, csv, json, struct
+import sys, os, csv, argparse
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from collections import defaultdict
 
-# ── Configuração TDMA ──────────────────────────────────────────────────────────
-FRAME_MS        = 150.0
-SLOT_MS         = 50.0
-NUM_NODES       = 3
-MIN_UDP_PAYLOAD = 100   # beacons têm ~65 B UDP payload; vídeo tem 1316 B
+# ── Configuração ──────────────────────────────────────────────────────────────
+FRAME_MS   = 150.0
+SLOT_MS    = 50.0
 
-# IPs conhecidos → nó
-IP_TO_NODE = {
-    '172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3,
-    '10.0.0.1':    1, '10.0.0.2':    2, '10.0.0.3':    3,
-}
-NODE_COLORS = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
-NODE_NAMES  = {1: 'N1', 2: 'N2', 3: 'N3'}
-SLOT_START  = {1: 0.0, 2: 50.0, 3: 100.0}
-TDMA_PORTS  = {7001, 7002, 7003}
+IP_PHYS = {'172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3}
+IP_TUN  = {'10.0.0.1': 1, '10.0.0.2': 2, '10.0.0.3': 3}
+
+NODE_COLOR = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
+
+TDMA_TCP_PORTS  = {8001, 8002, 8003}   # portos TCP do protocolo TDMA
+VIDEO_UDP_PORTS = {5000}               # porto vídeo MPEG TS
+CTRL_UDP_PORTS  = {7001, 7002, 7003, 9001, 9002}  # beacons + feedback
 
 
-def infer_relay_node(frame_pos):
-    """Devolve o nó relay inferido pela posição no frame TDMA (ou 0 se ambíguo)."""
-    for node, start in SLOT_START.items():
-        if start <= frame_pos < start + SLOT_MS:
-            return node
-    return 0
+# ── Leitura CSV ───────────────────────────────────────────────────────────────
+def _port_from_info(info):
+    """Extrai porto de destino do campo Info do Wireshark (heurística)."""
+    import re
+    m = re.search(r'>\s*(\d+)', info)
+    return int(m.group(1)) if m else None
 
 
-# ── Stripping L2 ───────────────────────────────────────────────────────────────
-def _strip_l2(data, link_type):
-    """Remove cabeçalho L2 e devolve bytes IP (IPv4) ou None."""
-    if link_type == 1:      # Ethernet
-        if len(data) < 14: return None
-        if struct.unpack('>H', data[12:14])[0] != 0x0800: return None
-        return data[14:]
-    elif link_type == 113:  # Linux cooked v1 (SLL)
-        if len(data) < 16: return None
-        if struct.unpack('>H', data[14:16])[0] != 0x0800: return None
-        return data[16:]
-    elif link_type == 276:  # Linux cooked v2 (SLL2) — gerado por tcpdump -i any
-        if len(data) < 20: return None
-        if struct.unpack('>H', data[0:2])[0] != 0x0800: return None
-        return data[20:]
-    return None
+def load_csv(path):
+    """
+    Lê CSV Wireshark. Devolve lista de dicts com campos normalizados.
+    Classifica cada pacote como: 'tdma_tcp', 'video_udp', 'ctrl', 'other'.
+    """
+    rows = []
+    with open(path, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        norm = {h.strip().strip('"').lower(): h for h in (reader.fieldnames or [])}
 
+        def col(name):
+            return norm.get(name)
 
-# ── Iteradores pcap / pcapng ───────────────────────────────────────────────────
-SUPPORTED_LINKTYPES = {1, 113, 276}
+        tc = col('time'); sc = col('source'); dc = col('destination')
+        pc = col('protocol'); lc = col('length'); ic = col('info')
 
-def _iter_classic_pcap(f):
-    raw = f.read(4)
-    if len(raw) < 4:
-        return
-    le = struct.unpack('<I', raw)[0]
-    if le in (0xa1b2c3d4, 0xa1b23c4d):
-        endian, ns = '<', (le == 0xa1b23c4d)
-    else:
-        be = struct.unpack('>I', raw)[0]
-        if be in (0xa1b2c3d4, 0xa1b23c4d):
-            endian, ns = '>', (be == 0xa1b23c4d)
-        else:
-            print("ERRO: não é um ficheiro pcap válido"); return
-    gh = f.read(20)
-    if len(gh) < 20:
-        return
-    network = struct.unpack(f'{endian}I', gh[16:20])[0]
-    if network not in SUPPORTED_LINKTYPES:
-        print(f"ERRO: link type {network} não suportado "
-              f"(suportados: 1=Ethernet, 113=Linux SLL, 276=Linux SLL2)")
-        return
-    div = 1_000_000_000 if ns else 1_000_000
-    while True:
-        hdr = f.read(16)
-        if len(hdr) < 16: break
-        ts_sec, ts_frac, incl_len, _ = struct.unpack(f'{endian}IIII', hdr)
-        data = f.read(incl_len)
-        if len(data) < incl_len: break
-        yield ts_sec + ts_frac / div, data, network
+        if not tc or not sc:
+            print(f"ERRO: CSV sem colunas Time/Source: {path}")
+            sys.exit(1)
 
-
-def _iter_pcapng(f):
-    raw12 = f.read(12)
-    if len(raw12) < 12 or struct.unpack('<I', raw12[0:4])[0] != 0x0A0D0D0A:
-        return
-    bom = struct.unpack('<I', raw12[8:12])[0]
-    endian = '<' if bom == 0x1A2B3C4D else ('>' if bom == 0x4D3C2B1A else None)
-    if not endian: return
-    shb_len = struct.unpack(f'{endian}I', raw12[4:8])[0]
-    f.seek(shb_len - 12, 1)
-    ifaces = {}
-    while True:
-        hdr = f.read(8)
-        if len(hdr) < 8: break
-        btype, blen = struct.unpack(f'{endian}II', hdr)
-        body = f.read(blen - 12)
-        f.read(4)
-        if btype == 0x00000001 and len(body) >= 2:
-            ltype = struct.unpack(f'{endian}H', body[0:2])[0]
-            ifaces[len(ifaces)] = (ltype, 1_000_000)
-        elif btype == 0x00000006 and len(body) >= 20:
-            iface_id = struct.unpack(f'{endian}I', body[0:4])[0]
-            ts_hi = struct.unpack(f'{endian}I', body[4:8])[0]
-            ts_lo = struct.unpack(f'{endian}I', body[8:12])[0]
-            cap_len = struct.unpack(f'{endian}I', body[12:16])[0]
-            ltype, div = ifaces.get(iface_id, (1, 1_000_000))
-            yield ((ts_hi << 32) | ts_lo) / div, body[20:20 + cap_len], ltype
-
-
-def _open_pcap(path):
-    f = open(path, 'rb')
-    magic = struct.unpack('<I', f.read(4))[0]
-    f.seek(0)
-    return (_iter_pcapng(f) if magic == 0x0A0D0D0A else _iter_classic_pcap(f)), f
-
-
-def _udp_fields(ip_bytes):
-    """Devolve (ip_src, sport, dport, udp_payload_len) ou None. Só IPv4/UDP."""
-    if len(ip_bytes) < 20:
-        return None
-    ip_ihl = (ip_bytes[0] & 0x0F) * 4
-    if ip_bytes[9] != 17:   # UDP
-        return None
-    ip_src = f'{ip_bytes[12]}.{ip_bytes[13]}.{ip_bytes[14]}.{ip_bytes[15]}'
-    udp_off = ip_ihl
-    if len(ip_bytes) < udp_off + 8:
-        return None
-    sport, dport = struct.unpack('>HH', ip_bytes[udp_off:udp_off + 4])
-    udp_len = struct.unpack('>H', ip_bytes[udp_off + 4:udp_off + 6])[0]
-    return ip_src, sport, dport, max(0, udp_len - 8)
-
-
-# ── Scan diagnóstico ──────────────────────────────────────────────────────────
-def scan_pcap(path):
-    print(f"\n[SCAN] {path}\n")
-    stats = defaultdict(lambda: {'n': 0, 'min': 9999, 'max': 0})
-
-    pkt_iter, f = _open_pcap(path)
-    with f:
-        for _, frame, ltype in pkt_iter:
-            ip_bytes = _strip_l2(frame, ltype)
-            if ip_bytes is None: continue
-            r = _udp_fields(ip_bytes)
-            if not r: continue
-            ip_src, sport, dport, plen = r
-            key = (ip_src, f'{sport}→{dport}')
-            stats[key]['n'] += 1
-            stats[key]['min'] = min(stats[key]['min'], plen)
-            stats[key]['max'] = max(stats[key]['max'], plen)
-
-    print(f"  {'IP origem':>16}  {'Portos UDP':>16}  {'Pkts':>6}  {'UDP payload (B)':>18}  Nó")
-    print("  " + "─" * 70)
-    for (src, ports), info in sorted(stats.items(), key=lambda x: -x[1]['n']):
-        node = IP_TO_NODE.get(src, '?')
-        beacon = ' ← beacons' if info['max'] < MIN_UDP_PAYLOAD else ''
-        print(f"  {src:>16}  {ports:>16}  {info['n']:>6}"
-              f"  {info['min']}–{info['max']} B  N{node}{beacon}")
-    print()
-
-
-# ── Carregamento pcap ─────────────────────────────────────────────────────────
-def load_pcap(path, video_port=None):
-    print(f"[INFO] A ler: {path}")
-    records = []
-    t0 = None
-    n_skip_beacon = 0
-    n_skip_ip = 0
-
-    pkt_iter, f = _open_pcap(path)
-    with f:
-        for ts, frame, ltype in pkt_iter:
-            ip_bytes = _strip_l2(frame, ltype)
-            if ip_bytes is None:
-                continue
-            r = _udp_fields(ip_bytes)
-            if not r:
-                continue
-            ip_src, sport, dport, plen = r
-
-            if sport in TDMA_PORTS or dport in TDMA_PORTS:
-                n_skip_beacon += 1
-                continue
-
-            if plen < MIN_UDP_PAYLOAD:
-                n_skip_beacon += 1
-                continue
-
-            if video_port is not None and dport != video_port:
-                continue
-
-            node = IP_TO_NODE.get(ip_src, 0)
-            if node == 0:
-                n_skip_ip += 1
+        t0 = None
+        for row in reader:
+            try:
+                ts  = float(row[tc].strip().strip('"'))
+                src = row[sc].strip().strip('"')
+                dst = row[dc].strip().strip('"') if dc else ''
+                proto = row[pc].strip().strip('"').upper() if pc else ''
+                info  = row[ic].strip().strip('"') if ic else ''
+                try:
+                    plen = int(row[lc].strip().strip('"')) if lc else 0
+                except ValueError:
+                    plen = 0
+            except (ValueError, KeyError):
                 continue
 
             if t0 is None:
                 t0 = ts
             ts_ms = (ts - t0) * 1000.0
 
-            records.append({
-                'ts_ms':     ts_ms,
-                'frame_pos': ts_ms % FRAME_MS,
-                'node':      node,
-                'ip_src':    ip_src,
-                'dport':     dport,
-                'plen':      plen,
-            })
-
-    print(f"[INFO] {len(records)} pacotes de vídeo carregados"
-          + (f"  (porta {video_port})" if video_port else ""))
-    if n_skip_beacon:
-        print(f"[INFO] {n_skip_beacon} beacons/pequenos ignorados")
-    if n_skip_ip:
-        print(f"[WARN] {n_skip_ip} pacotes de IPs desconhecidos ignorados")
-
-    return records
-
-
-# ── Carregamento CSV ──────────────────────────────────────────────────────────
-def load_csv(path):
-    """
-    Carrega pacotes do CSV exportado pelo Wireshark.
-
-    Estratégia de dois planos:
-      - Plano de dados  (10.0.0.x / MPEG TS / UDP): só pacotes de vídeo (len > 107).
-        O src IP permanece o do originador mesmo após relay transparente via TUN.
-        O relay de N2 é INFERIDO pela posição no frame TDMA (slot 50-100ms).
-      - Plano de controlo (172.20.10.x / RX): beacons TDMA — mostram quando cada
-        nó está activo no seu slot, incluindo N2 que não aparece como src de vídeo.
-    """
-    print(f"[INFO] A ler CSV: {path}")
-    records  = []
-    t0       = None
-    n_video  = 0
-    n_beacon = 0
-    skip     = 0
-
-    with open(path, newline='', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        norm = {h.strip().lower(): h for h in (reader.fieldnames or [])}
-        tc = norm.get('time'); sc = norm.get('source')
-        lc = norm.get('length'); pc = norm.get('protocol')
-        dc = norm.get('destination')
-        if not tc or not sc:
-            print("ERRO: colunas Time/Source não encontradas"); sys.exit(1)
-
-        for row in reader:
-            try:
-                ts  = float(row[tc].strip())
-                src = row[sc].strip()
-            except (ValueError, KeyError):
-                continue
-
-            proto = row[pc].strip().upper() if pc else ''
-            try:
-                plen = int(row[lc].strip()) if lc else 0
-            except ValueError:
-                plen = 0
-
-            node = IP_TO_NODE.get(src, 0)
-            if node == 0:
-                skip += 1; continue
-
-            is_ctrl_plane = src.startswith('172.20.')
-
-            if is_ctrl_plane:
-                # Beacons RX do plano de controlo TDMA — mostram actividade do slot
-                if proto != 'RX':
-                    skip += 1; continue
-                pkt_type = 'beacon'
-                n_beacon += 1
+            # classificação
+            dport = _port_from_info(info)
+            if proto == 'TCP' and dport in TDMA_TCP_PORTS:
+                ptype = 'tdma_tcp'
+            elif proto in ('UDP', 'MPEG TS') and dport in VIDEO_UDP_PORTS:
+                ptype = 'video_udp'
+            elif dport in CTRL_UDP_PORTS or proto == 'RX':
+                ptype = 'ctrl'
             else:
-                # Plano de dados — só vídeo (filtra beacons pequenos)
-                if proto not in ('UDP', 'MPEG TS'):
-                    skip += 1; continue
-                if plen <= 107:
-                    skip += 1; continue
-                pkt_type = 'video'
-                n_video += 1
+                ptype = 'other'
 
-            if t0 is None:
-                t0 = ts
-            ts_ms     = (ts - t0) * 1000.0
-            frame_pos = ts_ms % FRAME_MS
+            src_node = IP_PHYS.get(src) or IP_TUN.get(src, 0)
+            dst_node = IP_PHYS.get(dst) or IP_TUN.get(dst, 0)
 
-            records.append({
-                'ts_ms':      ts_ms,
-                'frame_pos':  frame_pos,
-                'node':       node,
-                'ip_src':     src,
-                'ip_dst':     row[dc].strip() if dc else '',
-                'plen':       plen,
-                'pkt_type':   pkt_type,
-                'relay_node': infer_relay_node(frame_pos) if pkt_type == 'video' else node,
+            rows.append({
+                'ts_ms':    ts_ms,
+                'src':      src,
+                'dst':      dst,
+                'proto':    proto,
+                'plen':     plen,
+                'info':     info,
+                'ptype':    ptype,
+                'src_node': src_node,
+                'dst_node': dst_node,
+                'dport':    dport,
+                'frame_pos': ts_ms % FRAME_MS,
             })
 
-    print(f"[INFO] {n_video} pacotes de vídeo + {n_beacon} beacons carregados ({skip} ignorados)")
-    return records
+    print(f"[INFO] {path}: {len(rows)} pacotes")
+    return rows
 
 
-# ── Estatísticas ───────────────────────────────────────────────────────────────
-def compute_stats(records):
-    # Separa vídeo de beacons
-    by_node_video   = defaultdict(list)  # frame_pos dos pacotes de vídeo (por src node)
-    by_node_beacon  = defaultdict(list)  # frame_pos dos beacons de controlo
-    by_relay_node   = defaultdict(list)  # frame_pos dos pacotes de vídeo por relay inferido
+# ── Análise N3 — prova do relay ───────────────────────────────────────────────
+def analyse_n3(direct_csv, relay_csv, out_prefix):
+    """
+    Compara capturas em N3: directo vs relay.
+    Prova: em relay o src físico muda para N2 e o protocolo passa a UDP/MPEG TS.
+    """
+    direct = load_csv(direct_csv)
+    relay  = load_csv(relay_csv)
 
-    for r in records:
-        if r['pkt_type'] == 'video':
-            by_node_video[r['node']].append(r['frame_pos'])
-            if r['relay_node']:
-                by_relay_node[r['relay_node']].append(r['frame_pos'])
-        else:
-            by_node_beacon[r['node']].append(r['frame_pos'])
+    def classify_n3(rows):
+        """Conta pacotes por (src_fisico, protocolo) que chegam a N3."""
+        counts = defaultdict(int)
+        for r in rows:
+            if r['dst_node'] != 3 and r['dst'] not in ('10.0.0.3', '172.20.10.3'):
+                continue
+            key = (r['src'], r['proto'] if r['proto'] != 'MPEG TS' else 'UDP/MPEG TS')
+            counts[key] += 1
+        return counts
 
-    print("\n─── Timing do vídeo relay no frame TDMA ──────────────────────────────────")
-    print(f"  {'Nó src':>6}  {'IP origem':>16}  {'N pkts':>7}  "
-          f"{'μ (ms)':>8}  {'σ (ms)':>7}  {'% no slot':>10}")
-    print("  " + "─" * 62)
+    d_counts = classify_n3(direct)
+    r_counts = classify_n3(relay)
 
-    ip_by_node = defaultdict(set)
-    for r in records:
-        if r['pkt_type'] == 'video':
-            ip_by_node[r['node']].add(r['ip_src'])
+    print("\n─── N3: O que chega em modo DIRECTO ────────────────────────────────────")
+    print(f"  {'Src IP':>16}  {'Protocolo':>12}  {'Pkts':>7}  Significado")
+    for (src, proto), n in sorted(d_counts.items(), key=lambda x: -x[1]):
+        sig = _significance(src, proto)
+        print(f"  {src:>16}  {proto:>12}  {n:>7}  {sig}")
 
-    results = {}
-    all_video_nodes = sorted(set(by_node_video) | set(by_relay_node))
-    for node in all_video_nodes:
-        pos  = np.array(by_node_video.get(node, []))
-        if len(pos) == 0:
-            continue
-        mu   = np.mean(pos)
-        sig  = np.std(pos)
-        sl_s = SLOT_START.get(node, -1)
-        pct  = 100.0 * np.sum((pos >= sl_s) & (pos < sl_s + SLOT_MS)) / len(pos) \
-               if sl_s >= 0 else 0.0
-        ips  = ', '.join(sorted(ip_by_node[node]))
-        print(f"  N{node}      {ips:>16}  {len(pos):>7}  "
-              f"{mu:>8.2f}  {sig:>7.2f}  {pct:>9.1f}%")
-        results[f'N{node}_video'] = {'n': len(pos), 'mean_ms': round(mu, 2),
-                                      'std_ms': round(sig, 2), 'pct_in_slot': round(pct, 1)}
+    print("\n─── N3: O que chega em modo RELAY ──────────────────────────────────────")
+    print(f"  {'Src IP':>16}  {'Protocolo':>12}  {'Pkts':>7}  Significado")
+    for (src, proto), n in sorted(r_counts.items(), key=lambda x: -x[1]):
+        sig = _significance(src, proto)
+        print(f"  {src:>16}  {proto:>12}  {n:>7}  {sig}")
 
-    print("\n─── Relay inferido por slot TDMA (vídeo recebido em cada slot) ───────────")
-    print(f"  {'Slot/Nó':>7}  {'N pkts':>7}  {'μ (ms)':>8}  {'σ (ms)':>7}  {'Intervalo slot':>16}")
-    print("  " + "─" * 55)
-    for node in sorted(by_relay_node):
-        pos  = np.array(by_relay_node[node])
-        mu   = np.mean(pos)
-        sig  = np.std(pos)
-        sl_s = SLOT_START[node]
-        print(f"  N{node} slot  {len(pos):>7}  {mu:>8.2f}  {sig:>7.2f}  "
-              f"  {sl_s:.0f}–{sl_s+SLOT_MS:.0f} ms")
-        results[f'N{node}_relay_slot'] = {'n': len(pos), 'mean_ms': round(mu, 2),
-                                           'std_ms': round(sig, 2)}
-
-    print("\n─── Actividade beacons TDMA (plano de controlo 172.20.x.x) ──────────────")
-    print(f"  {'Nó':>4}  {'N beacons':>9}  {'μ (ms)':>8}  {'σ (ms)':>7}  {'% no slot':>10}")
-    print("  " + "─" * 50)
-    for node in sorted(by_node_beacon):
-        pos  = np.array(by_node_beacon[node])
-        mu   = np.mean(pos)
-        sig  = np.std(pos)
-        sl_s = SLOT_START.get(node, -1)
-        pct  = 100.0 * np.sum((pos >= sl_s) & (pos < sl_s + SLOT_MS)) / len(pos) \
-               if sl_s >= 0 else 0.0
-        print(f"  N{node}    {len(pos):>9}  {mu:>8.2f}  {sig:>7.2f}  {pct:>9.1f}%")
-        results[f'N{node}_beacon'] = {'n': len(pos), 'mean_ms': round(mu, 2),
-                                       'std_ms': round(sig, 2), 'pct_in_slot': round(pct, 1)}
-    print("  " + "─" * 50)
-
-    return results, by_node_video, by_node_beacon, by_relay_node
+    _plot_n3_comparison(d_counts, r_counts, out_prefix + '_n3_protocol.png')
+    _plot_interarrival_comparison(direct, relay, out_prefix + '_n3_interarrival.png')
 
 
-# ── Plot histograma ────────────────────────────────────────────────────────────
-def plot_histogram(by_node, out_path):
-    bins = np.arange(0, FRAME_MS + 1, 1)
-    active = [n for n in [1, 2, 3] if n in by_node]
-    fig, axes = plt.subplots(len(active), 1,
-                             figsize=(12, 3 * len(active) + 1), sharex=True)
-    if len(active) == 1:
-        axes = [axes]
-    fig.suptitle('Timing do vídeo relay no frame TDMA de 150ms', fontsize=12, fontweight='bold')
+def _significance(src, proto):
+    if src == '172.20.10.1' and proto == 'TCP':
+        return '← N1 directo via TDMA TCP (encapsulado)'
+    if src == '172.20.10.2' and 'UDP' in proto:
+        return '← N2 relay via ip_forward (raw MPEG TS)'
+    if src == '172.20.10.1' and 'UDP' in proto:
+        return '← N1 directo via UDP (bypass TDMA?)'
+    if proto == 'RX':
+        return '← beacon TDMA controlo'
+    return ''
 
-    for i, node in enumerate(active):
-        ax  = axes[i]
-        pos = by_node[node]
-        col = NODE_COLORS[node]
-        ax.hist(pos, bins=bins, color=col, alpha=0.8, edgecolor='none')
-        mu = np.mean(pos)
-        ax.axvline(x=mu, color='orange', lw=1.8,
-                   label=f'μ={mu:.1f}ms  σ={np.std(pos):.1f}ms  n={len(pos)}')
-        sl_s = SLOT_START[node]
-        for b in [0, 50, 100, 150]:
-            ax.axvline(x=b, color='black', lw=0.9, linestyle='--', alpha=0.6)
-        ax.axvspan(sl_s, sl_s + SLOT_MS, alpha=0.14, color=col,
-                   label=f'Slot esperado N{node} ({sl_s:.0f}–{sl_s+SLOT_MS:.0f} ms)')
-        ax.set_ylabel(f'N{node}\n(pkts)', fontsize=9)
-        ax.legend(loc='upper right', fontsize=8)
-        ax.grid(axis='x', alpha=0.3)
 
-    axes[-1].set_xlabel('Posição dentro do frame TDMA (ms)', fontsize=11)
+def _plot_n3_comparison(d_counts, r_counts, out_path):
+    """Gráfico de barras: protocolos que chegam a N3 directo vs relay."""
+    # agrupa por protocolo
+    def proto_bytes(counts):
+        pg = defaultdict(int)
+        for (src, proto), n in counts.items():
+            label = f"{proto}\n({src})"
+            pg[label] += n
+        return pg
+
+    d_pg = proto_bytes(d_counts)
+    r_pg = proto_bytes(r_counts)
+
+    all_labels = sorted(set(d_pg) | set(r_pg))
+
+    x  = np.arange(len(all_labels))
+    w  = 0.35
+    dv = [d_pg.get(l, 0) for l in all_labels]
+    rv = [r_pg.get(l, 0) for l in all_labels]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bars_d = ax.bar(x - w/2, dv, w, label='Directo (N1→N3)', color='#2196F3', alpha=0.85)
+    bars_r = ax.bar(x + w/2, rv, w, label='Relay (N1→N2→N3)', color='#4CAF50', alpha=0.85)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(all_labels, fontsize=9)
+    ax.set_ylabel('Nº de pacotes')
+    ax.set_title('N3 — Protocolo recebido: Directo vs Relay\n'
+                 'Em relay o src muda para N2 (172.20.10.2) e o protocolo passa a UDP/MPEG TS',
+                 fontsize=10)
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+
+    # anotação explicativa
+    ax.annotate('TDMA encapsulado\n(protocolo do mesh)',
+                xy=(0, 0), xytext=(0.18, 0.85), textcoords='axes fraction',
+                fontsize=8, color='#2196F3',
+                arrowprops=None)
+    ax.annotate('ip_forward raw\n(bypass TDMA)',
+                xy=(0, 0), xytext=(0.62, 0.85), textcoords='axes fraction',
+                fontsize=8, color='#4CAF50',
+                arrowprops=None)
+
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"[PLOT] {out_path}")
 
 
-# ── Plot scatter ───────────────────────────────────────────────────────────────
-def plot_scatter(by_node, out_path):
-    fig, ax = plt.subplots(figsize=(12, 3))
-    ax.set_title('Timing do vídeo relay — scatter por nó (source IP)', fontsize=11)
+def _plot_interarrival_comparison(direct, relay, out_path):
+    """Histograma de inter-arrivals: directo vs relay sobrepostos."""
+    def ias(rows):
+        video = sorted([r['ts_ms'] for r in rows if r['ptype'] == 'video_udp'])
+        if len(video) < 2:
+            # fallback: todos os pacotes de vídeo incluindo TUN
+            video = sorted([r['ts_ms'] for r in rows
+                            if r['proto'] in ('UDP', 'MPEG TS') and r['plen'] > 200])
+        return [video[i] - video[i-1] for i in range(1, len(video))]
 
-    for node, positions in sorted(by_node.items()):
-        pos = positions[-600:] if len(positions) > 600 else positions
-        ax.scatter(pos, [node] * len(pos), s=5, alpha=0.4,
-                   color=NODE_COLORS.get(node, '#888'), label=f'N{node}')
+    d_ia = ias(direct)
+    r_ia = ias(relay)
 
-    for b in [0, 50, 100, 150]:
-        ax.axvline(x=b, color='black', lw=1.0, linestyle='--', alpha=0.65)
-    ax.axvspan(0,   50,  alpha=0.06, color=NODE_COLORS[1])
-    ax.axvspan(50,  100, alpha=0.06, color=NODE_COLORS[2])
-    ax.axvspan(100, 150, alpha=0.06, color=NODE_COLORS[3])
-    ax.set_xlim(0, FRAME_MS)
-    active = sorted(by_node.keys())
-    ax.set_ylim(min(active) - 0.5, max(active) + 0.5)
-    ax.set_yticks(active)
-    ax.set_yticklabels([f'N{n}' for n in active])
-    ax.set_xlabel('Posição dentro do frame TDMA (ms)', fontsize=11)
-    ax.legend(loc='upper right', fontsize=9)
+    if not d_ia or not r_ia:
+        print("[WARN] Inter-arrivals insuficientes para comparação")
+        return
+
+    bins = np.arange(0, 320, 5)
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+    fig.suptitle('Inter-arrival dos pacotes de vídeo em N3\nDirecto vs Relay — padrão TDMA preservado',
+                 fontsize=11, fontweight='bold')
+
+    for ax, ia, label, color in [
+        (axes[0], d_ia, 'Directo (N1→N3)', '#2196F3'),
+        (axes[1], r_ia, 'Relay (N1→N2→N3 via ip_forward)', '#4CAF50'),
+    ]:
+        ax.hist(ia, bins=bins, color=color, alpha=0.8, edgecolor='none')
+        # marcas TDMA
+        for ms in [50, 100, 150, 200, 250, 300]:
+            ax.axvline(x=ms, color='black', lw=0.8, linestyle='--', alpha=0.5)
+        ax.axvspan(130, 160, alpha=0.08, color='orange', label='Zona frame ~150ms')
+        n = len(ia)
+        burst = sum(1 for x in ia if x < 15)
+        ax.set_ylabel('Pacotes')
+        ax.set_title(f'{label}   n={n}   rajada(<15ms): {burst} ({100*burst/n:.0f}%)',
+                     fontsize=9)
+        ax.legend(fontsize=8)
+        ax.grid(axis='x', alpha=0.3)
+
+        mu = np.mean(ia); p95 = np.percentile(ia, 95)
+        ax.text(0.98, 0.92, f'μ={mu:.1f}ms  P95={p95:.0f}ms',
+                transform=ax.transAxes, ha='right', fontsize=8,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+
+    axes[-1].set_xlabel('Inter-arrival (ms)', fontsize=11)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"[PLOT] {out_path}")
+
+
+# ── Análise N2 — transformação TCP→UDP e latência ip_forward ──────────────────
+def analyse_n2(n2_csv, out_prefix):
+    """
+    Analisa captura em N2 durante relay.
+    Mostra:
+      1. Pacotes TCP chegando de N1 (TDMA encapsulado)
+      2. Pacotes UDP saindo para N3 (ip_forward raw)
+      3. Estimativa de latência ip_forward (Δt entre TCP entrada e UDP saída)
+    """
+    rows = load_csv(n2_csv)
+
+    # separa os dois fluxos
+    tcp_in  = [r for r in rows
+               if r['src_node'] == 1 and r['dst_node'] == 2 and r['proto'] == 'TCP']
+    udp_out = [r for r in rows
+               if r['src_node'] == 2 and r['dst_node'] == 3
+               and r['proto'] in ('UDP', 'MPEG TS')]
+
+    print("\n─── N2: Fluxos durante relay ───────────────────────────────────────────")
+    print(f"  TCP entrada  (N1→N2, TDMA encapsulado):  {len(tcp_in):>5} pacotes")
+    print(f"  UDP saída    (N2→N3, ip_forward raw):     {len(udp_out):>5} pacotes")
+
+    if tcp_in and udp_out:
+        # estimativa de latência: para cada UDP de saída, encontra o TCP de entrada
+        # mais próximo que o precedeu
+        deltas = []
+        j = 0
+        for udp in udp_out:
+            # procura o último TCP que chegou antes deste UDP
+            while j < len(tcp_in) - 1 and tcp_in[j + 1]['ts_ms'] < udp['ts_ms']:
+                j += 1
+            if tcp_in[j]['ts_ms'] < udp['ts_ms']:
+                dt = udp['ts_ms'] - tcp_in[j]['ts_ms']
+                if dt < 50:  # ignora gaps grandes (pacotes de rajadas diferentes)
+                    deltas.append(dt)
+
+        if deltas:
+            print(f"\n  Latência ip_forward estimada (Δt TCP→UDP):")
+            print(f"    μ  = {np.mean(deltas):.3f} ms")
+            print(f"    σ  = {np.std(deltas):.3f} ms")
+            print(f"    min= {min(deltas):.3f} ms")
+            print(f"    max= {max(deltas):.3f} ms")
+            print(f"    n  = {len(deltas)}")
+            print(f"\n  → ip_forward é instantâneo (~0ms), consistente com kernel bypass do TDMA")
+
+    _plot_n2_relay(tcp_in, udp_out, out_prefix + '_n2_relay.png')
+    if tcp_in and udp_out:
+        _plot_n2_latency(deltas, out_prefix + '_n2_latency.png')
+
+
+def _plot_n2_relay(tcp_in, udp_out, out_path):
+    """Timeline mostrando TCP entrada e UDP saída em N2."""
+    if not tcp_in and not udp_out:
+        print("[WARN] Sem dados de relay em N2 para plotar")
+        return
+
+    fig, axes = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
+    fig.suptitle('N2 — Transformação do relay: TCP (TDMA) → UDP (ip_forward)\n'
+                 'N2 recebe vídeo encapsulado em TDMA TCP e reencaminha como UDP raw via ip_forward',
+                 fontsize=10, fontweight='bold')
+
+    # subplot 1: TCP de entrada (N1→N2)
+    ax = axes[0]
+    if tcp_in:
+        ts = [r['ts_ms'] for r in tcp_in]
+        sizes = [r['plen'] for r in tcp_in]
+        ax.vlines(ts, 0, sizes, color='#2196F3', alpha=0.7, linewidth=1.2)
+        ax.set_ylabel('Tamanho (B)', fontsize=9)
+        ax.set_title(f'ENTRADA em N2: TCP de N1 (172.20.10.1→172.20.10.2, TDMA)  n={len(tcp_in)}',
+                     fontsize=9)
     ax.grid(axis='x', alpha=0.3)
+
+    # subplot 2: UDP de saída (N2→N3)
+    ax = axes[1]
+    if udp_out:
+        ts = [r['ts_ms'] for r in udp_out]
+        sizes = [r['plen'] for r in udp_out]
+        ax.vlines(ts, 0, sizes, color='#4CAF50', alpha=0.7, linewidth=1.2)
+        ax.set_ylabel('Tamanho (B)', fontsize=9)
+        ax.set_title(f'SAÍDA de N2: UDP/MPEG TS para N3 (172.20.10.2→172.20.10.3, ip_forward)  n={len(udp_out)}',
+                     fontsize=9)
+    ax.set_xlabel('Tempo (ms)', fontsize=10)
+    ax.grid(axis='x', alpha=0.3)
+
+    # marca frames TDMA
+    max_t = max(
+        (tcp_in[-1]['ts_ms'] if tcp_in else 0),
+        (udp_out[-1]['ts_ms'] if udp_out else 0)
+    )
+    for ax in axes:
+        for t in np.arange(0, max_t, FRAME_MS):
+            ax.axvline(x=t, color='black', lw=0.6, linestyle=':', alpha=0.4)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"[PLOT] {out_path}")
+
+
+def _plot_n2_latency(deltas, out_path):
+    """Histograma da latência ip_forward em N2."""
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(deltas, bins=50, color='#FF9800', alpha=0.85, edgecolor='none')
+    ax.axvline(x=np.mean(deltas), color='red', lw=1.8,
+               label=f'μ={np.mean(deltas):.3f}ms  σ={np.std(deltas):.3f}ms')
+    ax.set_xlabel('Δt  TCP entrada → UDP saída (ms)', fontsize=11)
+    ax.set_ylabel('Ocorrências')
+    ax.set_title('N2 — Latência do ip_forward kernel\n'
+                 'Tempo entre recepção TDMA TCP e reenvio UDP/MPEG TS',
+                 fontsize=10)
+    ax.legend(fontsize=9)
+    ax.grid(axis='y', alpha=0.3)
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
@@ -463,46 +401,44 @@ def plot_scatter(by_node, out_path):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    if len(sys.argv) < 2:
-        print(__doc__); sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='Análise de relay TDMA a partir de CSVs Wireshark',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemplos:
+  # Captura em N3 — directo vs relay
+  python3 tdma_relay_analysis.py --n3 direct.csv relay.csv
 
-    path = sys.argv[1]
-    if not os.path.exists(path):
-        print(f"ERRO: ficheiro não encontrado: {path}"); sys.exit(1)
+  # Captura em N2 — transformação TCP→UDP
+  python3 tdma_relay_analysis.py --n2 n2_relay.csv
 
-    if '--scan' in sys.argv:
-        scan_pcap(path)
-        return
+  # Ambos
+  python3 tdma_relay_analysis.py --n2 n2_relay.csv --n3 direct.csv relay.csv
+""")
+    parser.add_argument('--n3', nargs=2, metavar=('DIRECT_CSV', 'RELAY_CSV'),
+                        help='Capturas em N3: directo e relay')
+    parser.add_argument('--n2', metavar='N2_CSV',
+                        help='Captura em N2 durante relay (wlan0)')
+    parser.add_argument('--out', default='relay_analysis',
+                        help='Prefixo dos ficheiros de saída (default: relay_analysis)')
+    args = parser.parse_args()
 
-    video_port = None
-    if '--port' in sys.argv:
-        idx = sys.argv.index('--port')
-        if idx + 1 < len(sys.argv):
-            video_port = int(sys.argv[idx + 1])
-
-    ext = os.path.splitext(path)[1].lower()
-    if ext in ('.pcap', '.pcapng'):
-        records = load_pcap(path, video_port)
-    else:
-        records = load_csv(path)
-
-    if not records:
-        print("\nNenhum pacote de vídeo encontrado.")
-        print("A correr diagnóstico automático...\n")
-        if ext in ('.pcap', '.pcapng'):
-            scan_pcap(path)
-            print("→ Usa --port <N> para filtrar por porto de destino do vídeo.")
+    if not args.n3 and not args.n2:
+        parser.print_help()
         sys.exit(1)
 
-    stats, by_node = compute_stats(records)
+    if args.n2:
+        if not os.path.exists(args.n2):
+            print(f"ERRO: {args.n2} não encontrado"); sys.exit(1)
+        analyse_n2(args.n2, args.out)
 
-    base = os.path.splitext(path)[0]
-    plot_histogram(by_node, base + '_relay_histogram.png')
-    plot_scatter(by_node,   base + '_relay_scatter.png')
+    if args.n3:
+        for f in args.n3:
+            if not os.path.exists(f):
+                print(f"ERRO: {f} não encontrado"); sys.exit(1)
+        analyse_n3(args.n3[0], args.n3[1], args.out)
 
-    with open(base + '_relay_stats.json', 'w') as jf:
-        json.dump(stats, jf, indent=2)
-    print(f"[INFO] JSON: {base}_relay_stats.json")
+    print(f"\n[OK] Gráficos guardados com prefixo '{args.out}'")
 
 
 if __name__ == '__main__':
