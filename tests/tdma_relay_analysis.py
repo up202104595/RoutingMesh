@@ -189,7 +189,7 @@ def _print_category_breakdown(rows, label):
     """
     Mostra, por categoria do slot alignment, os fluxos (src→dst:porta) que a
     compõem. Serve para perceber EXACTAMENTE que pacotes são — em especial o
-    que cai na categoria 'TCP data (other nodes)'.
+    que cai na categoria 'Non-video TCP (>200B, e.g. N3 control)'.
     """
     from collections import Counter
     cat_flows = defaultdict(Counter)
@@ -285,7 +285,7 @@ def _align_offset(rows):
 SLOT_CATS = [
     ('Video N1→N3', '#4CAF50'),
     ('TDMA control (RX)', '#FF9800'),
-    ('TCP data (other nodes)', '#5C6BC0'),
+    ('Non-video TCP (>200B, e.g. N3 control)', '#5C6BC0'),
     ('TCP ACK / small', '#90A4AE'),
     ('Other', '#BDBDBD'),
 ]
@@ -295,7 +295,7 @@ def _packet_category(r):
     """
     Classifica um pacote. CRÍTICO: 'Video N1→N3' é APENAS o fluxo de vídeo real
     (origem N1, destino N3). TCP grande de outros nós (N2/N3 no seu slot) vai
-    para 'TCP data (other nodes)' — não é vídeo, mesmo sendo TCP grande.
+    para 'Non-video TCP (>200B, e.g. N3 control)' — não é vídeo, mesmo sendo TCP grande.
     """
     is_n1_to_n3 = r['src_node'] == 1 and r['dst_node'] == 3
     if r['ptype'] == 'video_udp' and is_n1_to_n3:
@@ -305,7 +305,7 @@ def _packet_category(r):
     if r['proto'] == 'RX':
         return 'TDMA control (RX)'
     if r['ptype'] == 'tdma_tcp' and r['plen'] > 200:
-        return 'TCP data (other nodes)'
+        return 'Non-video TCP (>200B, e.g. N3 control)'
     if r['proto'] == 'TCP':
         return 'TCP ACK / small'
     return 'Other'
