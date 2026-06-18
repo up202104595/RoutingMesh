@@ -45,6 +45,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$RESULTS_DIR"
+chmod 777 "$RESULTS_DIR"
 cd "$RESULTS_DIR"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'

@@ -93,7 +93,7 @@ def start_ffplay():
         "-vf", "setpts=0",
         "-probesize",       "32",
         "-analyzeduration", "0",
-        "-i", "udp://0.0.0.0:5000",
+        "-i", "udp://0.0.0.0:5000?reuseport=1",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f"[VIDEO] ffplay iniciado — udp://0.0.0.0:5000 (PID {proc.pid})")
