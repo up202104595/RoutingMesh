@@ -227,11 +227,6 @@ def plot_histogram(wrapped, out_path):
         ax.legend(loc='upper right', fontsize=8)
         ax.grid(axis='x', alpha=0.3)
 
-        if positions:
-            mean_pos = np.mean(positions)
-            ax.axvline(x=mean_pos, color='orange', linewidth=1.5,
-                       linestyle='-', alpha=0.9, label=f'mean = {mean_pos:.1f} ms')
-
     axes[-1].set_xlabel('Position within TDMA frame (ms)', fontsize=11)
     axes[0].set_title('Transmission distribution per slot (1 ms histogram)', fontsize=12)
 
