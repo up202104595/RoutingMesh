@@ -281,21 +281,30 @@ def _align_offset(rows):
     return 0.0, 'raw capture t0 (no reference)'
 
 
-# categorias de pacotes para colorir o slot alignment
+# categorias de pacotes para colorir o slot alignment.
+# Cada categoria explica O QUE é:
+#   Video N1→N3        — fluxo de vídeo real (só N1 o gera; é o que prova o slot)
+#   TDMA control (RX)  — beacons MATRIX + acks do protocolo RX (1 por nó por frame)
+#   Non-video TCP      — TCP grande que NÃO é vídeo (ex: N3 a enviar controlo p/ N1/N2)
+#   TCP ACK / small    — ACKs pequenos do TCP do vídeo
+#   Control/telemetry  — canal de controlo/telemetria UDP (portas 9000-9002)
+#   Other              — ruído do SO (mDNS/SSDP/ARP), sem relação com o mesh
 SLOT_CATS = [
     ('Video N1→N3', '#4CAF50'),
-    ('TDMA control (RX)', '#FF9800'),
+    ('TDMA control (RX beacons/acks)', '#FF9800'),
     ('Non-video TCP (>200B, e.g. N3 control)', '#5C6BC0'),
     ('TCP ACK / small', '#90A4AE'),
-    ('Other', '#BDBDBD'),
+    ('Control/telemetry (UDP 9000-9002)', '#AB47BC'),
+    ('Other (mDNS/SSDP/ARP)', '#CFCFCF'),
 ]
 
 
 def _packet_category(r):
     """
     Classifica um pacote. CRÍTICO: 'Video N1→N3' é APENAS o fluxo de vídeo real
-    (origem N1, destino N3). TCP grande de outros nós (N2/N3 no seu slot) vai
-    para 'Non-video TCP (>200B, e.g. N3 control)' — não é vídeo, mesmo sendo TCP grande.
+    (origem N1, destino N3). TCP grande de outros nós (ex: N3→N1 controlo) NÃO é
+    vídeo. Telemetria (UDP 9000-9002) tem categoria própria; 'Other' é só ruído
+    do SO (mDNS/SSDP/ARP).
     """
     is_n1_to_n3 = r['src_node'] == 1 and r['dst_node'] == 3
     if r['ptype'] == 'video_udp' and is_n1_to_n3:
@@ -303,12 +312,14 @@ def _packet_category(r):
     if r['ptype'] == 'tdma_tcp' and r['plen'] > 200 and is_n1_to_n3:
         return 'Video N1→N3'
     if r['proto'] == 'RX':
-        return 'TDMA control (RX)'
+        return 'TDMA control (RX beacons/acks)'
     if r['ptype'] == 'tdma_tcp' and r['plen'] > 200:
         return 'Non-video TCP (>200B, e.g. N3 control)'
     if r['proto'] == 'TCP':
         return 'TCP ACK / small'
-    return 'Other'
+    if r['dport'] in (9000, 9001, 9002):
+        return 'Control/telemetry (UDP 9000-9002)'
+    return 'Other (mDNS/SSDP/ARP)'
 
 
 def _plot_n3_slot_alignment(direct, relay, out_path):
