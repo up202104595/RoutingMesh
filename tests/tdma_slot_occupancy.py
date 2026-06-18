@@ -68,6 +68,17 @@ def print_stats(by_node, label):
         print(f"  N{node:>2}   {s_lo:>4.0f}–{s_hi:<4.0f} ms  {len(pos):>8}  "
               f"{_circular_mean(pos):>11.1f}  {np.std(pos):>8.1f}  {pct:>9.1f}%")
 
+    # aviso: nós colados (típico de captura na wlan0 via AP, não monitor mode)
+    means = {n: _circular_mean(by_node[n]) for n in (1, 2, 3) if len(by_node.get(n, []))}
+    collapsed = [(a, b) for a in means for b in means if a < b
+                 and abs(means[a] - means[b]) < 25]
+    if collapsed:
+        pairs = ', '.join(f'N{a}~N{b}' for a, b in collapsed)
+        print(f"\n  [AVISO] Nós com beacons colados ({pairs}, <25ms de distância).")
+        print(f"          Sintoma típico de captura na wlan0 em modo NORMAL (via AP),")
+        print(f"          que re-temporiza os beacons. Para ocupação de slots usa uma")
+        print(f"          captura em MODO MONITOR (tráfego cru do ar), como fez a Ana.")
+
 
 def plot_occupancy(captures, out_path):
     """
