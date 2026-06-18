@@ -1,80 +1,92 @@
-#!/bin/bash
-# run_tests.sh — Automated RTT test sequence
-# Run on Node 3 (base station) while rtt_test.py --mode server runs on Node 1
+#!/usr/bin/env bash
+# run_tests.sh — Wrapper rápido para testes individuais (sem relay automático)
 #
-# Prerequisites:
-#   Node 1: python3 tests/rtt_test.py --mode server
-#   Node 1: python3 tests/throughput_test.py --mode server
+# Uso:
+#   bash tests/run_tests.sh direct     # só fase directa
+#   bash tests/run_tests.sh relay      # só medições em modo relay (já activo)
+#   bash tests/run_tests.sh both       # directo + relay (pede confirmação)
 #
-# Usage: bash tests/run_tests.sh [direct|relay|both]
+# Pré-requisito: no Nó 1 correr:
+#   python3 tests/rtt_test.py --mode server &
+#
+# Para a suite completa com convergência automática usar run_all.sh.
 
-set -e
+set -uo pipefail
+
 TOPOLOGY=${1:-"direct"}
-N1_IP="10.0.0.1"
-N2_IP="10.0.0.2"
-RESULTS_DIR="tests/results/$(date +%Y%m%d_%H%M%S)"
+NODE1_IP="10.0.0.1"
+RUNS=2
+DURATION_THRU=15
+DURATION_TDMA=30
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESULTS_DIR="${TESTS_DIR}/results_quick_$(date +%Y%m%d_%H%M%S)"
+
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+info() { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+
 mkdir -p "$RESULTS_DIR"
 cd "$RESULTS_DIR"
 
-echo "=== RA-TDMAs+ Test Suite ==="
-echo "  Topology: $TOPOLOGY"
-echo "  Results:  $RESULTS_DIR"
-echo ""
+info "Resultados em: $RESULTS_DIR"
 
-run_rtt() {
-    local label=$1
-    local target=$2
-    local topo=$3
-    echo "[RTT] $label → $target ($topo)"
-    python3 ../../rtt_test.py \
-        --mode client \
-        --target "$target" \
-        --count 100 \
-        --interval 0.1 \
-        --label "$label" \
-        --topology "$topo"
-    echo ""
+run_direct() {
+    local r=$1
+    info "── RTT directo run $r ──"
+    python3 "$TESTS_DIR/rtt_test.py" \
+        --mode client --target "$NODE1_IP" \
+        --count 100 --interval 0.1 \
+        --topology direct --label "direct_rtt_r${r}"
+
+    info "── Throughput directo run $r ──"
+    python3 "$TESTS_DIR/throughput_test.py" \
+        --duration "$DURATION_THRU" --topology direct \
+        --label "direct_thru_r${r}"
+
+    info "── Timing TDMA directo run $r ──"
+    python3 "$TESTS_DIR/tdma_timing_test.py" \
+        --duration "$DURATION_TDMA" --label "direct_r${r}"
 }
 
-run_thru() {
-    local label=$1
-    local target=$2
-    local pktsize=$3
-    local topo=$4
-    echo "[THRU] $label pkt=${pktsize}B → $target ($topo)"
-    python3 ../../throughput_test.py \
-        --mode client \
-        --target "$target" \
-        --duration 10 \
-        --pktsize "$pktsize" \
-        --label "$label" \
-        --topology "$topo"
-    echo ""
+run_relay() {
+    local r=$1
+    info "── RTT relay run $r ──"
+    python3 "$TESTS_DIR/rtt_test.py" \
+        --mode client --target "$NODE1_IP" \
+        --count 100 --interval 0.1 \
+        --topology relay --label "relay_rtt_r${r}"
+
+    info "── Throughput relay run $r ──"
+    python3 "$TESTS_DIR/throughput_test.py" \
+        --duration "$DURATION_THRU" --topology relay \
+        --label "relay_thru_r${r}"
+
+    info "── Timing TDMA relay run $r ──"
+    python3 "$TESTS_DIR/tdma_timing_test.py" \
+        --duration "$DURATION_TDMA" --label "relay_r${r}"
 }
 
-if [[ "$TOPOLOGY" == "direct" || "$TOPOLOGY" == "both" ]]; then
-    echo "--- DIRECT (N3 → N1 direct, no relay) ---"
-    run_rtt "direct_N3toN1_100ms" "$N1_IP" "direct"
-    run_rtt "direct_N3toN1_10ms"  "$N1_IP" "direct"  # change interval below if needed
-    run_thru "direct_N3toN1_1316B"  "$N1_IP" 1316 "direct"
-    run_thru "direct_N3toN1_512B"   "$N1_IP"  512 "direct"
-    run_thru "direct_N3toN1_128B"   "$N1_IP"  128 "direct"
-fi
-
-if [[ "$TOPOLOGY" == "relay" || "$TOPOLOGY" == "both" ]]; then
+case "$TOPOLOGY" in
+direct)
+    for r in $(seq 1 "$RUNS"); do run_direct "$r"; done
+    ;;
+relay)
+    warn "Certifica que o relay está activo (link directo bloqueado ou fora de alcance)"
+    read -r -p "  Prima ENTER quando pronto..."
+    for r in $(seq 1 "$RUNS"); do run_relay "$r"; done
+    ;;
+both)
+    for r in $(seq 1 "$RUNS"); do run_direct "$r"; done
     echo ""
-    echo "--- RELAY (N3 → N2 → N1, Node 2 as relay) ---"
-    echo "Make sure Node 1 is only reachable via Node 2 before continuing."
-    read -p "Press Enter when topology is set to relay..."
-    run_rtt "relay_N3toN1_100ms" "$N1_IP" "relay"
-    run_thru "relay_N3toN1_1316B"  "$N1_IP" 1316 "relay"
-    run_thru "relay_N3toN1_512B"   "$N1_IP"  512 "relay"
-    run_thru "relay_N3toN1_128B"   "$N1_IP"  128 "relay"
-fi
+    warn "Configura agora o modo relay (bloqueia link directo ou afasta N1)"
+    read -r -p "  Prima ENTER quando relay estiver activo..."
+    for r in $(seq 1 "$RUNS"); do run_relay "$r"; done
+    ;;
+*)
+    echo "Uso: $0 [direct|relay|both]"; exit 1 ;;
+esac
 
 echo ""
-echo "=== Generating summary table ==="
-python3 ../../results_summary.py --dir .
-
-echo ""
-echo "Done. Results in: $RESULTS_DIR"
+info "A gerar sumário..."
+python3 "$TESTS_DIR/results_summary.py" --dir "$RESULTS_DIR"
+info "Concluído. Resultados em: $RESULTS_DIR"

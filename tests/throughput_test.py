@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-throughput_test.py — UDP throughput measurement over the mesh TUN network
+throughput_test.py — Medição passiva de throughput do vídeo UDP
 
-Measures achievable UDP throughput for different packet sizes, comparing
-direct (N3↔N1) vs relay (N3↔N2↔N1) topologies.
+Mede o tráfego de vídeo que JÁ está a fluir de N1→N3 (porta 5000),
+sem injectar tráfego extra. Usa SO_REUSEPORT para co-existir com
+o base_station.py que também escuta na porta 5000.
 
-Usage:
-  Server side (Node 1): python3 throughput_test.py --mode server
-  Client side (Node 3): python3 throughput_test.py --mode client --target 10.0.0.1 \
-                          --duration 10 --pktsize 1316 --label "direct_1316"
-
-Packet size 1316 matches the video stream (mpegts UDP pkt_size=1316).
+Uso (apenas no Nó 3, enquanto base_station.py corre):
+    python3 throughput_test.py --duration 15 --label "direct_1"
+    python3 throughput_test.py --duration 15 --label "relay_1" --topology relay
 """
 
 import socket
@@ -18,129 +16,102 @@ import time
 import json
 import struct
 import argparse
-import threading
 import statistics
 
-THRU_PORT  = 19877
-HDR_SIZE   = 12   # seq(4) + timestamp(8)
+VIDEO_PORT = 5000
 
-rx_count   = 0
-rx_bytes   = 0
-rx_lock    = threading.Lock()
-rx_done    = False
-
-def server_mode(bind_ip="0.0.0.0"):
-    global rx_count, rx_bytes, rx_done
-
+def measure(duration, label, topology, bind_ip="0.0.0.0"):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((bind_ip, THRU_PORT))
-    sock.settimeout(3.0)
-    print(f"[THRU-SERVER] Listening on {bind_ip}:{THRU_PORT}")
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    except AttributeError:
+        pass
+    sock.bind((bind_ip, VIDEO_PORT))
+    sock.settimeout(0.1)
 
-    while True:
-        rx_count = 0
-        rx_bytes = 0
-        rx_done  = False
-        t_start  = None
-        t_end    = None
+    print(f"[THRU] Medição passiva porta {VIDEO_PORT}  duração={duration}s  label={label}")
+    print(f"[THRU] A aguardar tráfego de vídeo...")
+
+    rx_pkts  = 0
+    rx_bytes = 0
+    t_start  = None
+    pkt_sizes = []
+
+    deadline = time.perf_counter() + duration + 3.0  # 3s extra para arranque
+
+    while time.perf_counter() < deadline:
         try:
-            while True:
-                data, addr = sock.recvfrom(65535)
-                if len(data) < HDR_SIZE:
-                    continue
-                seq, = struct.unpack_from(">I", data, 0)
-                if seq == 0xFFFFFFFF:
-                    # end-of-stream sentinel
-                    t_end = time.perf_counter()
-                    break
-                if t_start is None:
-                    t_start = time.perf_counter()
-                with rx_lock:
-                    rx_count += 1
-                    rx_bytes += len(data)
+            data, _ = sock.recvfrom(65536)
+            now = time.perf_counter()
+
+            if t_start is None:
+                t_start  = now
+                deadline = now + duration
+                print(f"[THRU] Primeiro pacote recebido — a medir {duration}s...")
+
+            rx_pkts  += 1
+            rx_bytes += len(data)
+            pkt_sizes.append(len(data))
+
+            if rx_pkts % 500 == 0:
+                elapsed = now - t_start
+                kbps    = (rx_bytes * 8) / elapsed / 1000 if elapsed > 0 else 0
+                print(f"\r[THRU] {rx_pkts} pkts  {kbps:.0f} kbps  {elapsed:.1f}s/{duration}s",
+                      end="", flush=True)
+
         except socket.timeout:
-            t_end = time.perf_counter()
-
-        if t_start and t_end and t_end > t_start:
-            elapsed   = t_end - t_start
-            throughput_kbps = (rx_bytes * 8) / elapsed / 1000
-            pdr = rx_count  # no total known server-side, just report count
-            print(f"[THRU-SERVER] Received {rx_count} pkts / {rx_bytes} bytes "
-                  f"in {elapsed:.2f}s = {throughput_kbps:.1f} kbps")
-        else:
-            print("[THRU-SERVER] No data received or timing error")
-
-def client_mode(target, duration, pkt_size, label, topology):
-    payload_size = max(HDR_SIZE, pkt_size)
-    data_filler  = b"X" * (payload_size - HDR_SIZE)
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    sent       = 0
-    sent_bytes = 0
-    seq        = 0
-    interval_ns = 0   # send as fast as possible
-
-    print(f"[THRU-CLIENT] Target={target}  PktSize={pkt_size}B  "
-          f"Duration={duration}s  Label={label}")
-
-    t_start = time.perf_counter()
-    t_end   = t_start + duration
-
-    while time.perf_counter() < t_end:
-        seq += 1
-        ts  = time.perf_counter()
-        pkt = struct.pack(">Id", seq, ts) + data_filler
-        try:
-            sock.sendto(pkt, (target, THRU_PORT))
-            sent += 1
-            sent_bytes += len(pkt)
-        except Exception:
-            pass
-
-    # sentinel
-    sentinel = struct.pack(">I", 0xFFFFFFFF) + b"\x00" * (HDR_SIZE - 4 + len(data_filler))
-    for _ in range(3):
-        sock.sendto(sentinel, (target, THRU_PORT))
-
-    elapsed = time.perf_counter() - t_start
-    throughput_kbps = (sent_bytes * 8) / elapsed / 1000
+            if t_start and time.perf_counter() > t_start + duration:
+                break
 
     sock.close()
+    print()
 
-    print(f"[THRU-CLIENT] Sent {sent} pkts / {sent_bytes} bytes "
-          f"in {elapsed:.2f}s = {throughput_kbps:.1f} kbps")
+    if not t_start or rx_pkts == 0:
+        print("[THRU] Sem dados — o vídeo está a chegar à porta 5000?")
+        return
+
+    elapsed      = min(time.perf_counter() - t_start, duration)
+    throughput_kbps = (rx_bytes * 8) / elapsed / 1000
+    avg_pkt      = statistics.mean(pkt_sizes) if pkt_sizes else 0
+    pps          = rx_pkts / elapsed
+
+    print(f"\n{'='*50}")
+    print(f"  Label:      {label}")
+    print(f"  Topology:   {topology}")
+    print(f"  Duração:    {elapsed:.2f}s")
+    print(f"  Pacotes:    {rx_pkts}")
+    print(f"  Bytes:      {rx_bytes/1024:.1f} KB")
+    print(f"  Throughput: {throughput_kbps:.1f} kbps")
+    print(f"  PPS:        {pps:.1f} pkt/s")
+    print(f"  Pkt médio:  {avg_pkt:.0f} B")
+    print(f"{'='*50}")
 
     result = {
         "label":           label,
         "topology":        topology,
-        "target":          target,
-        "pkt_size_bytes":  pkt_size,
+        "direction":       "N1_to_N3",
         "duration_s":      round(elapsed, 3),
-        "pkts_sent":       sent,
-        "bytes_sent":      sent_bytes,
+        "pkts_received":   rx_pkts,
+        "bytes_received":  rx_bytes,
         "throughput_kbps": round(throughput_kbps, 1),
+        "pps":             round(pps, 1),
+        "pkt_size_bytes":  round(avg_pkt, 1),   # alias esperado por results_summary.py
+        "avg_pkt_bytes":   round(avg_pkt, 1),
         "timestamp":       time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
     fname = f"throughput_{label}.json"
     with open(fname, "w") as f:
         json.dump(result, f, indent=2)
-    print(f"[THRU-CLIENT] Saved → {fname}")
+    print(f"  Guardado → {fname}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode",     choices=["client","server"], required=True)
-    parser.add_argument("--target",   default="10.0.0.1")
-    parser.add_argument("--duration", type=int,   default=10)
-    parser.add_argument("--pktsize",  type=int,   default=1316,
-                        help="UDP payload size in bytes (1316=mpegts default)")
+    parser.add_argument("--duration", type=int,   default=15)
     parser.add_argument("--label",    default="test")
-    parser.add_argument("--topology", default="direct",
-                        choices=["direct","relay","3hop"])
+    parser.add_argument("--topology", default="direct", choices=["direct", "relay"])
+    parser.add_argument("--bind",     default="0.0.0.0")
     args = parser.parse_args()
 
-    if args.mode == "server":
-        server_mode()
-    else:
-        client_mode(args.target, args.duration, args.pktsize, args.label, args.topology)
+    measure(args.duration, args.label, args.topology, args.bind)
