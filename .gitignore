@@ -7,3 +7,13 @@ tests/results_*/
 tests/results_quick_*/
 tests/**/*.json
 tests/results_summary.txt
+
+# Gráficos gerados pelos scripts de análise (não versionar)
+tests/*_histogram.png
+tests/*_scatter.png
+tests/*_rounds.png
+tests/*_n2_*.png
+tests/*_n3_*.png
+tests/relay_analysis*.png
+tests/slot_occupancy*.png
+tests/*_proto_comparison.png
