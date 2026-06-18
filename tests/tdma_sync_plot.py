@@ -151,9 +151,35 @@ def load_pcap_scapy(path):
     return packets
 
 # ── Processamento: wrap a 150ms ───────────────────────────────────────────────
-def wrap_to_frame(packets):
+def _circ_mean(pos_ms, period=FRAME_MS):
+    """Média circular de posições no frame (lida com o wrap em 0/period)."""
+    if len(pos_ms) == 0:
+        return 0.0
+    ang = 2 * np.pi * np.asarray(pos_ms) / period
+    m = np.arctan2(np.sin(ang).mean(), np.cos(ang).mean())
+    return (m / (2 * np.pi) * period) % period
+
+
+def frame_offset(packets):
     """
-    Devolve dict {node: [pos_ms, ...]} onde pos_ms = timestamp_ms mod 150.
+    Offset (ms) para alinhar o eixo: coloca o cluster do nó de menor id (idealmente
+    N1) no CENTRO do seu slot, para os picos assentarem bem em [0-50]/[50-100]/
+    [100-150] como na Fig. 4.34 da Ana. O t0 cru do Wireshark é arbitrário.
+    """
+    if not packets:
+        return 0.0
+    t0 = packets[0][0]
+    by_node = defaultdict(list)
+    for ts, node in packets:
+        by_node[node].append(((ts - t0) * 1000.0) % FRAME_MS)
+    ref = min(by_node)                       # menor id presente (idealmente 1)
+    target = SLOT_START[ref] + SLOT_MS / 2   # centro do slot desse nó
+    return target - _circ_mean(by_node[ref])
+
+
+def wrap_to_frame(packets, offset=0.0):
+    """
+    Devolve dict {node: [pos_ms, ...]} onde pos_ms = (timestamp_ms + offset) mod 150.
     """
     result = defaultdict(list)
     if not packets:
@@ -162,12 +188,12 @@ def wrap_to_frame(packets):
     t0 = packets[0][0]
     for (ts, node) in packets:
         ts_ms = (ts - t0) * 1000.0
-        pos   = ts_ms % FRAME_MS
+        pos   = (ts_ms + offset) % FRAME_MS
         result[node].append(pos)
     return result
 
 # ── Plot 0: Scatter por ronda (igual à Fig. 4.34 da Ana) ─────────────────────
-def plot_rounds(packets, out_path, max_rounds=14):
+def plot_rounds(packets, out_path, max_rounds=14, offset=0.0):
     """
     X = posição wrapped no frame (ms), Y = número da ronda TDMA, cor = nó.
     Réplica do gráfico da Ana (Fig. 4.34/4.35): mostra que cada nó ocupa a sua
@@ -177,11 +203,11 @@ def plot_rounds(packets, out_path, max_rounds=14):
     if not packets:
         return
     t0 = packets[0][0]
-    # ronda e posição de cada pacote
+    # ronda e posição de cada pacote (com o mesmo offset de alinhamento)
     pts = []  # (pos_ms, round_idx, node)
     for ts, node in packets:
         ms = (ts - t0) * 1000.0
-        pts.append((ms % FRAME_MS, int(ms // FRAME_MS), node))
+        pts.append(((ms + offset) % FRAME_MS, int(ms // FRAME_MS), node))
     last = max(p[1] for p in pts)
     lo = max(0, last - max_rounds + 1)
 
@@ -476,11 +502,12 @@ def main():
 
     print(f"[INFO] {len(packets)} pacotes carregados ({len(set(n for _,n in packets))} nós)")
 
-    wrapped = wrap_to_frame(packets)
+    offset  = frame_offset(packets)
+    wrapped = wrap_to_frame(packets, offset)
     stats   = print_stats(wrapped)
 
     base = os.path.splitext(path)[0]
-    plot_rounds    (packets, base + '_rounds.png')
+    plot_rounds    (packets, base + '_rounds.png', offset=offset)
     plot_scatter   (wrapped, base + '_scatter.png')
     plot_histogram (wrapped, base + '_histogram.png')
 
