@@ -238,68 +238,67 @@ def _n1_beacon_pos(rows):
     return _circular_mean(bt % FRAME_MS)
 
 
+def _align_offset(rows):
+    """
+    Offset a aplicar às posições no frame para alinhar o eixo com o início real
+    do slot de N1. Preferência: beacon do N1 (marca o início do seu slot → 0 ms).
+    Fallback: média circular da rajada de vídeo (centra no meio do slot N1, 25ms).
+    Cada captura tem o seu próprio offset (t0 do Wireshark é independente).
+    """
+    b = _n1_beacon_pos(rows)
+    if b is not None:
+        return -b, 'aligned to N1 beacon'
+    vts, _ = _video_stream(rows)
+    if len(vts):
+        return 25.0 - _circular_mean(vts % FRAME_MS), 'aligned to N1 video burst'
+    return 0.0, 'raw capture t0 (no reference)'
+
+
 def _plot_n3_slot_alignment(direct, relay, out_path):
     """
-    Histograma da posição de cada pacote de vídeo dentro do frame de 150ms.
+    Histograma da posição de TODOS os pacotes dentro do frame de 150ms — mostra
+    a estrutura TDMA completa (cada nó transmite no seu slot).
 
-    NOTA: uma captura passiva não conhece o início real do frame TDMA (o t0 do
-    Wireshark é arbitrário). Alinhamos o eixo usando o BEACON do N1 (enviado no
-    início do slot de N1) como referência objetiva — assim o início do slot de N1
-    fica em 0 ms e vê-se o vídeo a cair dentro do slot de N1, onde é transmitido.
-    Se não houver beacons do N1 (ex: link directo em baixo no relay), usamos a
-    média circular da rajada de vídeo. O mesmo offset é aplicado a direto e relay.
+    Cada captura é alinhada com a SUA própria referência (beacon do N1), porque
+    são capturas independentes com t0 diferentes. Os dois painéis ficam lado a
+    lado, cada um com o seu eixo X, para comparação directo vs relay.
     """
-    d_ts, _ = _video_stream(direct)
-    r_ts, _ = _video_stream(relay)
-    d_raw = d_ts % FRAME_MS
-    r_raw = r_ts % FRAME_MS
-
-    # referência preferida: beacon do N1 (marca o início do slot de N1 → 0 ms)
-    beacon = _n1_beacon_pos(direct)
-    if beacon is None:
-        beacon = _n1_beacon_pos(relay)
-    if beacon is not None:
-        offset = -beacon            # põe o início do slot de N1 em 0 ms
-        ref_note = 'Frame origin aligned to N1 beacon (start of N1 slot)'
-    else:
-        # fallback: centra a rajada de vídeo no meio do slot de N1 (25 ms)
-        ref = _circular_mean(d_raw) if len(d_raw) else _circular_mean(r_raw)
-        offset = 25.0 - ref
-        ref_note = 'Frame origin aligned to N1 video burst (no N1 beacon captured)'
-    d_pos = (d_raw + offset) % FRAME_MS
-    r_pos = (r_raw + offset) % FRAME_MS
+    d_all = np.array([r['ts_ms'] for r in direct])
+    r_all = np.array([r['ts_ms'] for r in relay])
+    d_off, d_note = _align_offset(direct)
+    r_off, r_note = _align_offset(relay)
+    d_pos = (d_all + d_off) % FRAME_MS
+    r_pos = (r_all + r_off) % FRAME_MS
 
     bins = np.arange(0, FRAME_MS + 3, 3)
-    fig, axes = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
     fig.suptitle('TDMA Frame Slot Alignment at N3\n'
-                 'Direct vs. Relay — packet position within 150 ms frame',
+                 'All packets — position within 150 ms frame (each capture aligned independently)',
                  fontsize=14, fontweight='bold')
 
     slots = [(0, 50, 'N1 slot\n(0–50 ms)', '#2196F3'),
              (50, 100, 'N2 slot\n(50–100 ms)', '#7E57C2'),
              (100, 150, 'N3 slot\n(100–150 ms)', '#F44336')]
 
-    for ax, pos, title, color in [
-        (axes[0], d_pos, f'Direct Link  (n = {len(d_pos):,} packets)', '#2196F3'),
-        (axes[1], r_pos, f'Relay via ip_forward  (n = {len(r_pos):,} packets)', '#4CAF50'),
+    for ax, pos, title, color, note in [
+        (axes[0], d_pos, f'Direct Link  (n = {len(d_pos):,} packets)', '#2196F3', d_note),
+        (axes[1], r_pos, f'Relay via ip_forward  (n = {len(r_pos):,} packets)', '#4CAF50', r_note),
     ]:
-        # regiões dos slots
         for a, b, lab, scol in slots:
             ax.axvspan(a, b, alpha=0.06, color=scol)
             ax.axvline(b, color='gray', ls='--', lw=1, alpha=0.6)
-            ax.text((a + b) / 2, 0.88, lab, transform=ax.get_xaxis_transform(),
+            ax.text((a + b) / 2, 0.97, lab, transform=ax.get_xaxis_transform(),
                     ha='center', va='top', fontsize=9, color=scol,
                     bbox=dict(boxstyle='round', facecolor='white', edgecolor=scol, alpha=0.9))
         ax.hist(pos, bins=bins, color=color, alpha=0.9, edgecolor='none')
+        ax.set_xlabel('Position within TDMA frame (ms)', fontsize=11)
         ax.set_ylabel('Packet count', fontsize=11)
         ax.set_title(title, fontsize=12, fontweight='bold', color=color)
         ax.grid(axis='y', alpha=0.2)
         ax.set_xlim(0, FRAME_MS)
+        ax.text(0.99, 0.02, f'* {note}', transform=ax.transAxes, ha='right',
+                fontsize=8, style='italic', color='gray')
 
-    axes[1].text(0.99, 0.04, f'* {ref_note}; burst width ≈ one 50 ms slot',
-                 transform=axes[1].transAxes, ha='right', fontsize=9,
-                 style='italic', color='gray')
-    axes[-1].set_xlabel('Position within TDMA frame (ms)', fontsize=12)
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
