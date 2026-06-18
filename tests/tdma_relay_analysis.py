@@ -357,9 +357,8 @@ def analyse_n2(n2_csv, out_prefix):
 
 def _plot_n2_latency(deltas, out_path):
     """
-    Gráfico único e claro da latência do relay em N2:
-      esquerda  — histograma do Δt (recebe → liberta)
-      direita   — CDF, com P50/P95/P99 marcados
+    Single histogram of the N2 relay forwarding delay (receive -> release),
+    with all metrics shown in a side box.
     """
     mu   = deltas.mean()
     med  = np.median(deltas)
@@ -369,54 +368,34 @@ def _plot_n2_latency(deltas, out_path):
     p95  = np.percentile(deltas, 95)
     p99  = np.percentile(deltas, 99)
 
-    fig, (axh, axc) = plt.subplots(1, 2, figsize=(13, 5))
-    fig.suptitle('N2 — Latência do relay: tempo entre RECEBER (TCP de N1) e '
-                 'LIBERTAR (MPEG TS para N3)\n'
-                 'ip_forward do kernel — o pacote é reencaminhado sem passar pela aplicação',
-                 fontsize=11, fontweight='bold')
+    fig, ax = plt.subplots(figsize=(11, 5))
 
-    # ── histograma ──
-    # limita o eixo a P99 para não esmagar a distribuição com a cauda
+    # limit the x axis to the bulk of the distribution (tail goes into the box)
     xmax = max(p99 * 1.5, 0.5)
     bins = np.linspace(0, xmax, 60)
-    axh.hist(deltas, bins=bins, color='#4CAF50', alpha=0.85, edgecolor='none')
-    axh.axvline(med, color='#1565C0', lw=1.8, label=f'mediana = {med:.3f} ms')
-    axh.axvline(mu,  color='red',     lw=1.8, ls='--', label=f'média = {mu:.3f} ms')
-    axh.set_xlabel('Δt  recebe → liberta (ms)', fontsize=11)
-    axh.set_ylabel('Nº de pacotes')
-    axh.set_xlim(0, xmax)
-    axh.set_title(f'Distribuição (n={len(deltas)})', fontsize=10)
-    axh.legend(fontsize=9)
-    axh.grid(axis='y', alpha=0.3)
+    ax.hist(deltas, bins=bins, color='#4CAF50', alpha=0.85, edgecolor='none')
+    ax.axvline(med, color='#1565C0', lw=1.8, label=f'median = {med:.3f} ms')
+    ax.axvline(mu,  color='red',     lw=1.8, ls='--', label=f'mean = {mu:.3f} ms')
 
-    # ── CDF ──
-    ds = np.sort(deltas)
-    cdf = np.arange(1, len(ds) + 1) / len(ds)
-    axc.plot(ds, cdf * 100, color='#4CAF50', lw=2)
-    for val, lab, col in [(med, 'P50', '#1565C0'), (p95, 'P95', '#FF9800'),
-                          (p99, 'P99', '#F44336')]:
-        axc.axvline(val, color=col, lw=1.4, ls='--')
-        axc.text(val, 5, f'{lab}\n{val:.2f}ms', color=col, fontsize=8,
-                 ha='left', va='bottom')
-    axc.set_xlabel('Δt  recebe → liberta (ms)', fontsize=11)
-    axc.set_ylabel('Percentagem de pacotes (%)')
-    axc.set_xlim(0, xmax)
-    axc.set_ylim(0, 100)
-    axc.set_title('CDF — fração reencaminhada em ≤ Δt', fontsize=10)
-    axc.grid(alpha=0.3)
+    ax.set_title('N2 relay forwarding latency', fontsize=13, fontweight='bold')
+    ax.set_xlabel('Forwarding delay  Δt  (ms)', fontsize=11)
+    ax.set_ylabel('Packets', fontsize=11)
+    ax.set_xlim(0, xmax)
+    ax.legend(fontsize=9, loc='upper right')
+    ax.grid(axis='y', alpha=0.3)
 
-    # caixa-resumo — todas as métricas, em ms
-    txt = (f'n        = {len(deltas)}\n'
-           f'média    = {mu:.3f} ms\n'
-           f'mediana  = {med:.3f} ms\n'
-           f'σ        = {sd:.3f} ms\n'
-           f'mín      = {dmin:.3f} ms\n'
-           f'P95      = {p95:.3f} ms\n'
-           f'P99      = {p99:.3f} ms\n'
-           f'máx      = {dmax:.3f} ms')
-    axc.text(0.97, 0.55, txt, transform=axc.transAxes, ha='right', va='top',
-             fontsize=9, family='monospace',
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+    # side box with every metric, in ms
+    txt = (f'n       = {len(deltas)}\n'
+           f'mean    = {mu:.3f} ms\n'
+           f'median  = {med:.3f} ms\n'
+           f'std     = {sd:.3f} ms\n'
+           f'min     = {dmin:.3f} ms\n'
+           f'P95     = {p95:.3f} ms\n'
+           f'P99     = {p99:.3f} ms\n'
+           f'max     = {dmax:.3f} ms')
+    ax.text(0.985, 0.74, txt, transform=ax.transAxes, ha='right', va='top',
+            fontsize=9, family='monospace',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
