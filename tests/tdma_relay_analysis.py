@@ -256,21 +256,31 @@ def _align_offset(rows):
 
 # categorias de pacotes para colorir o slot alignment
 SLOT_CATS = [
-    ('Video (TCP/MPEG TS)', '#4CAF50'),
-    ('TDMA control (RX beacons/acks)', '#FF9800'),
-    ('TCP ACK / control', '#90A4AE'),
+    ('Video N1→N3', '#4CAF50'),
+    ('TDMA control (RX)', '#FF9800'),
+    ('TCP data (other nodes)', '#5C6BC0'),
+    ('TCP ACK / small', '#90A4AE'),
     ('Other', '#BDBDBD'),
 ]
 
 
 def _packet_category(r):
-    """Classifica um pacote numa das SLOT_CATS."""
-    if (r['ptype'] == 'tdma_tcp' and r['plen'] > 200) or r['ptype'] == 'video_udp':
-        return 'Video (TCP/MPEG TS)'
+    """
+    Classifica um pacote. CRÍTICO: 'Video N1→N3' é APENAS o fluxo de vídeo real
+    (origem N1, destino N3). TCP grande de outros nós (N2/N3 no seu slot) vai
+    para 'TCP data (other nodes)' — não é vídeo, mesmo sendo TCP grande.
+    """
+    is_n1_to_n3 = r['src_node'] == 1 and r['dst_node'] == 3
+    if r['ptype'] == 'video_udp' and is_n1_to_n3:
+        return 'Video N1→N3'
+    if r['ptype'] == 'tdma_tcp' and r['plen'] > 200 and is_n1_to_n3:
+        return 'Video N1→N3'
     if r['proto'] == 'RX':
-        return 'TDMA control (RX beacons/acks)'
+        return 'TDMA control (RX)'
+    if r['ptype'] == 'tdma_tcp' and r['plen'] > 200:
+        return 'TCP data (other nodes)'
     if r['proto'] == 'TCP':
-        return 'TCP ACK / control'
+        return 'TCP ACK / small'
     return 'Other'
 
 
