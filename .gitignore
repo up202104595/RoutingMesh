@@ -1,3 +1,9 @@
 meshnode
 obj/
 __pycache__/
+
+# Resultados de testes (gerados automaticamente)
+tests/results_*/
+tests/results_quick_*/
+tests/**/*.json
+tests/results_summary.txt
