@@ -49,8 +49,14 @@ static int64_t g_delay_count = 0;
 static double get_current_round_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    int64_t now_ms = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-    return (double)(now_ms % (int64_t)g_round_period_ms);
+    int64_t sec  = (int64_t)ts.tv_sec;
+    int64_t nsec = (int64_t)ts.tv_nsec;
+    /* IGUAL ao tdma_getCurrentRoundTimeD() do Diogo: módulo em ms inteiros e
+     * soma de volta a parte fracionária do ms (preserva precisão sub-ms). */
+    double cur_time_ms =
+        (double)((sec * 1000 + nsec / 1000000) % (int64_t)g_round_period_ms);
+    cur_time_ms += -(double)(nsec / 1000000) + (nsec / 1000000.0);
+    return cur_time_ms;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -119,9 +125,10 @@ static float compute_delay(uint8_t  sender_slot_id,
     double sender_timestamp_ms = sender_timestamp_s * 1000.0;
     /* timestamp do emissor em ms dentro do round */
     double sender_ts_in_round = fmod(sender_timestamp_ms, (double)g_round_period_ms);
+    /* msg_position: posição do pacote dentro do slot do emissor.
+     * IGUAL ao tdma_getMsgPosition() do Diogo (sem clamp/sanitize extra). */
     float msg_position = (float)(sender_ts_in_round - (double)sender_begin_ms);
     if (msg_position < 0) msg_position += g_round_period_ms;
-    if (msg_position > width_ms) msg_position = 0; /* sanitize */
 
     /* slot_difference: +1=next, -1=prev */
     float slot_difference = (float)sender_slot_id - (float)g_slot_id;
