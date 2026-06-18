@@ -215,12 +215,35 @@ def _video_stream(rows):
 
 
 # ── 1) Alinhamento de slots TDMA ──────────────────────────────────────────────
+def _circular_mean(pos, period=FRAME_MS):
+    """Média circular de posições no frame (lida com o wrap em 0/period)."""
+    if len(pos) == 0:
+        return 0.0
+    ang = 2 * np.pi * pos / period
+    m = np.arctan2(np.sin(ang).mean(), np.cos(ang).mean())
+    return (m / (2 * np.pi) * period) % period
+
+
 def _plot_n3_slot_alignment(direct, relay, out_path):
-    """Histograma da posição de cada pacote de vídeo dentro do frame de 150ms."""
+    """
+    Histograma da posição de cada pacote de vídeo dentro do frame de 150ms.
+
+    NOTA: uma captura passiva não conhece o início real do frame TDMA (o t0 do
+    Wireshark é arbitrário). Como o vídeo é gerado por N1 e transmitido no slot
+    de N1, alinhamos o referencial do frame para que a rajada de vídeo caia no
+    centro do slot de N1 (~25 ms). O mesmo deslocamento é aplicado a direto e
+    relay, mantendo-os comparáveis.
+    """
     d_ts, _ = _video_stream(direct)
     r_ts, _ = _video_stream(relay)
-    d_pos = d_ts % FRAME_MS
-    r_pos = r_ts % FRAME_MS
+    d_raw = d_ts % FRAME_MS
+    r_raw = r_ts % FRAME_MS
+
+    # referencial: centra a rajada de vídeo do directo no meio do slot N1 (25 ms)
+    ref = _circular_mean(d_raw) if len(d_raw) else _circular_mean(r_raw)
+    offset = 25.0 - ref
+    d_pos = (d_raw + offset) % FRAME_MS
+    r_pos = (r_raw + offset) % FRAME_MS
 
     bins = np.arange(0, FRAME_MS + 3, 3)
     fig, axes = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
@@ -249,7 +272,8 @@ def _plot_n3_slot_alignment(direct, relay, out_path):
         ax.grid(axis='y', alpha=0.2)
         ax.set_xlim(0, FRAME_MS)
 
-    axes[1].text(0.99, 0.04, '* Peak near 150 ms wraps into N1 slot of next frame',
+    axes[1].text(0.99, 0.04, '* Frame origin aligned to N1 slot (video source); '
+                 'burst width ≈ one 50 ms slot',
                  transform=axes[1].transAxes, ha='right', fontsize=9,
                  style='italic', color='gray')
     axes[-1].set_xlabel('Position within TDMA frame (ms)', fontsize=12)
