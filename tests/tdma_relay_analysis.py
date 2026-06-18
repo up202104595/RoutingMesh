@@ -361,10 +361,13 @@ def _plot_n2_latency(deltas, out_path):
       esquerda  — histograma do Δt (recebe → liberta)
       direita   — CDF, com P50/P95/P99 marcados
     """
-    mu  = deltas.mean()
-    med = np.median(deltas)
-    p95 = np.percentile(deltas, 95)
-    p99 = np.percentile(deltas, 99)
+    mu   = deltas.mean()
+    med  = np.median(deltas)
+    sd   = deltas.std()
+    dmin = deltas.min()
+    dmax = deltas.max()
+    p95  = np.percentile(deltas, 95)
+    p99  = np.percentile(deltas, 99)
 
     fig, (axh, axc) = plt.subplots(1, 2, figsize=(13, 5))
     fig.suptitle('N2 — Latência do relay: tempo entre RECEBER (TCP de N1) e '
@@ -387,9 +390,9 @@ def _plot_n2_latency(deltas, out_path):
     axh.grid(axis='y', alpha=0.3)
 
     # ── CDF ──
-    sd = np.sort(deltas)
-    cdf = np.arange(1, len(sd) + 1) / len(sd)
-    axc.plot(sd, cdf * 100, color='#4CAF50', lw=2)
+    ds = np.sort(deltas)
+    cdf = np.arange(1, len(ds) + 1) / len(ds)
+    axc.plot(ds, cdf * 100, color='#4CAF50', lw=2)
     for val, lab, col in [(med, 'P50', '#1565C0'), (p95, 'P95', '#FF9800'),
                           (p99, 'P99', '#F44336')]:
         axc.axvline(val, color=col, lw=1.4, ls='--')
@@ -402,12 +405,18 @@ def _plot_n2_latency(deltas, out_path):
     axc.set_title('CDF — fração reencaminhada em ≤ Δt', fontsize=10)
     axc.grid(alpha=0.3)
 
-    # caixa-resumo
-    txt = (f'média  = {mu:.3f} ms\nmediana= {med:.3f} ms\n'
-           f'P95    = {p95:.3f} ms\nP99    = {p99:.3f} ms\nmax    = {deltas.max():.3f} ms')
-    axc.text(0.97, 0.45, txt, transform=axc.transAxes, ha='right', va='top',
+    # caixa-resumo — todas as métricas, em ms
+    txt = (f'n        = {len(deltas)}\n'
+           f'média    = {mu:.3f} ms\n'
+           f'mediana  = {med:.3f} ms\n'
+           f'σ        = {sd:.3f} ms\n'
+           f'mín      = {dmin:.3f} ms\n'
+           f'P95      = {p95:.3f} ms\n'
+           f'P99      = {p99:.3f} ms\n'
+           f'máx      = {dmax:.3f} ms')
+    axc.text(0.97, 0.55, txt, transform=axc.transAxes, ha='right', va='top',
              fontsize=9, family='monospace',
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.85))
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
