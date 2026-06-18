@@ -29,6 +29,7 @@ from collections import defaultdict
 # reutiliza o parsing e o alinhamento do tdma_relay_analysis
 from tdma_relay_analysis import (
     load_csv, FRAME_MS, SLOT_MS, _align_offset, _circular_mean,
+    is_tdma_beacon, _n1_beacon_pos,
 )
 
 NODE_COLOR = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
@@ -37,13 +38,14 @@ SLOTS = [(1, 0, 50), (2, 50, 100), (3, 100, 150)]   # (nó, início, fim) em ms
 
 def beacon_positions(rows, offset):
     """
-    Posições (mod 150ms, já alinhadas) dos beacons de cada nó físico.
-    Beacon = pacote RX (protocolo TDMA custom) vindo de 172.20.10.{1,2,3}.
+    Posições (mod 150ms, já alinhadas) dos BEACONS MATRIX de cada nó físico.
+    Usa is_tdma_beacon() para excluir os RX-ACKs (que são enviados em resposta,
+    fora do slot do nó, e poluiriam a medição).
     Devolve dict {node: np.array(posicoes)}.
     """
     by_node = defaultdict(list)
     for r in rows:
-        if r['proto'] != 'RX':
+        if not is_tdma_beacon(r):
             continue
         node = {'172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3}.get(r['src'])
         if node is None:
@@ -54,8 +56,8 @@ def beacon_positions(rows, offset):
 
 def print_stats(by_node, label):
     """Imprime, por nó, quantos beacons caíram dentro do slot esperado."""
-    print(f"\n─── {label}: ocupação de slots (beacons por nó) ──────────────────────")
-    print(f"  {'Nó':>4}  {'Slot':>12}  {'beacons':>8}  {'média (ms)':>11}  {'% no slot':>10}")
+    print(f"\n─── {label}: ocupação de slots (beacons MATRIX por nó) ────────────────")
+    print(f"  {'Nó':>4}  {'Slot':>12}  {'beacons':>8}  {'média (ms)':>11}  {'σ (ms)':>8}  {'% no slot':>10}")
     for node, s_lo, s_hi in [(n, lo, hi) for n, lo, hi in SLOTS]:
         pos = by_node.get(node, np.array([]))
         if len(pos) == 0:
@@ -64,7 +66,7 @@ def print_stats(by_node, label):
         inside = np.sum((pos >= s_lo) & (pos < s_hi))
         pct = 100.0 * inside / len(pos)
         print(f"  N{node:>2}   {s_lo:>4.0f}–{s_hi:<4.0f} ms  {len(pos):>8}  "
-              f"{_circular_mean(pos):>11.1f}  {pct:>9.1f}%")
+              f"{_circular_mean(pos):>11.1f}  {np.std(pos):>8.1f}  {pct:>9.1f}%")
 
 
 def plot_occupancy(captures, out_path):
@@ -120,7 +122,13 @@ def main():
         if not os.path.exists(f):
             print(f"ERRO: {f} não encontrado"); sys.exit(1)
         rows = load_csv(f)
-        offset, note = _align_offset(rows)
+        # centra o beacon do N1 no MEIO do seu slot (25 ms) para não "rachar"
+        # na fronteira 0/150; cada captura usa a sua própria referência.
+        b = _n1_beacon_pos(rows)
+        if b is not None:
+            offset, note = 25.0 - b, 'N1 beacon centred in slot'
+        else:
+            offset, note = _align_offset(rows)
         by_node = beacon_positions(rows, offset)
         label = os.path.splitext(os.path.basename(f))[0] + f'  ({note})'
         print_stats(by_node, label)

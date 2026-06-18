@@ -251,15 +251,28 @@ def _circular_mean(pos, period=FRAME_MS):
     return (m / (2 * np.pi) * period) % period
 
 
+def is_tdma_beacon(r):
+    """
+    True se for um beacon MATRIX (não um RX-ACK). Os pacotes RX na captura são de
+    dois tipos: o beacon MATRIX (dissecado como '[Malformed Packet]', enviado no
+    slot do próprio nó) e o RX-ACK ('ACK 0 Seq... Call...', enviado em RESPOSTA a
+    um beacon, logo a seguir). Só o beacon marca o slot do nó.
+    """
+    if r['proto'] != 'RX':
+        return False
+    # NB: não usar 'ACK' como discriminador — "Packet" contém "ack".
+    # Os RX-ACKs têm sempre "Call:" no info; os beacons MATRIX não.
+    info = r['info'].upper()
+    return 'CALL' not in info
+
+
 def _n1_beacon_pos(rows):
     """
-    Posição (mod 150ms) dos beacons do N1 na captura. O N1 envia o beacon MATRIX
-    no INÍCIO do seu slot, por isso isto marca o início real do slot de N1 —
-    a referência objetiva para alinhar o eixo do frame.
-    Devolve None se não houver beacons do N1 na captura.
+    Posição (mod 150ms) dos beacons MATRIX do N1. Marca o slot de N1 — referência
+    para alinhar o eixo. Devolve None se não houver beacons do N1.
     """
     bt = np.array([r['ts_ms'] for r in rows
-                   if r['proto'] == 'RX' and r['src'] == '172.20.10.1'])
+                   if r['src'] == '172.20.10.1' and is_tdma_beacon(r)])
     if len(bt) == 0:
         return None
     return _circular_mean(bt % FRAME_MS)
