@@ -16,6 +16,17 @@
 
 set -uo pipefail
 
+# ── cleanup: restaura iptables se script for interrompido ─────────────────────
+_cleanup() {
+    echo ""
+    warn "Interrompido — a restaurar iptables..."
+    iptables -D INPUT  -s "${NODE1_PHY:-172.20.10.1}" -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -d "${NODE1_PHY:-172.20.10.1}" -j DROP 2>/dev/null || true
+    info "iptables restaurado. Sair."
+    exit 1
+}
+trap _cleanup INT TERM
+
 NODE1_IP="10.0.0.1"
 NODE1_PHY="172.20.10.1"
 RUNS=3

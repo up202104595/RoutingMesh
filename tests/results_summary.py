@@ -95,8 +95,14 @@ def table_convergence(results, out):
     for base, runs in sorted(groups.items()):
         n      = len(runs)
         convs  = [r["convergence_ms"] for r in runs if r.get("convergence_ms") is not None]
-        befs   = [r["inter_arrival_before_ms"]["avg"] for r in runs if r.get("inter_arrival_before_ms")]
-        afts   = [r["inter_arrival_after_ms"]["avg"]  for r in runs if r.get("inter_arrival_after_ms")]
+        befs   = [r["inter_arrival_before_ms"]["avg"]
+                  for r in runs
+                  if isinstance(r.get("inter_arrival_before_ms"), dict)
+                  and "avg" in r["inter_arrival_before_ms"]]
+        afts   = [r["inter_arrival_after_ms"]["avg"]
+                  for r in runs
+                  if isinstance(r.get("inter_arrival_after_ms"), dict)
+                  and "avg" in r["inter_arrival_after_ms"]]
         conv_s = f"{avg(convs):.0f} ± {stdev(convs):.0f}" if convs else "N/A"
         bef_s  = f"{avg(befs):.1f}" if befs else "N/A"
         aft_s  = f"{avg(afts):.1f}" if afts else "N/A"

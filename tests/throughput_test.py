@@ -96,6 +96,7 @@ def measure(duration, label, topology, bind_ip="0.0.0.0"):
         "bytes_received":  rx_bytes,
         "throughput_kbps": round(throughput_kbps, 1),
         "pps":             round(pps, 1),
+        "pkt_size_bytes":  round(avg_pkt, 1),   # alias esperado por results_summary.py
         "avg_pkt_bytes":   round(avg_pkt, 1),
         "timestamp":       time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

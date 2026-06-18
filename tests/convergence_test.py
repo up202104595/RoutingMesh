@@ -48,13 +48,21 @@ def run(label, do_block=True):
     sock.bind(("0.0.0.0", VIDEO_PORT))
     sock.settimeout(0.05)
 
+    WARMUP_TIMEOUT = 60.0   # desiste se nenhum vídeo chegar em 60s
+
     print(f"[CONV] Label={label}  GAP_threshold={GAP_THRESHOLD}s")
     print(f"[CONV] A aguardar vídeo estável ({WARMUP_S}s)...")
 
     # ── warmup: espera vídeo estável ──────────────────────────────────────
-    warmup_start = None
-    warmup_pkts  = 0
+    warmup_start  = None
+    warmup_pkts   = 0
+    warmup_deadline = time.perf_counter() + WARMUP_TIMEOUT
     while True:
+        if time.perf_counter() > warmup_deadline:
+            print(f"\n[CONV] Timeout: sem vídeo em {WARMUP_TIMEOUT:.0f}s — o vídeo está a fluir?")
+            sock.close()
+            return {"label": label, "converged": False, "convergence_ms": None,
+                    "error": "no_video_warmup"}
         try:
             data, _ = sock.recvfrom(65536)
             now = time.perf_counter()
