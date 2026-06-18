@@ -253,17 +253,13 @@ def _circular_mean(pos, period=FRAME_MS):
 
 def is_tdma_beacon(r):
     """
-    True se for um beacon MATRIX (não um RX-ACK). Os pacotes RX na captura são de
-    dois tipos: o beacon MATRIX (dissecado como '[Malformed Packet]', enviado no
-    slot do próprio nó) e o RX-ACK ('ACK 0 Seq... Call...', enviado em RESPOSTA a
-    um beacon, logo a seguir). Só o beacon marca o slot do nó.
+    True se for um beacon MATRIX. Os beacons são UDP nas portas 7001-7003 (107B),
+    mas o Wireshark dissecta as portas 7000-7009 como protocolo RX (AFS) e, conforme
+    os bytes do beacon, mostra-os ora como '[Malformed Packet]' ora como
+    'ACK 0 ... Call: <timestamp>'. NÃO são pacotes RX a sério nem RX-ACKs — são
+    TODOS beacons. Por isso classificamos qualquer pacote RX como beacon.
     """
-    if r['proto'] != 'RX':
-        return False
-    # NB: não usar 'ACK' como discriminador — "Packet" contém "ack".
-    # Os RX-ACKs têm sempre "Call:" no info; os beacons MATRIX não.
-    info = r['info'].upper()
-    return 'CALL' not in info
+    return r['proto'] == 'RX'
 
 
 def _n1_beacon_pos(rows):
