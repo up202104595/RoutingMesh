@@ -176,10 +176,37 @@ def analyse_n3(direct_csv, relay_csv, out_prefix):
         sig = _significance(src, proto)
         print(f"  {src:>16}  {proto:>12}  {n:>7}  {sig}")
 
+    _print_category_breakdown(direct, 'DIRECTO')
+    _print_category_breakdown(relay, 'RELAY')
+
     _plot_n3_slot_alignment(direct, relay, out_prefix + '_n3_slot_alignment.png')
     _plot_n3_performance(direct, relay, out_prefix + '_n3_performance.png')
     _plot_n3_throughput(direct, relay, out_prefix + '_n3_throughput.png')
     _plot_n3_composition(direct, relay, out_prefix + '_n3_composition.png')
+
+
+def _print_category_breakdown(rows, label):
+    """
+    Mostra, por categoria do slot alignment, os fluxos (src→dst:porta) que a
+    compõem. Serve para perceber EXACTAMENTE que pacotes são — em especial o
+    que cai na categoria 'TCP data (other nodes)'.
+    """
+    from collections import Counter
+    cat_flows = defaultdict(Counter)
+    for r in rows:
+        cat = _packet_category(r)
+        flow = f"{r['src']}→{r['dst']} :{r['dport'] if r['dport'] else '?'}"
+        cat_flows[cat][flow] += 1
+
+    print(f"\n─── N3 [{label}]: composição por categoria (fluxos principais) ──────────")
+    for cat, _ in SLOT_CATS:
+        flows = cat_flows.get(cat)
+        if not flows:
+            continue
+        total = sum(flows.values())
+        print(f"  {cat}  —  {total} pacotes")
+        for flow, n in flows.most_common(4):
+            print(f"      {n:>7}  {flow}")
 
 
 def _significance(src, proto):
