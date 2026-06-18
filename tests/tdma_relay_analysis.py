@@ -224,24 +224,48 @@ def _circular_mean(pos, period=FRAME_MS):
     return (m / (2 * np.pi) * period) % period
 
 
+def _n1_beacon_pos(rows):
+    """
+    Posição (mod 150ms) dos beacons do N1 na captura. O N1 envia o beacon MATRIX
+    no INÍCIO do seu slot, por isso isto marca o início real do slot de N1 —
+    a referência objetiva para alinhar o eixo do frame.
+    Devolve None se não houver beacons do N1 na captura.
+    """
+    bt = np.array([r['ts_ms'] for r in rows
+                   if r['proto'] == 'RX' and r['src'] == '172.20.10.1'])
+    if len(bt) == 0:
+        return None
+    return _circular_mean(bt % FRAME_MS)
+
+
 def _plot_n3_slot_alignment(direct, relay, out_path):
     """
     Histograma da posição de cada pacote de vídeo dentro do frame de 150ms.
 
     NOTA: uma captura passiva não conhece o início real do frame TDMA (o t0 do
-    Wireshark é arbitrário). Como o vídeo é gerado por N1 e transmitido no slot
-    de N1, alinhamos o referencial do frame para que a rajada de vídeo caia no
-    centro do slot de N1 (~25 ms). O mesmo deslocamento é aplicado a direto e
-    relay, mantendo-os comparáveis.
+    Wireshark é arbitrário). Alinhamos o eixo usando o BEACON do N1 (enviado no
+    início do slot de N1) como referência objetiva — assim o início do slot de N1
+    fica em 0 ms e vê-se o vídeo a cair dentro do slot de N1, onde é transmitido.
+    Se não houver beacons do N1 (ex: link directo em baixo no relay), usamos a
+    média circular da rajada de vídeo. O mesmo offset é aplicado a direto e relay.
     """
     d_ts, _ = _video_stream(direct)
     r_ts, _ = _video_stream(relay)
     d_raw = d_ts % FRAME_MS
     r_raw = r_ts % FRAME_MS
 
-    # referencial: centra a rajada de vídeo do directo no meio do slot N1 (25 ms)
-    ref = _circular_mean(d_raw) if len(d_raw) else _circular_mean(r_raw)
-    offset = 25.0 - ref
+    # referência preferida: beacon do N1 (marca o início do slot de N1 → 0 ms)
+    beacon = _n1_beacon_pos(direct)
+    if beacon is None:
+        beacon = _n1_beacon_pos(relay)
+    if beacon is not None:
+        offset = -beacon            # põe o início do slot de N1 em 0 ms
+        ref_note = 'Frame origin aligned to N1 beacon (start of N1 slot)'
+    else:
+        # fallback: centra a rajada de vídeo no meio do slot de N1 (25 ms)
+        ref = _circular_mean(d_raw) if len(d_raw) else _circular_mean(r_raw)
+        offset = 25.0 - ref
+        ref_note = 'Frame origin aligned to N1 video burst (no N1 beacon captured)'
     d_pos = (d_raw + offset) % FRAME_MS
     r_pos = (r_raw + offset) % FRAME_MS
 
@@ -272,8 +296,7 @@ def _plot_n3_slot_alignment(direct, relay, out_path):
         ax.grid(axis='y', alpha=0.2)
         ax.set_xlim(0, FRAME_MS)
 
-    axes[1].text(0.99, 0.04, '* Frame origin aligned to N1 slot (video source); '
-                 'burst width ≈ one 50 ms slot',
+    axes[1].text(0.99, 0.04, f'* {ref_note}; burst width ≈ one 50 ms slot',
                  transform=axes[1].transAxes, ha='right', fontsize=9,
                  style='italic', color='gray')
     axes[-1].set_xlabel('Position within TDMA frame (ms)', fontsize=12)
