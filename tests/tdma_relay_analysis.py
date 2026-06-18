@@ -253,13 +253,12 @@ def _circular_mean(pos, period=FRAME_MS):
 
 def is_tdma_beacon(r):
     """
-    True se for um beacon MATRIX. Os beacons são UDP nas portas 7001-7003 (107B),
-    mas o Wireshark dissecta as portas 7000-7009 como protocolo RX (AFS) e, conforme
-    os bytes do beacon, mostra-os ora como '[Malformed Packet]' ora como
-    'ACK 0 ... Call: <timestamp>'. NÃO são pacotes RX a sério nem RX-ACKs — são
-    TODOS beacons. Por isso classificamos qualquer pacote RX como beacon.
+    True se for um beacon MATRIX. Os beacons são UDP nas portas 7001-7003 com
+    TAMANHO FIXO de 107 bytes (3 nós), dissecados pelo Wireshark como RX. Filtra-se
+    pelo tamanho (≈107B) — igual ao tdma_sync_plot.py — para apanhar só os beacons
+    e excluir outros pacotes RX de tamanho diferente que poluiriam a posição.
     """
-    return r['proto'] == 'RX'
+    return r['proto'] == 'RX' and 100 <= r['plen'] <= 120
 
 
 def _n1_beacon_pos(rows):
