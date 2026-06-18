@@ -101,9 +101,16 @@ def load_csv(path):
 
             # classificação
             dport = _port_from_info(info)
-            if proto == 'TCP' and dport in TDMA_TCP_PORTS:
+            # Porto de origem (src port) para TCP TDMA: "8001 > 51354"
+            import re as _re
+            sport_m = _re.search(r'(\d+)\s*>', info)
+            sport = int(sport_m.group(1)) if sport_m else None
+
+            if proto == 'TCP' and (sport in TDMA_TCP_PORTS or dport in TDMA_TCP_PORTS):
                 ptype = 'tdma_tcp'
-            elif proto in ('UDP', 'MPEG TS') and dport in VIDEO_UDP_PORTS:
+            elif proto == 'MPEG TS':
+                ptype = 'video_udp'  # MPEG TS relay via ip_forward (TUN IPs)
+            elif proto == 'UDP' and (dport in VIDEO_UDP_PORTS or src in IP_TUN):
                 ptype = 'video_udp'
             elif dport in CTRL_UDP_PORTS or proto == 'RX':
                 ptype = 'ctrl'
@@ -172,10 +179,12 @@ def analyse_n3(direct_csv, relay_csv, out_prefix):
 def _significance(src, proto):
     if src == '172.20.10.1' and proto == 'TCP':
         return '← N1 directo via TDMA TCP (encapsulado)'
+    if src == '10.0.0.1' and ('UDP' in proto or proto == 'MPEG TS'):
+        return '← relay ip_forward: TUN src N1→N3 via N2 (raw MPEG TS, bypass TDMA)'
+    if src == '172.20.10.2' and proto == 'TCP':
+        return '← N2 TDMA slot próprio (TCP encapsulado)'
     if src == '172.20.10.2' and 'UDP' in proto:
         return '← N2 relay via ip_forward (raw MPEG TS)'
-    if src == '172.20.10.1' and 'UDP' in proto:
-        return '← N1 directo via UDP (bypass TDMA?)'
     if proto == 'RX':
         return '← beacon TDMA controlo'
     return ''
@@ -233,11 +242,10 @@ def _plot_n3_comparison(d_counts, r_counts, out_path):
 def _plot_interarrival_comparison(direct, relay, out_path):
     """Histograma de inter-arrivals: directo vs relay sobrepostos."""
     def ias(rows):
-        video = sorted([r['ts_ms'] for r in rows if r['ptype'] == 'video_udp'])
-        if len(video) < 2:
-            # fallback: todos os pacotes de vídeo incluindo TUN
-            video = sorted([r['ts_ms'] for r in rows
-                            if r['proto'] in ('UDP', 'MPEG TS') and r['plen'] > 200])
+        # directo: TCP de N1 (172.20.10.1) — TDMA encapsulado, plen > 200B (dados, não ACKs)
+        # relay:   MPEG TS de TUN (10.0.0.1) — ip_forward raw
+        video = sorted([r['ts_ms'] for r in rows
+                        if r['ptype'] in ('video_udp', 'tdma_tcp') and r['plen'] > 200])
         return [video[i] - video[i-1] for i in range(1, len(video))]
 
     d_ia = ias(direct)
