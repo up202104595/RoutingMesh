@@ -166,6 +166,51 @@ def wrap_to_frame(packets):
         result[node].append(pos)
     return result
 
+# ── Plot 0: Scatter por ronda (igual à Fig. 4.34 da Ana) ─────────────────────
+def plot_rounds(packets, out_path, max_rounds=14):
+    """
+    X = posição wrapped no frame (ms), Y = número da ronda TDMA, cor = nó.
+    Réplica do gráfico da Ana (Fig. 4.34/4.35): mostra que cada nó ocupa a sua
+    zona de slot de forma ESTÁVEL ao longo das rondas (pontos alinhados na
+    vertical). Usa as últimas `max_rounds` rondas para ficar legível.
+    """
+    if not packets:
+        return
+    t0 = packets[0][0]
+    # ronda e posição de cada pacote
+    pts = []  # (pos_ms, round_idx, node)
+    for ts, node in packets:
+        ms = (ts - t0) * 1000.0
+        pts.append((ms % FRAME_MS, int(ms // FRAME_MS), node))
+    last = max(p[1] for p in pts)
+    lo = max(0, last - max_rounds + 1)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for node in (1, 2, 3):
+        xs = [pos for pos, rnd, n in pts if n == node and rnd >= lo]
+        ys = [rnd for pos, rnd, n in pts if n == node and rnd >= lo]
+        if xs:
+            ax.scatter(xs, ys, s=18, color=NODE_COLORS[node], label=f'Node {node}')
+    # zonas e fronteiras de slot
+    for node in (1, 2, 3):
+        s = SLOT_START[node]
+        ax.axvspan(s, s + SLOT_MS, alpha=0.05, color=NODE_COLORS[node])
+    for b in (0, 50, 100, 150):
+        ax.axvline(b, color='gray', ls='--', lw=0.8, alpha=0.6)
+
+    ax.set_xlim(0, FRAME_MS)
+    ax.set_xlabel('Position within TDMA frame (ms)  [wrapped 0-150 ms]', fontsize=11)
+    ax.set_ylabel('TDMA round', fontsize=11)
+    ax.set_title('Synchronization packet transmission per round\n'
+                 'each node stays in its slot, stable across rounds', fontsize=12)
+    ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=9)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"[PLOT] Rounds scatter guardado: {out_path}")
+
+
 # ── Plot 1: Scatter (como Fig. 4.34 da Ana) ──────────────────────────────────
 def plot_scatter(wrapped, out_path):
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -435,6 +480,7 @@ def main():
     stats   = print_stats(wrapped)
 
     base = os.path.splitext(path)[0]
+    plot_rounds    (packets, base + '_rounds.png')
     plot_scatter   (wrapped, base + '_scatter.png')
     plot_histogram (wrapped, base + '_histogram.png')
 
