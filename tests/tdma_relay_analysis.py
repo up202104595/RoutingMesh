@@ -7,8 +7,9 @@ Modos de uso:
   1) Análise em N3 — prova que relay muda protocolo e src:
        python3 tdma_relay_analysis.py --n3 direct.csv relay.csv
 
-  2) Análise em N2 — mostra transformação TCP→UDP e latência ip_forward:
+  2) Análise em N2 — mede a latência do relay (tempo receber → libertar):
        python3 tdma_relay_analysis.py --n2 n2_relay.csv
+       Produz um único gráfico: histograma + CDF do Δt do ip_forward.
 
   3) Análise completa (N2 + N3):
        python3 tdma_relay_analysis.py --n2 n2_relay.csv --n3 direct.csv relay.csv
@@ -295,18 +296,19 @@ def _plot_interarrival_comparison(direct, relay, out_path):
 # ── Análise N2 — transformação TCP→UDP e latência ip_forward ──────────────────
 def analyse_n2(n2_csv, out_prefix):
     """
-    Analisa captura em N2 durante relay.
-    Mostra:
-      1. Pacotes TCP chegando de N1 (TDMA encapsulado)
-      2. Pacotes UDP saindo para N3 (ip_forward raw)
-      3. Estimativa de latência ip_forward (Δt entre TCP entrada e UDP saída)
+    Mede a latência do relay em N2: tempo entre RECEBER o pacote (TCP de N1)
+    e LIBERTÁ-LO reencaminhado (MPEG TS para N3 via ip_forward).
+
+    Para cada pacote de saída encontra o último pacote de dados TCP que chegou
+    antes dele (o que completou a receção) e calcula Δt = saída − entrada.
     """
     rows = load_csv(n2_csv)
 
-    # separa os dois fluxos
-    # ENTRADA: vídeo encapsulado em TDMA TCP que chega de N1 (172.20.10.1→172.20.10.2)
-    tcp_in  = [r for r in rows
-               if r['src_node'] == 1 and r['dst_node'] == 2 and r['proto'] == 'TCP']
+    # ENTRADA: dados de vídeo encapsulados em TDMA TCP que chegam de N1.
+    # Filtra ACKs puros (~66B): só segmentos com dados podem "completar" um pacote.
+    tcp_in = [r for r in rows
+              if r['src_node'] == 1 and r['dst_node'] == 2
+              and r['proto'] == 'TCP' and r['plen'] > 100]
     # SAÍDA: o relay é TRANSPARENTE (ip_forward sem NAT) — o vídeo reencaminhado
     # mantém os IPs originais (src=10.0.0.1 N1, dst=10.0.0.3 N3) e aparece como
     # MPEG TS / UDP porta 5000. NÃO sai como 172.20.10.2→172.20.10.3.
@@ -314,100 +316,99 @@ def analyse_n2(n2_csv, out_prefix):
                if r['ptype'] == 'video_udp'
                and r['src_node'] == 1 and r['dst_node'] == 3]
 
-    print("\n─── N2: Fluxos durante relay ───────────────────────────────────────────")
-    print(f"  TCP entrada  (N1→N2, TDMA encapsulado):       {len(tcp_in):>5} pacotes")
-    print(f"  MPEG TS saída (N1→N3 via ip_forward transparente): {len(udp_out):>5} pacotes")
+    print("\n─── N2: Latência do relay (receber → libertar) ─────────────────────────")
+    print(f"  Entrada  TCP dados (N1→N2, TDMA):                 {len(tcp_in):>5} pacotes")
+    print(f"  Saída    MPEG TS  (N1→N3, ip_forward transparente): {len(udp_out):>5} pacotes")
 
-    if tcp_in and udp_out:
-        # estimativa de latência: para cada UDP de saída, encontra o TCP de entrada
-        # mais próximo que o precedeu
-        deltas = []
-        j = 0
-        for udp in udp_out:
-            # procura o último TCP que chegou antes deste UDP
-            while j < len(tcp_in) - 1 and tcp_in[j + 1]['ts_ms'] < udp['ts_ms']:
-                j += 1
-            if tcp_in[j]['ts_ms'] < udp['ts_ms']:
-                dt = udp['ts_ms'] - tcp_in[j]['ts_ms']
-                if dt < 50:  # ignora gaps grandes (pacotes de rajadas diferentes)
-                    deltas.append(dt)
-
-        if deltas:
-            print(f"\n  Latência ip_forward estimada (Δt TCP→UDP):")
-            print(f"    μ  = {np.mean(deltas):.3f} ms")
-            print(f"    σ  = {np.std(deltas):.3f} ms")
-            print(f"    min= {min(deltas):.3f} ms")
-            print(f"    max= {max(deltas):.3f} ms")
-            print(f"    n  = {len(deltas)}")
-            print(f"\n  → ip_forward é instantâneo (~0ms), consistente com kernel bypass do TDMA")
-
-    _plot_n2_relay(tcp_in, udp_out, out_prefix + '_n2_relay.png')
-    if tcp_in and udp_out:
-        _plot_n2_latency(deltas, out_prefix + '_n2_latency.png')
-
-
-def _plot_n2_relay(tcp_in, udp_out, out_path):
-    """Timeline mostrando TCP entrada e UDP saída em N2."""
-    if not tcp_in and not udp_out:
-        print("[WARN] Sem dados de relay em N2 para plotar")
+    if not (tcp_in and udp_out):
+        print("\n[WARN] Sem ambos os fluxos — impossível medir latência.")
         return
 
-    fig, axes = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
-    fig.suptitle('N2 — Transformação do relay: TCP (TDMA) → MPEG TS (ip_forward transparente)\n'
-                 'N2 recebe vídeo encapsulado em TDMA TCP e reencaminha como MPEG TS raw (src/dst originais 10.0.0.1→10.0.0.3)',
-                 fontsize=10, fontweight='bold')
+    # emparelha cada saída com a última entrada de dados que a precedeu
+    deltas = []
+    j = 0
+    for udp in udp_out:
+        while j < len(tcp_in) - 1 and tcp_in[j + 1]['ts_ms'] < udp['ts_ms']:
+            j += 1
+        if tcp_in[j]['ts_ms'] < udp['ts_ms']:
+            dt = udp['ts_ms'] - tcp_in[j]['ts_ms']
+            if dt < 50:  # ignora gaps grandes (rajadas/frames diferentes)
+                deltas.append(dt)
 
-    # subplot 1: TCP de entrada (N1→N2)
-    ax = axes[0]
-    if tcp_in:
-        ts = [r['ts_ms'] for r in tcp_in]
-        sizes = [r['plen'] for r in tcp_in]
-        ax.vlines(ts, 0, sizes, color='#2196F3', alpha=0.7, linewidth=1.2)
-        ax.set_ylabel('Tamanho (B)', fontsize=9)
-        ax.set_title(f'ENTRADA em N2: TCP de N1 (172.20.10.1→172.20.10.2, TDMA)  n={len(tcp_in)}',
-                     fontsize=9)
-    ax.grid(axis='x', alpha=0.3)
+    if not deltas:
+        print("\n[WARN] Não foi possível emparelhar entrada/saída.")
+        return
 
-    # subplot 2: UDP de saída (N2→N3)
-    ax = axes[1]
-    if udp_out:
-        ts = [r['ts_ms'] for r in udp_out]
-        sizes = [r['plen'] for r in udp_out]
-        ax.vlines(ts, 0, sizes, color='#4CAF50', alpha=0.7, linewidth=1.2)
-        ax.set_ylabel('Tamanho (B)', fontsize=9)
-        ax.set_title(f'SAÍDA de N2: MPEG TS para N3 (10.0.0.1→10.0.0.3, ip_forward transparente)  n={len(udp_out)}',
-                     fontsize=9)
-    ax.set_xlabel('Tempo (ms)', fontsize=10)
-    ax.grid(axis='x', alpha=0.3)
+    deltas = np.array(deltas)
+    print(f"\n  Δt recebe → liberta  (latência ip_forward):")
+    print(f"    n        = {len(deltas)}")
+    print(f"    média    = {deltas.mean():.3f} ms")
+    print(f"    mediana  = {np.median(deltas):.3f} ms")
+    print(f"    σ        = {deltas.std():.3f} ms")
+    print(f"    min      = {deltas.min():.3f} ms")
+    print(f"    P95      = {np.percentile(deltas, 95):.3f} ms")
+    print(f"    P99      = {np.percentile(deltas, 99):.3f} ms")
+    print(f"    max      = {deltas.max():.3f} ms")
+    print(f"\n  → relay quase instantâneo: o ip_forward do kernel encaminha sem"
+          f" passar pela aplicação.")
 
-    # marca frames TDMA
-    max_t = max(
-        (tcp_in[-1]['ts_ms'] if tcp_in else 0),
-        (udp_out[-1]['ts_ms'] if udp_out else 0)
-    )
-    for ax in axes:
-        for t in np.arange(0, max_t, FRAME_MS):
-            ax.axvline(x=t, color='black', lw=0.6, linestyle=':', alpha=0.4)
-
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
-    print(f"[PLOT] {out_path}")
+    _plot_n2_latency(deltas, out_prefix + '_n2_latency.png')
 
 
 def _plot_n2_latency(deltas, out_path):
-    """Histograma da latência ip_forward em N2."""
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.hist(deltas, bins=50, color='#FF9800', alpha=0.85, edgecolor='none')
-    ax.axvline(x=np.mean(deltas), color='red', lw=1.8,
-               label=f'μ={np.mean(deltas):.3f}ms  σ={np.std(deltas):.3f}ms')
-    ax.set_xlabel('Δt  TCP entrada → UDP saída (ms)', fontsize=11)
-    ax.set_ylabel('Ocorrências')
-    ax.set_title('N2 — Latência do ip_forward kernel\n'
-                 'Tempo entre recepção TDMA TCP e reenvio UDP/MPEG TS',
-                 fontsize=10)
-    ax.legend(fontsize=9)
-    ax.grid(axis='y', alpha=0.3)
+    """
+    Gráfico único e claro da latência do relay em N2:
+      esquerda  — histograma do Δt (recebe → liberta)
+      direita   — CDF, com P50/P95/P99 marcados
+    """
+    mu  = deltas.mean()
+    med = np.median(deltas)
+    p95 = np.percentile(deltas, 95)
+    p99 = np.percentile(deltas, 99)
+
+    fig, (axh, axc) = plt.subplots(1, 2, figsize=(13, 5))
+    fig.suptitle('N2 — Latência do relay: tempo entre RECEBER (TCP de N1) e '
+                 'LIBERTAR (MPEG TS para N3)\n'
+                 'ip_forward do kernel — o pacote é reencaminhado sem passar pela aplicação',
+                 fontsize=11, fontweight='bold')
+
+    # ── histograma ──
+    # limita o eixo a P99 para não esmagar a distribuição com a cauda
+    xmax = max(p99 * 1.5, 0.5)
+    bins = np.linspace(0, xmax, 60)
+    axh.hist(deltas, bins=bins, color='#4CAF50', alpha=0.85, edgecolor='none')
+    axh.axvline(med, color='#1565C0', lw=1.8, label=f'mediana = {med:.3f} ms')
+    axh.axvline(mu,  color='red',     lw=1.8, ls='--', label=f'média = {mu:.3f} ms')
+    axh.set_xlabel('Δt  recebe → liberta (ms)', fontsize=11)
+    axh.set_ylabel('Nº de pacotes')
+    axh.set_xlim(0, xmax)
+    axh.set_title(f'Distribuição (n={len(deltas)})', fontsize=10)
+    axh.legend(fontsize=9)
+    axh.grid(axis='y', alpha=0.3)
+
+    # ── CDF ──
+    sd = np.sort(deltas)
+    cdf = np.arange(1, len(sd) + 1) / len(sd)
+    axc.plot(sd, cdf * 100, color='#4CAF50', lw=2)
+    for val, lab, col in [(med, 'P50', '#1565C0'), (p95, 'P95', '#FF9800'),
+                          (p99, 'P99', '#F44336')]:
+        axc.axvline(val, color=col, lw=1.4, ls='--')
+        axc.text(val, 5, f'{lab}\n{val:.2f}ms', color=col, fontsize=8,
+                 ha='left', va='bottom')
+    axc.set_xlabel('Δt  recebe → liberta (ms)', fontsize=11)
+    axc.set_ylabel('Percentagem de pacotes (%)')
+    axc.set_xlim(0, xmax)
+    axc.set_ylim(0, 100)
+    axc.set_title('CDF — fração reencaminhada em ≤ Δt', fontsize=10)
+    axc.grid(alpha=0.3)
+
+    # caixa-resumo
+    txt = (f'média  = {mu:.3f} ms\nmediana= {med:.3f} ms\n'
+           f'P95    = {p95:.3f} ms\nP99    = {p99:.3f} ms\nmax    = {deltas.max():.3f} ms')
+    axc.text(0.97, 0.45, txt, transform=axc.transAxes, ha='right', va='top',
+             fontsize=9, family='monospace',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.85))
+
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
