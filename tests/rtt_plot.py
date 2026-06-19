@@ -82,19 +82,12 @@ def plot_timeseries(ax, samples, frame_ms, title):
     fast, slow, thr = split_clusters(samples, frame_ms)
     ax.plot(x, samples, color='#90A4AE', lw=0.8, zorder=1)
     mask_fast = samples < thr
-    ax.scatter(x[mask_fast],  samples[mask_fast],  s=16, color='#2196F3',
-               label='catches the round (~1 slot)', zorder=2)
-    ax.scatter(x[~mask_fast], samples[~mask_fast], s=16, color='#F44336',
-               label='misses 1 round (+1 frame)', zorder=2)
-    if len(samples):
-        ax.axhline(samples.min(), color='#2196F3', ls=':', lw=1, alpha=0.6)
-        ax.axhline(samples.min() + frame_ms, color='#F44336', ls=':', lw=1,
-                   alpha=0.6, label=f'floor + 1 frame ({frame_ms:.0f} ms)')
+    ax.scatter(x[mask_fast],  samples[mask_fast],  s=16, color='#2196F3', zorder=2)
+    ax.scatter(x[~mask_fast], samples[~mask_fast], s=16, color='#F44336', zorder=2)
     ax.set_xlabel('Ping sequence number')
     ax.set_ylabel('RTT (ms)')
     ax.set_title(title, fontsize=11, fontweight='bold')
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc='upper right')
 
 
 def plot_histogram(ax, samples, frame_ms, title):
@@ -102,20 +95,10 @@ def plot_histogram(ax, samples, frame_ms, title):
         return
     bins = np.arange(0, samples.max() + 10, 5)
     ax.hist(samples, bins=bins, color='#5C6BC0', alpha=0.85, edgecolor='none')
-    fast, slow, thr = split_clusters(samples, frame_ms)
-    n = len(samples)
-    # mostra os DOIS clusters (centro + %), não média/mediana (não relevantes p/ bimodal)
-    if len(fast):
-        ax.axvline(fast.mean(), color='#2196F3', lw=1.8,
-                   label=f'catches round: {100*len(fast)/n:.0f}% @ {fast.mean():.0f} ms')
-    if len(slow):
-        ax.axvline(slow.mean(), color='#F44336', lw=1.8,
-                   label=f'misses 1 round: {100*len(slow)/n:.0f}% @ {slow.mean():.0f} ms')
     ax.set_xlabel('RTT (ms)')
     ax.set_ylabel('Count')
     ax.set_title(title, fontsize=11, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    ax.legend(fontsize=8)
 
 
 def main():
