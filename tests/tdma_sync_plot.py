@@ -335,6 +335,83 @@ def print_stats(wrapped):
     print("─" * 68)
     return results
 
+
+def _circ_std(pos_ms, period=FRAME_MS):
+    """Desvio-padrão CIRCULAR (ms) de posições no frame. Ao contrário de np.std,
+    não é enganado pelo wrap em 0/period (um cluster apertado à volta de 0 dá σ
+    pequeno, não ~period/2)."""
+    if len(pos_ms) < 2:
+        return 0.0
+    ang = 2 * np.pi * np.asarray(pos_ms) / period
+    R = np.hypot(np.sin(ang).mean(), np.cos(ang).mean())
+    R = min(max(R, 1e-12), 1.0)
+    return np.sqrt(-2.0 * np.log(R)) / (2 * np.pi) * period
+
+
+def _drift_rate_ms_per_s(packets, ref_node):
+    """Ritmo de deriva do frame (ms/s) seguindo o nó de referência: desenrola a
+    posição wrapped do nó ao longo do tempo e ajusta uma reta. ~0 = frame parado
+    em wall-clock; >0 = frame a rodar para a frente (NORMAL em sync relativa)."""
+    pts = [(ts, node) for ts, node in packets if node == ref_node]
+    if len(pts) < 3:
+        return None
+    t0 = packets[0][0]
+    t  = np.array([(ts - t0) for ts, _ in pts])           # segundos
+    p  = np.array([((ts - t0) * 1000.0) % FRAME_MS for ts, _ in pts])
+    # desenrola o wrap (mod 150) para uma série contínua
+    unwrapped = np.unwrap(p * 2 * np.pi / FRAME_MS) / (2 * np.pi) * FRAME_MS
+    if t.max() - t.min() < 1e-6:
+        return None
+    slope, _ = np.polyfit(t, unwrapped, 1)                 # ms por segundo
+    return slope
+
+
+def print_relative_stats(packets):
+    """
+    Métrica CORRETA para sincronização RELATIVA (RA-TDMA+): a separação entre os
+    beacons de cada nó e os do nó de referência, medida ronda a ronda. É
+    INVARIANTE à deriva do frame — se a separação observada for ~50 ms (nós
+    adjacentes) com σ pequeno, os nós ESTÃO sincronizados entre si, por muito que
+    o frame inteiro esteja a rodar em wall-clock.
+    """
+    times = defaultdict(list)
+    for ts, node in packets:
+        times[node].append(ts)
+    nodes = sorted(times)
+    if len(nodes) < 2:
+        print("\n[REL] Só um nó na captura — sem separação relativa para medir.")
+        return
+    ref = nodes[0]
+    ref_t = np.array(sorted(times[ref]))
+
+    drift = _drift_rate_ms_per_s(packets, ref)
+    print("\n─── Sincronização RELATIVA (invariante à deriva do frame) ──────────")
+    if drift is not None:
+        print(f"   Deriva do frame (ref N{ref}): {drift:+.2f} ms/s  "
+              f"(≈ rotação do frame em wall-clock; >0 é normal e não é dessync)")
+    print(f"   {'Par':>8}  {'esperado':>9}  {'observado μ':>12}  {'σ circ':>8}  "
+          f"{'avaliação':>12}")
+    print("─" * 64)
+    for node in nodes:
+        if node == ref:
+            continue
+        seps = []
+        for t in times[node]:
+            i = int(np.argmin(np.abs(ref_t - t)))
+            seps.append(((t - ref_t[i]) * 1000.0) % FRAME_MS)
+        expected = ((node - ref) * SLOT_MS) % FRAME_MS
+        mu  = _circ_mean(seps)
+        sig = _circ_std(seps)
+        # erro de alinhamento relativo (distância circular ao esperado)
+        err = abs(((mu - expected + FRAME_MS / 2) % FRAME_MS) - FRAME_MS / 2)
+        verdict = 'OK' if (err < 10 and sig < 12) else ('LIMITE' if err < 20 else 'DESSINC')
+        print(f"   N{node}–N{ref}  {expected:>7.0f}ms  {mu:>10.1f}ms  {sig:>6.1f}ms  "
+              f"{verdict:>12}")
+    print("─" * 64)
+    print("   Interpretação: erro<10ms & σ<12ms = sincronizados; a posição")
+    print("   ABSOLUTA do slot (tabela acima) não importa em sync relativa.")
+
+
 # ── Análise de protocolo: TCP (directo) vs UDP/MPEG TS (relay) ────────────────
 def _load_full_csv(path):
     """Lê CSV Wireshark SEM filtro — devolve lista de dicts com todos os campos."""
@@ -508,6 +585,7 @@ def main():
     offset  = frame_offset(packets)
     wrapped = wrap_to_frame(packets, offset)
     stats   = print_stats(wrapped)
+    print_relative_stats(packets)
 
     base = os.path.splitext(path)[0]
     plot_rounds    (packets, base + '_rounds.png', offset=offset)
