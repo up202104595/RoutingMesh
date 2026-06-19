@@ -15,12 +15,12 @@ Uso (no Nó 3, com vídeo a fluir e mesh ativa):
 """
 
 import os
-import socket
 import time
 import json
-import subprocess
 import argparse
 import statistics
+
+from video_sniff import VideoTap, VideoTapError
 
 VIDEO_PORT    = 5000
 GAP_THRESHOLD = 0.4   # segundos sem pacotes -> link quebrado
@@ -39,14 +39,12 @@ def restore_link():
 
 
 def run(label, do_block=True):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    except AttributeError:
-        pass
-    sock.bind(("0.0.0.0", VIDEO_PORT))
-    sock.settimeout(0.05)
+        tap = VideoTap(VIDEO_PORT)
+    except VideoTapError as e:
+        print(f"[CONV] {e}")
+        return {"label": label, "converged": False, "convergence_ms": None,
+                "error": "tap_open_failed"}
 
     WARMUP_TIMEOUT = 60.0   # desiste se nenhum vídeo chegar em 60s
 
@@ -60,20 +58,19 @@ def run(label, do_block=True):
     while True:
         if time.perf_counter() > warmup_deadline:
             print(f"\n[CONV] Timeout: sem vídeo em {WARMUP_TIMEOUT:.0f}s — o vídeo está a fluir?")
-            sock.close()
+            tap.close()
             return {"label": label, "converged": False, "convergence_ms": None,
                     "error": "no_video_warmup"}
-        try:
-            data, _ = sock.recvfrom(65536)
-            now = time.perf_counter()
-            if warmup_start is None:
-                warmup_start = now
-                print(f"[CONV] Vídeo detectado — a aguardar {WARMUP_S}s estável...")
-            warmup_pkts += 1
-            if now - warmup_start >= WARMUP_S:
-                break
-        except socket.timeout:
-            pass
+        r = tap.recv()
+        if not r:                 # None (timeout) ou False (trama não-vídeo)
+            continue
+        now = r[0]
+        if warmup_start is None:
+            warmup_start = now
+            print(f"[CONV] Vídeo detectado — a aguardar {WARMUP_S}s estável...")
+        warmup_pkts += 1
+        if now - warmup_start >= WARMUP_S:
+            break
 
     print(f"[CONV] Warmup OK ({warmup_pkts} pkts).  "
           f"{'A bloquear link direto...' if do_block else 'Modo monitor (sem bloqueio).'}")
@@ -85,6 +82,8 @@ def run(label, do_block=True):
         print(f"[CONV] Link direto bloqueado")
 
     # ── detetar gap e convergência ────────────────────────────────────────
+    # NOTA: a deteção de gap é guiada pelo RELÓGIO (não pelo timeout do socket),
+    # porque o sniffer vê tráfego de outras interfaces e raramente "time-out".
     last_pkt_t   = time.perf_counter()
     gap_detected = False
     t_gap_start  = None  # timestamp do último pkt antes do gap
@@ -95,49 +94,49 @@ def run(label, do_block=True):
     deadline     = t_block + MAX_WAIT_S + 10
 
     while time.perf_counter() < deadline:
-        try:
-            data, _ = sock.recvfrom(65536)
-            now     = time.perf_counter()
-            elapsed = now - t_block
+        r       = tap.recv()
+        now     = time.perf_counter()
+        elapsed = now - t_block
+        got_video = bool(r)        # tuplo (ts,len) é truthy; None/False não
 
+        if got_video:
+            vts = r[0]
             if not gap_detected:
-                t_gap_start = now
+                t_gap_start = vts
                 last_pkt_t  = now
                 if prev_t:
-                    pkts_before.append((now - prev_t) * 1000)
-                prev_t = now
+                    pkts_before.append((vts - prev_t) * 1000)
+                prev_t = vts
                 print(f"\r[CONV] t={elapsed:5.2f}s  DIRETO              ", end="", flush=True)
             else:
+                last_pkt_t = now
                 if t_converged is None:
-                    t_converged = now
+                    t_converged = vts
                     conv_ms = (t_converged - t_gap_start) * 1000
                     print(f"\n[CONV] *** CONVERGIU em {conv_ms:.0f} ms (t={elapsed:.2f}s) ***")
                 if prev_t:
-                    pkts_after.append((now - prev_t) * 1000)
-                prev_t = now
+                    pkts_after.append((vts - prev_t) * 1000)
+                prev_t = vts
                 print(f"\r[CONV] t={elapsed:5.2f}s  RELAY  pkts={len(pkts_after):4d}  ",
                       end="", flush=True)
                 if len(pkts_after) >= 50:
                     break
+            continue
 
-        except socket.timeout:
-            now     = time.perf_counter()
-            elapsed = now - t_block
-            gap     = now - last_pkt_t
-
-            if not gap_detected and gap > GAP_THRESHOLD:
-                gap_detected = True
-                print(f"\n[CONV] *** GAP DETECTADO  t={elapsed:.2f}s  gap={gap:.2f}s ***")
-
-            if gap_detected and t_converged is None:
-                print(f"\r[CONV] t={elapsed:5.2f}s  SEM VÍDEO  gap={gap:.2f}s    ",
-                      end="", flush=True)
-                if (now - t_block) > MAX_WAIT_S:
-                    print(f"\n[CONV] Timeout — relay não convergiu em {MAX_WAIT_S}s")
-                    break
+        # sem vídeo nesta iteração → avalia gap pelo relógio
+        gap = now - last_pkt_t
+        if not gap_detected and gap > GAP_THRESHOLD:
+            gap_detected = True
+            print(f"\n[CONV] *** GAP DETECTADO  t={elapsed:.2f}s  gap={gap:.2f}s ***")
+        if gap_detected and t_converged is None:
+            print(f"\r[CONV] t={elapsed:5.2f}s  SEM VÍDEO  gap={gap:.2f}s    ",
+                  end="", flush=True)
+            if (now - t_block) > MAX_WAIT_S:
+                print(f"\n[CONV] Timeout — relay não convergiu em {MAX_WAIT_S}s")
+                break
 
     print()
-    sock.close()
+    tap.close()
 
     if do_block:
         restore_link()
