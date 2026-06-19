@@ -36,7 +36,7 @@ def summarize(path):
     print(f"\n══ {os.path.basename(path)} ══")
     print(f"  Total pacotes      : {n}")
     print(f"  Protocolos         : {dict(protos)}")
-    print(f"  Beacons (RX ~107B) : {len(beacons)}")
+    print(f"  Beacons (RX 88-120B) : {len(beacons)}")
     print(f"  Vídeo (5000/MPEGTS): {len(video)}")
     print(f"  {'Nó':>3}  {'beacons':>8}  {'μ (ms)':>8}  {'σ (ms)':>8}  {'% no slot':>10}")
     for node in (1, 2, 3):

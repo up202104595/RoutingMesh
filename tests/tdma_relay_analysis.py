@@ -253,12 +253,13 @@ def _circular_mean(pos, period=FRAME_MS):
 
 def is_tdma_beacon(r):
     """
-    True se for um beacon MATRIX. Os beacons são UDP nas portas 7001-7003 com
-    TAMANHO FIXO de 107 bytes (3 nós), dissecados pelo Wireshark como RX. Filtra-se
-    pelo tamanho (≈107B) — igual ao tdma_sync_plot.py — para apanhar só os beacons
-    e excluir outros pacotes RX de tamanho diferente que poluiriam a posição.
+    True se for um beacon MATRIX. Os beacons são UDP nas portas 7001-7003,
+    dissecados pelo Wireshark como RX. O tamanho do beacon VARIA com o número de
+    nós activos na matriz: ~93 B com 2 nós (ex.: N2+N3), ~107 B com 3 nós. Por
+    isso o filtro é 88–120 B (e não fixo em 107) — caso contrário capturas de
+    apenas 2 nós são rejeitadas em silêncio e a análise dá "0 beacons".
     """
-    return r['proto'] == 'RX' and 100 <= r['plen'] <= 120
+    return r['proto'] == 'RX' and 88 <= r['plen'] <= 120
 
 
 def _n1_beacon_pos(rows):

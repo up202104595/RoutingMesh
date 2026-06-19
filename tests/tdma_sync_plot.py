@@ -64,7 +64,8 @@ def load_wireshark_csv(path):
       172.20.10.1 = N1 (slot 0)
       172.20.10.2 = N2 (slot 1)
       172.20.10.3 = N3 (slot 2)
-    Filtra apenas pacotes do protocolo RX (TDMA custom) com length 107.
+    Filtra pacotes do protocolo RX (TDMA custom) com length 88–120 B
+    (o tamanho do beacon varia com o número de nós: ~93 B com 2, ~107 B com 3).
     """
     import re
     packets = []
@@ -105,11 +106,13 @@ def load_wireshark_csv(path):
                     if proto not in ('RX', 'UDP'):
                         continue
 
-                # Filtra por length 107 (tamanho fixo dos beacons TDMA)
+                # Filtra pelo tamanho dos beacons TDMA. O tamanho VARIA com o
+                # número de nós activos na matriz: ~93 B (2 nós) a ~107 B (3 nós),
+                # por isso usa-se um intervalo (88–120 B) e não um valor fixo.
                 if len_col:
                     try:
                         pkt_len = int(row[len_col].strip())
-                        if pkt_len != 107:
+                        if not (88 <= pkt_len <= 120):
                             continue
                     except ValueError:
                         pass
