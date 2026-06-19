@@ -540,6 +540,10 @@ def main():
                         help='CSV(s) Wireshark — 1 ficheiro (sync) ou 2 (direct relay)')
     parser.add_argument('--proto', action='store_true',
                         help='Modo análise de protocolo TCP vs MPEG TS (directo vs relay)')
+    parser.add_argument('--last-rounds', type=int, default=0, metavar='N',
+                        help='Analisa só as últimas N rondas (como a Ana, Fig.4.34, '
+                             'usou 14) — janela curta onde a deriva/abanão do laço '
+                             'não acumulam e os slots aparecem nítidos.')
     args = parser.parse_args()
 
     for f in args.files:
@@ -566,6 +570,16 @@ def main():
         print("  Para beacons: capturar com filtro  udp portrange 7001-7003")
         print("  Para protocolo: usar flag --proto")
         sys.exit(1)
+
+    # ── Janela curta à Ana: ficar só com as últimas N rondas ────────────────
+    if args.last_rounds > 0:
+        t0_all = packets[0][0]
+        last_round = max(int((ts - t0_all) * 1000.0 // FRAME_MS) for ts, _ in packets)
+        lo = last_round - args.last_rounds + 1
+        packets = [(ts, n) for ts, n in packets
+                   if int((ts - t0_all) * 1000.0 // FRAME_MS) >= lo]
+        print(f"[INFO] Janela à Ana: últimas {args.last_rounds} rondas "
+              f"→ {len(packets)} pacotes")
 
     print(f"[INFO] {len(packets)} pacotes carregados ({len(set(n for _,n in packets))} nós)")
 
