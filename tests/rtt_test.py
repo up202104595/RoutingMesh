@@ -73,6 +73,7 @@ def client_mode(target, count, interval, label, topology):
         return
 
     avg   = statistics.mean(rtts)
+    med   = statistics.median(rtts)
     mn    = min(rtts)
     mx    = max(rtts)
     stdev = statistics.stdev(rtts) if len(rtts) > 1 else 0.0
@@ -88,6 +89,7 @@ def client_mode(target, count, interval, label, topology):
     print(f"  Received: {len(rtts)}  Lost: {lost}")
     print(f"  PDR:      {pdr:.1f}%")
     print(f"  RTT avg:  {avg:.3f} ms")
+    print(f"  RTT med:  {med:.3f} ms")
     print(f"  RTT min:  {mn:.3f} ms")
     print(f"  RTT max:  {mx:.3f} ms")
     print(f"  RTT std:  {stdev:.3f} ms")
@@ -103,6 +105,7 @@ def client_mode(target, count, interval, label, topology):
         "lost":      lost,
         "pdr_pct":   round(pdr, 2),
         "avg_ms":    round(avg, 3),
+        "median_ms": round(med, 3),
         "min_ms":    round(mn, 3),
         "max_ms":    round(mx, 3),
         "std_ms":    round(stdev, 3),

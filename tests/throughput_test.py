@@ -3,32 +3,28 @@
 throughput_test.py — Medição passiva de throughput do vídeo UDP
 
 Mede o tráfego de vídeo que JÁ está a fluir de N1→N3 (porta 5000),
-sem injectar tráfego extra. Usa SO_REUSEPORT para co-existir com
-o base_station.py que também escuta na porta 5000.
+sem injectar tráfego extra. Observa o tráfego com um sniffer raw (AF_PACKET)
+para NÃO ocupar a porta 5000 — assim co-existe com o ffplay/base_station.py sem
+"Address already in use" e sem roubar pacotes ao vídeo. Sem root, cai para o
+método antigo de SO_REUSEPORT (ver video_sniff.py).
 
 Uso (apenas no Nó 3, enquanto base_station.py corre):
-    python3 throughput_test.py --duration 15 --label "direct_1"
-    python3 throughput_test.py --duration 15 --label "relay_1" --topology relay
+    sudo python3 throughput_test.py --duration 15 --label "direct_1"
+    sudo python3 throughput_test.py --duration 15 --label "relay_1" --topology relay
+    # --iface wlp5s0  para fixar a interface do sniffer (default: todas)
 """
 
-import socket
 import time
 import json
-import struct
 import argparse
 import statistics
 
+from video_sniff import VideoTap
+
 VIDEO_PORT = 5000
 
-def measure(duration, label, topology, bind_ip="0.0.0.0"):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    except AttributeError:
-        pass
-    sock.bind((bind_ip, VIDEO_PORT))
-    sock.settimeout(0.1)
+def measure(duration, label, topology, iface=None):
+    tap = VideoTap(VIDEO_PORT, iface=iface)
 
     print(f"[THRU] Medição passiva porta {VIDEO_PORT}  duração={duration}s  label={label}")
     print(f"[THRU] A aguardar tráfego de vídeo...")
@@ -41,30 +37,31 @@ def measure(duration, label, topology, bind_ip="0.0.0.0"):
     deadline = time.perf_counter() + duration + 3.0  # 3s extra para arranque
 
     while time.perf_counter() < deadline:
-        try:
-            data, _ = sock.recvfrom(65536)
-            now = time.perf_counter()
-
-            if t_start is None:
-                t_start  = now
-                deadline = now + duration
-                print(f"[THRU] Primeiro pacote recebido — a medir {duration}s...")
-
-            rx_pkts  += 1
-            rx_bytes += len(data)
-            pkt_sizes.append(len(data))
-
-            if rx_pkts % 500 == 0:
-                elapsed = now - t_start
-                kbps    = (rx_bytes * 8) / elapsed / 1000 if elapsed > 0 else 0
-                print(f"\r[THRU] {rx_pkts} pkts  {kbps:.0f} kbps  {elapsed:.1f}s/{duration}s",
-                      end="", flush=True)
-
-        except socket.timeout:
+        r = tap.recv()
+        if r is None:                       # timeout do socket
             if t_start and time.perf_counter() > t_start + duration:
                 break
+            continue
+        if r is False:                      # trama capturada mas não é vídeo
+            continue
+        now, plen = r
 
-    sock.close()
+        if t_start is None:
+            t_start  = now
+            deadline = now + duration
+            print(f"[THRU] Primeiro pacote recebido — a medir {duration}s...")
+
+        rx_pkts  += 1
+        rx_bytes += plen
+        pkt_sizes.append(plen)
+
+        if rx_pkts % 500 == 0:
+            elapsed = now - t_start
+            kbps    = (rx_bytes * 8) / elapsed / 1000 if elapsed > 0 else 0
+            print(f"\r[THRU] {rx_pkts} pkts  {kbps:.0f} kbps  {elapsed:.1f}s/{duration}s",
+                  end="", flush=True)
+
+    tap.close()
     print()
 
     if not t_start or rx_pkts == 0:
@@ -111,7 +108,8 @@ if __name__ == "__main__":
     parser.add_argument("--duration", type=int,   default=15)
     parser.add_argument("--label",    default="test")
     parser.add_argument("--topology", default="direct", choices=["direct", "relay"])
-    parser.add_argument("--bind",     default="0.0.0.0")
+    parser.add_argument("--iface",    default=None,
+                        help="Interface do sniffer raw (default: todas)")
     args = parser.parse_args()
 
-    measure(args.duration, args.label, args.topology, args.bind)
+    measure(args.duration, args.label, args.topology, args.iface)

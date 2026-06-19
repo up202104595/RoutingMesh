@@ -2,35 +2,32 @@
 """
 tdma_timing_test.py — Análise de timing TDMA dos pacotes de vídeo
 
-Escuta passivamente a porta 5000 (SO_REUSEPORT) e regista o timestamp
-exato de cada pacote. Analisa os inter-arrivals para verificar se os
+Observa passivamente o vídeo na porta 5000 (sniffer raw AF_PACKET, NÃO ocupa a
+porta — co-existe com o ffplay sem "Address already in use") e regista o
+timestamp exato de cada pacote. Analisa os inter-arrivals para verificar se os
 pacotes chegam alinhados com as slots TDMA (frame=150ms, slot=50ms).
+Sem root cai para SO_REUSEPORT (ver video_sniff.py).
 
 Uso (no Nó 3, com vídeo a fluir):
-    python3 tests/tdma_timing_test.py --duration 30 --label "direct"
-    python3 tests/tdma_timing_test.py --duration 30 --label "relay"
+    sudo python3 tests/tdma_timing_test.py --duration 30 --label "direct"
+    sudo python3 tests/tdma_timing_test.py --duration 30 --label "relay"
+    # --iface wlp5s0  para fixar a interface do sniffer (default: todas)
 """
 
-import socket
 import time
 import json
 import argparse
 import statistics
+
+from video_sniff import VideoTap
 
 VIDEO_PORT   = 5000
 TDMA_SLOT_MS = 50.0    # duração de cada slot
 TDMA_FRAME_MS = 150.0  # duração da frame completa (3 nós)
 
 
-def measure(duration, label):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    except AttributeError:
-        pass
-    sock.bind(("0.0.0.0", VIDEO_PORT))
-    sock.settimeout(0.05)
+def measure(duration, label, iface=None):
+    tap = VideoTap(VIDEO_PORT, iface=iface)
 
     print(f"[TDMA] Label={label}  Duração={duration}s")
     print(f"[TDMA] A aguardar vídeo na porta {VIDEO_PORT}...")
@@ -40,23 +37,25 @@ def measure(duration, label):
     t_start = None
 
     while time.perf_counter() < deadline:
-        try:
-            _, _ = sock.recvfrom(65536)
-            now = time.perf_counter()
-            if t_start is None:
-                t_start = now
-                deadline = now + duration
-                print(f"[TDMA] Primeiro pacote — a medir {duration}s...")
-            timestamps.append(now)
-            if len(timestamps) % 200 == 0:
-                elapsed = now - t_start
-                print(f"\r[TDMA] {len(timestamps)} pkts  {elapsed:.1f}s/{duration}s",
-                      end="", flush=True)
-        except socket.timeout:
+        r = tap.recv()
+        if r is None:                       # timeout do socket
             if t_start and time.perf_counter() > t_start + duration:
                 break
+            continue
+        if r is False:                      # trama capturada mas não é vídeo
+            continue
+        now, _ = r
+        if t_start is None:
+            t_start = now
+            deadline = now + duration
+            print(f"[TDMA] Primeiro pacote — a medir {duration}s...")
+        timestamps.append(now)
+        if len(timestamps) % 200 == 0:
+            elapsed = now - t_start
+            print(f"\r[TDMA] {len(timestamps)} pkts  {elapsed:.1f}s/{duration}s",
+                  end="", flush=True)
 
-    sock.close()
+    tap.close()
     print()
 
     if len(timestamps) < 2:
@@ -176,5 +175,7 @@ if __name__ == "__main__":
                         help="Duração da medição em segundos (default: 30)")
     parser.add_argument("--label", default="direct",
                         help="Etiqueta para o ficheiro JSON")
+    parser.add_argument("--iface", default=None,
+                        help="Interface do sniffer raw (default: todas)")
     args = parser.parse_args()
-    measure(args.duration, args.label)
+    measure(args.duration, args.label, args.iface)
