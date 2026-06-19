@@ -509,7 +509,8 @@ void* tx_loop(void *arg) {
             uint64_t cur_round = now / round_us;
             if (cur_round != last_round) {
                 last_round = cur_round;
-                sync_adjust_slot(rp_ms);
+                /* NOTA: sync_adjust_slot() foi movido para o FIM do slot
+                 * (end_of_slot), como no tdma_syncronizeSlot() do Diogo. */
 
                 if (get_time_us() - start_time < STARTUP_GRACE_US) goto skip_loss;
 
@@ -691,6 +692,11 @@ void* tx_loop(void *arg) {
                    data->dst_id, next_hop, next_hop_ip, data->msg_id, data->data_len, sent);
             if (sent > 0) { pkts_sent++; bytes_sent += (uint64_t)sent; }
         }
+
+        /* END-OF-SLOT: sincroniza o slot UMA vez no fim do nosso slot, depois de
+         * ter recolhido os delays dos beacons dos vizinhos durante a ronda.
+         * É aqui que o Diogo chama tdma_syncronizeSlot() (end_of_slot_operations). */
+        sync_adjust_slot(rp_ms);
 
         float slot_use_pct    = (float)bytes_sent / (float)MAX_BYTES_SLOT * 100.0f;
         float throughput_kbps = (bytes_sent * 8.0f * 1000000.0f) / ((float)SLOT_DURATION_US * 1000.0f);
