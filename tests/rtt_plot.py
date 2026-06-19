@@ -23,6 +23,7 @@ Uso:
 
 import sys
 import os
+import re
 import json
 import argparse
 import glob
@@ -123,7 +124,13 @@ def main():
     ap.add_argument('--frame', type=float, default=FRAME_MS_DEFAULT,
                     help=f'duração do frame TDMA em ms (default {FRAME_MS_DEFAULT:.0f})')
     ap.add_argument('--out', default='.', help='pasta de saída dos PNG')
+    ap.add_argument('--title', default=None,
+                    help='título da figura (ex.: "RTT over the direct link"); '
+                         'substitui a etiqueta r1/r2 e dá nome ao ficheiro')
     args = ap.parse_args()
+
+    def _fname(s):
+        return re.sub(r'[^A-Za-z0-9._-]+', '_', s).strip('_')
 
     # expande globs (útil quando a shell não o faz)
     paths = []
@@ -155,14 +162,13 @@ def main():
         print_summary(label, samples, args.frame)
         all_samples.append(samples)
 
+        display = args.title or f"TDMA RTT — {label}"
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
-        plot_timeseries(a1, samples, args.frame, f'RTT per sequence — {label}')
-        plot_histogram(a2, samples, args.frame, f'RTT distribution — {label}')
-        fig.suptitle(f"TDMA RTT — {label}  "
-                     f"(n={len(samples)}, PDR {d.get('pdr_pct','?')}%)",
-                     fontsize=12, fontweight='bold')
+        plot_timeseries(a1, samples, args.frame, 'RTT per sequence')
+        plot_histogram(a2, samples, args.frame, 'RTT distribution')
+        fig.suptitle(display, fontsize=13, fontweight='bold')
         plt.tight_layout()
-        out = os.path.join(args.out, f"rtt_{label}.png")
+        out = os.path.join(args.out, f"{_fname(args.title) if args.title else 'rtt_'+label}.png")
         plt.savefig(out, dpi=150); plt.close()
         print(f"  [PLOT] {out}")
 
@@ -170,13 +176,13 @@ def main():
     if len(all_samples) > 1:
         agg = np.concatenate(all_samples)
         print_summary("AGGREGATE (all runs)", agg, args.frame)
+        agg_title = args.title or f"TDMA RTT — aggregate of {len(all_samples)} runs"
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
-        plot_timeseries(a1, agg, args.frame, 'RTT per sequence — aggregate')
-        plot_histogram(a2, agg, args.frame, 'RTT distribution — aggregate')
-        fig.suptitle(f"TDMA RTT — aggregate of {len(all_samples)} runs (n={len(agg)})",
-                     fontsize=12, fontweight='bold')
+        plot_timeseries(a1, agg, args.frame, 'RTT per sequence')
+        plot_histogram(a2, agg, args.frame, 'RTT distribution')
+        fig.suptitle(agg_title, fontsize=13, fontweight='bold')
         plt.tight_layout()
-        out = os.path.join(args.out, "rtt_agregado.png")
+        out = os.path.join(args.out, f"{_fname(args.title) if args.title else 'rtt_aggregate'}.png")
         plt.savefig(out, dpi=150); plt.close()
         print(f"  [PLOT] {out}")
 
