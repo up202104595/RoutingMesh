@@ -6,6 +6,10 @@ Requires=meshnode.service
 [Service]
 Type=simple
 WorkingDirectory=/home/pi/Documentos/RoutingMeshNet/RoutingMesh
+# Espera 3 min após o meshnode arrancar para a sincronização TDMA assentar
+# (os slots convergem) ANTES de ligar o vídeo, que compete com a convergência.
+# Ver GUIA.txt secção 0.1.
+ExecStartPre=/bin/sleep 180
 ExecStart=/usr/bin/python3 alphabot_node.py
 Restart=on-failure
 RestartSec=5

@@ -102,11 +102,22 @@ PASSO E — Capturar beacons no No 3 (Wireshark, filtro:  udp portrange 7001-700
 
 PASSO F — SO DEPOIS de o sync ter assentado, ligar o video:
 
-  No 1:  sudo systemctl start alphabot       # arranca o stream de video
+  IMPORTANTE: esperar ~3 MINUTOS apos arrancar o meshnode antes de ligar
+  o video/capturar. O transitorio de convergencia dos slots tem de passar.
+  - Via systemd: o alphabot.service ja espera 3 min automaticamente
+    (ExecStartPre=/bin/sleep 180) antes de arrancar o stream.
+  - Manualmente: espera ~3 min depois do meshnode e so depois corre o video.
+
+  No 1:  sudo systemctl start alphabot       # arranca o stream (espera 3 min sozinho)
   No 3:  python3 base_station.py             # ou ffplay (ver seccao 4)
 
 NOTA: se o sigma ficar grande (~30ms, slots a vaguear), o sync nao
       convergiu — guarda os logs [SYNC] dos 3 nos e analisa-os.
+
+NOTA CAPTURA: para capturar beacons (prova de slots), descarta sempre os
+      primeiros ~3 min (transitorio). Captura so depois de o delta do [SYNC]
+      ter assentado em valores pequenos. (Como a Ana: testes so com a rede
+      ja sincronizada e estavel.)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. COMPILAR
@@ -182,8 +193,9 @@ PASSO 1 — Meshnode em todos os nos (sempre primeiro):
   Raspberry Relay    (no 2):  sudo ./meshnode_arp 2 3
   PC                 (no 3):  sudo ./meshnode_arp 3 3
 
-PASSO 2 — AlphaBot na Raspberry 1 (depois do meshnode):
-  sudo python3 alphabot_node.py
+PASSO 2 — AlphaBot na Raspberry 1 (SO ~3 min DEPOIS do meshnode, p/ o sync assentar):
+  sleep 180 && sudo python3 alphabot_node.py
+  # (via systemd o alphabot.service ja espera 3 min sozinho)
 
 PASSO 3 — Base station no PC (por ultimo):
   python3 base_station.py
