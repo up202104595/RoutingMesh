@@ -215,6 +215,12 @@ def main():
     args = parser.parse_args()
 
     d = args.dir
+    if not os.path.isdir(d):
+        print(f"ERRO: pasta não encontrada: {d}")
+        print(f"  Estás em: {os.getcwd()}")
+        print(f"  Dica: se já estás dentro de tests/, usa só o nome da pasta, ex.:")
+        print(f"    python3 results_summary.py --dir results_AAAAMMDD_HHMMSS")
+        sys.exit(1)
     rtt_results  = load_jsons(os.path.join(d, "rtt_results_*.json"))
     conv_results = load_jsons(os.path.join(d, "convergence_*.json"))
     thru_results = load_jsons(os.path.join(d, "throughput_*.json"))
