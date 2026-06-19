@@ -77,6 +77,25 @@ restore_link() {
     info "Link direto restaurado"
 }
 
+# Confirma que o link DIRETO ao N1 está mesmo cortado. O IP FÍSICO (172.20.10.1)
+# só é alcançável em 1 salto L2 (não é relayado), por isso se o ping falhar o
+# bloqueio pegou. Reforça o bloqueio até 3x; avisa se não conseguir cortar
+# (limitação do testbed — iptables nem sempre corta à primeira).
+verify_blocked() {
+    for attempt in 1 2 3; do
+        if ! ping -c 1 -W 1 "$NODE1_PHY" &>/dev/null; then
+            info "Link direto confirmado CORTADO (ping a $NODE1_PHY falha)."
+            return 0
+        fi
+        warn "Link direto ainda ATIVO (tentativa $attempt) — a reforçar bloqueio..."
+        block_link
+        sleep 2
+    done
+    warn "ATENÇÃO: não foi possível cortar o link direto — as medições de relay"
+    warn "         podem estar contaminadas com tráfego direto (limitação iptables/testbed)."
+    return 1
+}
+
 # ── banner ────────────────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -163,6 +182,7 @@ for run in $(seq 1 "$RUNS"); do
     info "A bloquear link para medições em relay..."
     block_link
     sleep 5   # aguarda relay estabilizar
+    verify_blocked   # confirma que o corte pegou (senão o "relay" mede direto)
 
     echo ""
     info "RTT relay (N3 -> N2 -> N1)..."
