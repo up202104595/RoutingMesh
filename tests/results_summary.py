@@ -247,11 +247,26 @@ def main():
     report = "\n".join(out)
     print(report)
 
-    # guarda em ficheiro de texto
+    # guarda em ficheiro de texto (tolerante a falha de permissões —
+    # ex.: a pasta/ficheiro foi criada pelo run_all.sh com sudo, e agora
+    # corremos como utilizador normal). O relatório já foi impresso acima.
     summary_file = os.path.join(d, "results_summary.txt")
-    with open(summary_file, "w") as f:
-        f.write(report)
-    print(f"\n  Guardado em: {summary_file}")
+    try:
+        with open(summary_file, "w") as f:
+            f.write(report)
+        print(f"\n  Guardado em: {summary_file}")
+    except (PermissionError, OSError) as e:
+        fallback = os.path.join(os.getcwd(), "results_summary.txt")
+        try:
+            with open(fallback, "w") as f:
+                f.write(report)
+            print(f"\n  AVISO: sem permissão em {summary_file} ({e.errno}).")
+            print(f"  Guardado em: {fallback}")
+            print(f"  (dica: o ficheiro original é do root — apaga-o com "
+                  f"'sudo rm {summary_file}' ou corre com sudo)")
+        except OSError:
+            print(f"\n  AVISO: não foi possível guardar o relatório ({e}).")
+            print(f"  O relatório acima foi impresso na consola.")
 
 if __name__ == "__main__":
     main()
