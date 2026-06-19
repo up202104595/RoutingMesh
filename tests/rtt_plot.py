@@ -58,25 +58,22 @@ def split_clusters(samples, frame_ms):
 
 def print_summary(label, samples, frame_ms):
     if len(samples) == 0:
-        print(f"  [{label}] sem amostras")
+        print(f"  [{label}] no samples")
         return
     fast, slow, thr = split_clusters(samples, frame_ms)
     n = len(samples)
-    print(f"\n─── {label} ───────────────────────────────")
-    print(f"  n={n}  avg={samples.mean():.1f}  med={np.median(samples):.1f}  "
-          f"min={samples.min():.1f}  max={samples.max():.1f}  "
-          f"std={samples.std():.1f} ms")
+    print(f"\n--- {label} ---")
+    print(f"  n={n}  min={samples.min():.1f}  max={samples.max():.1f} ms")
     if len(fast) and len(slow):
         sep = slow.mean() - fast.mean()
-        print(f"  Cluster RÁPIDO (apanha a ronda): {len(fast):>3} pings "
-              f"({100*len(fast)/n:4.1f}%)  μ={fast.mean():.1f} ms")
-        print(f"  Cluster LENTO  (falha 1 ronda):  {len(slow):>3} pings "
-              f"({100*len(slow)/n:4.1f}%)  μ={slow.mean():.1f} ms")
-        print(f"  Separação entre clusters: {sep:.1f} ms  "
-              f"(≈ {sep/frame_ms:.2f} frame; esperado ≈ 1.0)")
+        print(f"  catches round (~1 slot): {len(fast):>3} ({100*len(fast)/n:4.1f}%)  "
+              f"center={fast.mean():.1f} ms")
+        print(f"  misses 1 round (+1 frame): {len(slow):>3} ({100*len(slow)/n:4.1f}%)  "
+              f"center={slow.mean():.1f} ms")
+        print(f"  cluster gap: {sep:.1f} ms  (~{sep/frame_ms:.2f} frame; expected 1.0)")
     else:
-        only = "RÁPIDO" if len(fast) else "LENTO"
-        print(f"  Distribuição unimodal (só cluster {only})")
+        only = "fast" if len(fast) else "slow"
+        print(f"  unimodal ({only} cluster only)")
 
 
 def plot_timeseries(ax, samples, frame_ms, title):
@@ -85,14 +82,14 @@ def plot_timeseries(ax, samples, frame_ms, title):
     ax.plot(x, samples, color='#90A4AE', lw=0.8, zorder=1)
     mask_fast = samples < thr
     ax.scatter(x[mask_fast],  samples[mask_fast],  s=16, color='#2196F3',
-               label='apanha a ronda (~1 slot)', zorder=2)
+               label='catches the round (~1 slot)', zorder=2)
     ax.scatter(x[~mask_fast], samples[~mask_fast], s=16, color='#F44336',
-               label='falha 1 ronda (+1 frame)', zorder=2)
+               label='misses 1 round (+1 frame)', zorder=2)
     if len(samples):
         ax.axhline(samples.min(), color='#2196F3', ls=':', lw=1, alpha=0.6)
         ax.axhline(samples.min() + frame_ms, color='#F44336', ls=':', lw=1,
-                   alpha=0.6, label=f'piso + 1 frame ({frame_ms:.0f} ms)')
-    ax.set_xlabel('Número de sequência do ping')
+                   alpha=0.6, label=f'floor + 1 frame ({frame_ms:.0f} ms)')
+    ax.set_xlabel('Ping sequence number')
     ax.set_ylabel('RTT (ms)')
     ax.set_title(title, fontsize=11, fontweight='bold')
     ax.grid(alpha=0.3)
@@ -104,12 +101,17 @@ def plot_histogram(ax, samples, frame_ms, title):
         return
     bins = np.arange(0, samples.max() + 10, 5)
     ax.hist(samples, bins=bins, color='#5C6BC0', alpha=0.85, edgecolor='none')
-    ax.axvline(np.median(samples), color='red', lw=1.6, ls='--',
-               label=f'mediana {np.median(samples):.0f} ms')
-    ax.axvline(samples.mean(), color='black', lw=1.6, ls=':',
-               label=f'média {samples.mean():.0f} ms')
+    fast, slow, thr = split_clusters(samples, frame_ms)
+    n = len(samples)
+    # mostra os DOIS clusters (centro + %), não média/mediana (não relevantes p/ bimodal)
+    if len(fast):
+        ax.axvline(fast.mean(), color='#2196F3', lw=1.8,
+                   label=f'catches round: {100*len(fast)/n:.0f}% @ {fast.mean():.0f} ms')
+    if len(slow):
+        ax.axvline(slow.mean(), color='#F44336', lw=1.8,
+                   label=f'misses 1 round: {100*len(slow)/n:.0f}% @ {slow.mean():.0f} ms')
     ax.set_xlabel('RTT (ms)')
-    ax.set_ylabel('Contagem')
+    ax.set_ylabel('Count')
     ax.set_title(title, fontsize=11, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
     ax.legend(fontsize=8)
@@ -132,10 +134,10 @@ def main():
         elif os.path.exists(f):
             paths.append(f)
         else:
-            print(f"[AVISO] nada corresponde a '{f}'")
+            print(f"[WARN] no match for '{f}'")
     if not paths:
-        print("ERRO: nenhum ficheiro encontrado.")
-        print("  Dica: os JSON ficam em tests/results_*/  — ex.:")
+        print("ERROR: no files found.")
+        print("  Hint: JSONs live in tests/results_*/  — e.g.:")
         print("    python3 tests/rtt_plot.py tests/results_*/rtt_results_*.json --out figs_rtt")
         sys.exit(1)
 
@@ -144,20 +146,20 @@ def main():
 
     for path in paths:
         if not os.path.exists(path):
-            print(f"ERRO: não encontrado: {path}"); continue
+            print(f"ERROR: not found: {path}"); continue
         d, samples = load(path)
         if len(samples) == 0:
-            print(f"[AVISO] {path}: sem campo 'samples' (regrava com rtt_test atualizado)")
+            print(f"[WARN] {path}: no 'samples' field (re-run with updated rtt_test)")
             continue
         label = d.get('label', os.path.basename(path))
         print_summary(label, samples, args.frame)
         all_samples.append(samples)
 
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
-        plot_timeseries(a1, samples, args.frame, f'RTT por sequência — {label}')
-        plot_histogram(a2, samples, args.frame, f'Distribuição RTT — {label}')
-        fig.suptitle(f"RTT TDMA — {label}  "
-                     f"(avg {samples.mean():.0f} ms, PDR {d.get('pdr_pct','?')}%)",
+        plot_timeseries(a1, samples, args.frame, f'RTT per sequence — {label}')
+        plot_histogram(a2, samples, args.frame, f'RTT distribution — {label}')
+        fig.suptitle(f"TDMA RTT — {label}  "
+                     f"(n={len(samples)}, PDR {d.get('pdr_pct','?')}%)",
                      fontsize=12, fontweight='bold')
         plt.tight_layout()
         out = os.path.join(args.out, f"rtt_{label}.png")
@@ -167,12 +169,11 @@ def main():
     # agregado de todas as runs
     if len(all_samples) > 1:
         agg = np.concatenate(all_samples)
-        print_summary("AGREGADO (todas as runs)", agg, args.frame)
+        print_summary("AGGREGATE (all runs)", agg, args.frame)
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
-        plot_timeseries(a1, agg, args.frame, 'RTT por sequência — agregado')
-        plot_histogram(a2, agg, args.frame, 'Distribuição RTT — agregado')
-        fig.suptitle(f"RTT TDMA — agregado de {len(all_samples)} runs "
-                     f"(n={len(agg)}, avg {agg.mean():.0f} ms)",
+        plot_timeseries(a1, agg, args.frame, 'RTT per sequence — aggregate')
+        plot_histogram(a2, agg, args.frame, 'RTT distribution — aggregate')
+        fig.suptitle(f"TDMA RTT — aggregate of {len(all_samples)} runs (n={len(agg)})",
                      fontsize=12, fontweight='bold')
         plt.tight_layout()
         out = os.path.join(args.out, "rtt_agregado.png")
