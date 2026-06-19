@@ -165,6 +165,14 @@ for run in $(seq 1 "$RUNS"); do
     sleep 5   # aguarda relay estabilizar
 
     echo ""
+    info "RTT relay (N3 -> N2 -> N1)..."
+    python3 "$TESTS_DIR/rtt_test.py" \
+        --mode client --target "$NODE1_IP" \
+        --count 100 --interval 0.1 \
+        --topology relay \
+        --label "relay_rtt_r${run}"
+
+    echo ""
     info "Throughput relay — a medir vídeo via relay 15s..."
     python3 "$TESTS_DIR/throughput_test.py" \
         --duration 15 --topology relay \

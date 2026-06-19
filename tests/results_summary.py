@@ -135,14 +135,44 @@ def table_throughput(results, out):
     out.append("\n└──────────────────────────┴────────┴──────────┴──────────┴──────────────┘")
 
 
-def comparison_table(rtt_results, out):
-    """Tabela comparativa direto vs relay — formato pronto para tese."""
+def comparison_table(rtt_results, thru_results, out):
+    """Tabela comparativa direto vs relay — formato pronto para tese.
+    Mostra RTT e Throughput separadamente; cada bloco aparece se tiver dados
+    de ambos os modos (direto e relay)."""
+    _comparison_rtt(rtt_results, out)
+    _comparison_throughput(thru_results, out)
+
+
+def _comparison_throughput(thru_results, out):
+    groups = group_by_base(thru_results)
+    direct = [r for base, runs in groups.items() if "direct" in base for r in runs]
+    relay  = [r for base, runs in groups.items() if "relay"  in base for r in runs]
+    if not direct or not relay:
+        return
+    d_kbps = avg([r["throughput_kbps"] for r in direct if "throughput_kbps" in r])
+    r_kbps = avg([r["throughput_kbps"] for r in relay  if "throughput_kbps" in r])
+    overhead_pct = (d_kbps - r_kbps) / d_kbps * 100 if d_kbps else 0.0
+    out.append(
+        "\n┌──────────────────────────────────────────────────────────────────────┐\n"
+        "│  Comparação Direto vs Relay — Throughput de vídeo                    │\n"
+        "├────────────────────┬────────────────────┬────────────────────────────┤\n"
+        "│  Métrica           │  Direto (N1→N3)    │  Relay  (N1→N2→N3)        │\n"
+        "├────────────────────┼────────────────────┼────────────────────────────┤\n"
+       f"│  Throughput (kbps) │ {d_kbps:>18.1f} │ {r_kbps:>18.1f}           │\n"
+       f"│  Overhead relay    │ {'':>18}  {overhead_pct:+.1f} %                     │\n"
+        "└────────────────────┴────────────────────┴────────────────────────────┘"
+    )
+
+
+def _comparison_rtt(rtt_results, out):
     groups = group_by_base(rtt_results)
 
     direct_runs = [r for base, runs in groups.items() if "direct" in base for r in runs]
     relay_runs  = [r for base, runs in groups.items() if "relay"  in base for r in runs]
 
     if not direct_runs or not relay_runs:
+        out.append("\n  RTT: faltam dados de relay (corre o rtt_test em modo relay — "
+                   "já incluído no run_all.sh actualizado).")
         return
 
     d_avg = avg([r.get("avg_ms",    0) for r in direct_runs])
@@ -198,7 +228,7 @@ def main():
     table_rtt(rtt_results, out)
 
     out.append("\n\n── 2. Comparação Direto vs Relay ─────────────────────────────────────")
-    comparison_table(rtt_results, out)
+    comparison_table(rtt_results, thru_results, out)
 
     out.append("\n\n── 3. Convergência de Topologia ──────────────────────────────────────")
     table_convergence(conv_results, out)
