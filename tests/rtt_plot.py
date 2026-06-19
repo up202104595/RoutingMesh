@@ -126,7 +126,18 @@ def main():
     # expande globs (útil quando a shell não o faz)
     paths = []
     for f in args.files:
-        paths.extend(sorted(glob.glob(f)) or [f])
+        m = sorted(glob.glob(f))
+        if m:
+            paths.extend(m)
+        elif os.path.exists(f):
+            paths.append(f)
+        else:
+            print(f"[AVISO] nada corresponde a '{f}'")
+    if not paths:
+        print("ERRO: nenhum ficheiro encontrado.")
+        print("  Dica: os JSON ficam em tests/results_*/  — ex.:")
+        print("    python3 tests/rtt_plot.py tests/results_*/rtt_results_*.json --out figs_rtt")
+        sys.exit(1)
 
     os.makedirs(args.out, exist_ok=True)
     all_samples = []
