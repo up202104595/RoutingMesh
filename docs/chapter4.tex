@@ -369,7 +369,21 @@ Video throughput was measured by streaming continuously from N1 to N3 and
 recording every video packet with a passive capture at N3 for 15\,s; because
 the capture does not occupy port~5000, it does not perturb the live stream.
 The test was repeated three times over the direct link and three times over
-the relay path. Table~\ref{tab:throughput} reports the means.
+the relay path. Figure~\ref{fig:throughput} and Table~\ref{tab:throughput}
+report the means.
+
+\vspace{0.4cm}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.65\textwidth]{throughput.png}
+\caption{Video stream throughput at N3, direct link vs.\ relay path (mean of
+three repetitions; error bars show the standard deviation). The relay reduces
+throughput by only $\approx 1\,\%$; the dashed line marks the 500\,kbps
+encoder target, which both conditions exceed because of MPEG-TS container
+overhead and the all-intra encoder configuration.}
+\label{fig:throughput}
+\end{figure}
+\vspace{0.5cm}
 
 \begin{table}[h]
 \centering

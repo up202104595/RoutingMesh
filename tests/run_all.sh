@@ -221,6 +221,10 @@ echo ""
 
 python3 "$TESTS_DIR/results_summary.py" --dir "$RESULTS_DIR"
 
+# deixa todos os ficheiros graváveis pelo utilizador (o run_all corre com sudo,
+# senão o results_summary.txt fica do root e não pode ser reescrito sem sudo)
+chmod -R a+rw "$RESULTS_DIR" 2>/dev/null || true
+
 echo ""
 info "Todos os JSON em: $RESULTS_DIR"
 info "Para rever: python3 tests/results_summary.py --dir $RESULTS_DIR"
