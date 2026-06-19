@@ -48,6 +48,11 @@ class PermissionFallback(Exception):
     pass
 
 
+class VideoTapError(Exception):
+    """Não foi possível abrir a captura (nem raw nem reuseport)."""
+    pass
+
+
 def _open_raw(iface=None):
     try:
         s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_ALL))
@@ -68,7 +73,16 @@ def _open_reuseport(port, bind_ip="0.0.0.0"):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     except (AttributeError, OSError):
         pass
-    s.bind((bind_ip, port))
+    try:
+        s.bind((bind_ip, port))
+    except OSError as e:
+        s.close()
+        raise VideoTapError(
+            f"não foi possível abrir a captura na porta {port} ({e}).\n"
+            f"         → corre o teste com 'sudo' (usa o sniffer raw, sem ocupar "
+            f"a porta).\n"
+            f"         O fallback sem root falha porque o ffplay já segura a "
+            f"porta {port}.")
     s.settimeout(_RECV_TIMEOUT)
     return s
 

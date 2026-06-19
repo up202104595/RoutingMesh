@@ -19,12 +19,16 @@ import json
 import argparse
 import statistics
 
-from video_sniff import VideoTap
+from video_sniff import VideoTap, VideoTapError
 
 VIDEO_PORT = 5000
 
 def measure(duration, label, topology, iface=None):
-    tap = VideoTap(VIDEO_PORT, iface=iface)
+    try:
+        tap = VideoTap(VIDEO_PORT, iface=iface)
+    except VideoTapError as e:
+        print(f"[THRU] {e}")
+        return
 
     print(f"[THRU] Medição passiva porta {VIDEO_PORT}  duração={duration}s  label={label}")
     print(f"[THRU] A aguardar tráfego de vídeo...")

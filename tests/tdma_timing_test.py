@@ -19,7 +19,7 @@ import json
 import argparse
 import statistics
 
-from video_sniff import VideoTap
+from video_sniff import VideoTap, VideoTapError
 
 VIDEO_PORT   = 5000
 TDMA_SLOT_MS = 50.0    # duração de cada slot
@@ -27,7 +27,11 @@ TDMA_FRAME_MS = 150.0  # duração da frame completa (3 nós)
 
 
 def measure(duration, label, iface=None):
-    tap = VideoTap(VIDEO_PORT, iface=iface)
+    try:
+        tap = VideoTap(VIDEO_PORT, iface=iface)
+    except VideoTapError as e:
+        print(f"[TDMA] {e}")
+        return
 
     print(f"[TDMA] Label={label}  Duração={duration}s")
     print(f"[TDMA] A aguardar vídeo na porta {VIDEO_PORT}...")
