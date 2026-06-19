@@ -38,6 +38,9 @@ def avg(lst):
 def stdev(lst):
     return statistics.stdev(lst) if len(lst) > 1 else 0.0
 
+def median(lst):
+    return statistics.median(lst) if lst else 0.0
+
 def fmt(v, dec=2):
     return f"{v:.{dec}f}" if isinstance(v, (int, float)) else "N/A"
 
@@ -60,24 +63,25 @@ def table_rtt(results, out):
         return
 
     header = (
-        "\n┌──────────────────────────┬────────┬────────┬────────┬────────┬────────┬──────────┐\n"
-        "│  Cenário                 │  Runs  │Avg(ms) │Min(ms) │Max(ms) │Std(ms) │Jitter(ms)│\n"
-        "├──────────────────────────┼────────┼────────┼────────┼────────┼────────┼──────────┤"
+        "\n┌──────────────────────────┬────────┬────────┬────────┬────────┬────────┬────────┬──────────┐\n"
+        "│  Cenário                 │  Runs  │Avg(ms) │Med(ms) │Min(ms) │Max(ms) │Std(ms) │Jitter(ms)│\n"
+        "├──────────────────────────┼────────┼────────┼────────┼────────┼────────┼────────┼──────────┤"
     )
     out.append(header)
     for base, runs in sorted(groups.items()):
         n     = len(runs)
         avgs  = avg([r["avg_ms"]    for r in runs])
+        # mediana: usa o median_ms por run (cai para avg_ms se faltar — JSON antigo)
+        meds  = median([r.get("median_ms", r["avg_ms"]) for r in runs])
         mins  = min(r["min_ms"]    for r in runs)
         maxs  = max(r["max_ms"]    for r in runs)
         stds  = avg([r["std_ms"]   for r in runs])
         jits  = avg([r["jitter_ms"] for r in runs])
-        topo  = runs[0].get("topology","?")
         label = base[:26]
-        line = (f"\n│  {label:<24}  │ {n:>6} │{avgs:>7.2f} │{mins:>7.2f} │"
+        line = (f"\n│  {label:<24}  │ {n:>6} │{avgs:>7.2f} │{meds:>7.2f} │{mins:>7.2f} │"
                 f"{maxs:>7.2f} │{stds:>7.2f} │{jits:>9.3f} │")
         out.append(line)
-    out.append("\n└──────────────────────────┴────────┴────────┴────────┴────────┴────────┴──────────┘")
+    out.append("\n└──────────────────────────┴────────┴────────┴────────┴────────┴────────┴────────┴──────────┘")
 
 
 def table_convergence(results, out):
@@ -87,9 +91,10 @@ def table_convergence(results, out):
 
     groups = group_by_base(results)
     header = (
-        "\n┌──────────────────────┬────────┬─────────────┬──────────────┬──────────────┐\n"
-        "│  Cenário             │  Runs  │  Conv.(ms)  │IA_antes(ms)  │IA_depois(ms) │\n"
-        "├──────────────────────┼────────┼─────────────┼──────────────┼──────────────┤"
+        "\n┌──────────────────────┬────────┬─────────────────┬──────────────┬──────────────┐\n"
+        "│  Cenário             │  Runs  │ Conv. med (ms)  │IA_antes(ms)  │IA_depois(ms) │\n"
+        "│                      │        │  [min–max]      │              │              │\n"
+        "├──────────────────────┼────────┼─────────────────┼──────────────┼──────────────┤"
     )
     out.append(header)
     for base, runs in sorted(groups.items()):
@@ -103,13 +108,14 @@ def table_convergence(results, out):
                   for r in runs
                   if isinstance(r.get("inter_arrival_after_ms"), dict)
                   and "avg" in r["inter_arrival_after_ms"]]
-        conv_s = f"{avg(convs):.0f} ± {stdev(convs):.0f}" if convs else "N/A"
+        # mediana é robusta ao outlier (ex.: uma run converge em 453ms vs ~2930ms)
+        conv_s = f"{median(convs):.0f} [{min(convs):.0f}-{max(convs):.0f}]" if convs else "N/A"
         bef_s  = f"{avg(befs):.1f}" if befs else "N/A"
         aft_s  = f"{avg(afts):.1f}" if afts else "N/A"
         label  = base[:22]
-        line   = (f"\n│  {label:<20}  │ {n:>6} │ {conv_s:>11} │ {bef_s:>12} │ {aft_s:>12} │")
+        line   = (f"\n│  {label:<20}  │ {n:>6} │ {conv_s:>15} │ {bef_s:>12} │ {aft_s:>12} │")
         out.append(line)
-    out.append("\n└──────────────────────┴────────┴─────────────┴──────────────┴──────────────┘")
+    out.append("\n└──────────────────────┴────────┴─────────────────┴──────────────┴──────────────┘")
 
 
 def table_throughput(results, out):
