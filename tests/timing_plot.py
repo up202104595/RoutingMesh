@@ -73,7 +73,7 @@ def main():
     n = len(topos)
     fig, axes = plt.subplots(1, n, figsize=(7 * n, 4.5), squeeze=False)
 
-    titles = {"direct": "Direto (N1→N3)", "relay": "Relay (N1→N2→N3)"}
+    titles = {"direct": "Direct (N1→N3)", "relay": "Relay (N1→N2→N3)"}
     colors = {"direct": "#2196F3", "relay": "#2E7D32"}
 
     for ax, topo in zip(axes[0], topos):
@@ -95,12 +95,12 @@ def main():
                     bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
         ax.set_xlim(0, max(FRAME_MS * 1.3, max(los) + args.bucket))
         ax.set_xlabel("Inter-arrival (ms)")
-        ax.set_ylabel("Nº de pacotes")
+        ax.set_ylabel("Number of packets")
         ax.set_title(titles[topo], fontsize=12, fontweight="bold")
         ax.grid(axis="y", alpha=0.3)
 
-    fig.suptitle("Timing TDMA do vídeo — distribuição bimodal de inter-arrivals\n"
-                 "rajada no slot (0–10 ms) + silêncio de 1 frame (~140–150 ms)",
+    fig.suptitle("Video TDMA timing — bimodal inter-arrival distribution\n"
+                 "burst within the slot (0–10 ms) + one-frame gap (~140–150 ms)",
                  fontsize=12, fontweight="bold")
     plt.tight_layout()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

@@ -5,7 +5,8 @@
 %% Figuras esperadas no Overleaf:
 %%   RTT_over_the_direct_link.png   (\ref{fig:rtt-direct})
 %%   RTT_over_the_relay_path.png    (\ref{fig:rtt-relay})
-%%   ia_direct.png / ia_relay.png   (\ref{fig:ia-direct}, \ref{fig:ia-relay})
+%%   ia_timing.png                  (\ref{fig:ia})  — combinada direto vs relay
+%%   throughput.png                 (\ref{fig:throughput})
 %%   slot_occupancy.png             (\ref{fig:slots})
 
 \chapter{Experimental Evaluation}
@@ -481,19 +482,21 @@ most effective way to reduce convergence.
 
 To verify that the relay preserves the temporal structure of the video stream,
 the inter-arrival times of consecutive video packets were extracted from the
-captures over a 30\,s window, separately for the direct and relay conditions.
-Figures~\ref{fig:ia-direct} and~\ref{fig:ia-relay} show the histograms.
+captures over a 30\,s window, for both the direct and relay conditions.
+Figure~\ref{fig:ia} shows the two histograms side by side.
 
 \vspace{0.4cm}
 \begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{ia_direct.png}
-\caption{Inter-arrival histogram of video packets at N3, direct link, over
-30\,s. The distribution is strongly bimodal: a dominant peak at $<10$\,ms
-(packets transmitted back-to-back within one TDMA burst) and a second peak at
-$\approx 140$--$150$\,ms (the inter-burst gap of one frame, during which N2
-and N3 hold the channel and N1 cannot transmit).}
-\label{fig:ia-direct}
+\includegraphics[width=\textwidth]{ia_timing.png}
+\caption{Inter-arrival histograms of video packets at N3, direct link (left)
+and relay path (right), over 30\,s. Both distributions are strongly bimodal
+and practically identical: a dominant peak at $<10$\,ms (packets transmitted
+back-to-back within one TDMA burst) and a second peak at $\approx
+140$--$150$\,ms (the inter-burst gap of one frame, during which N2 and N3 hold
+the channel and N1 cannot transmit). The relay preserves the burst structure
+of the stream.}
+\label{fig:ia}
 \end{figure}
 \vspace{0.5cm}
 
@@ -509,20 +512,8 @@ n_{\mathrm{pkts}} = \frac{558{,}000 \times 0.150}{8 \times 1316} \approx 8\,\tex
 \end{equation}
 consistent with the observed burst size of 8--9 packets.
 
-\vspace{0.4cm}
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{ia_relay.png}
-\caption{Inter-arrival histogram of video packets at N3, relay path, over
-30\,s. The bimodal structure is preserved identically to the direct link in
-Figure~\ref{fig:ia-direct}: the relay shifts the absolute arrival time of each
-burst by about one slot, but leaves the intra-burst and inter-burst timing
-unchanged.}
-\label{fig:ia-relay}
-\end{figure}
-\vspace{0.5cm}
-
-The relay histogram is statistically indistinguishable from the direct one:
+The relay histogram (Figure~\ref{fig:ia}, right) is statistically
+indistinguishable from the direct one:
 the burst fraction and the inter-burst gap are identical, and only the rare
 tail differs (Table~\ref{tab:ia}). The relay forwards each packet within the
 same slot in which it arrives, preserving the TDMA burst structure of the
