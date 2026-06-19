@@ -56,6 +56,7 @@ node, with a 5\,ms guard interval at the end of each slot. Slot~$i$ is
 assigned to node~$i$, giving the fixed ordering
 $[\text{N1}, \text{N2}, \text{N3}]$ shown in Figure~\ref{fig:frame}.
 
+\vspace{0.4cm}
 \begin{figure}[H]
 \centering
 \fbox{\parbox{0.95\textwidth}{\centering\vspace{1.4cm}
@@ -66,6 +67,7 @@ is divided into three 50\,ms slots; each node transmits only within its own
 slot.}
 \label{fig:frame}
 \end{figure}
+\vspace{0.5cm}
 
 All three nodes were placed on a laboratory bench within mutual radio range,
 so that any pair could communicate directly. This is a deliberate constraint:
@@ -87,8 +89,8 @@ Table~\ref{tab:hardware} lists the hardware of each node.
 \toprule
 \textbf{Component} & \textbf{N1 (Robot)} & \textbf{N2 (Relay)} & \textbf{N3 (Base Station)} \\
 \midrule
-Platform         & AlphaBot2-Pi    & Raspberry Pi 4B & Laptop (Ubuntu 22.04) \\
-Processor        & RPi 4B, 4\,GB   & RPi 4B, 4\,GB   & Intel Core i7 \\
+Platform         & AlphaBot2-Pi    & Raspberry Pi 5  & Laptop (Ubuntu 22.04) \\
+Processor        & RPi 5, 8\,GB    & RPi 5, 8\,GB    & Intel Core i7 \\
 Wireless         & Wi-Fi (ad-hoc)  & Wi-Fi (ad-hoc)  & Wi-Fi (ad-hoc) \\
 Camera           & Pi Camera v2    & ---             & --- \\
 Motor driver     & TB6612FNG       & ---             & --- \\
@@ -99,11 +101,11 @@ Gamepad          & ---             & ---             & DualShock 4 (USB) \\
 \end{table}
 
 \textbf{Node~1 (N1) --- Robot.} An AlphaBot2-Pi differential-drive robot with
-a Raspberry Pi~4B and a Pi Camera Module~v2. N1 runs the RA-TDMAs+ node
+a Raspberry Pi~5 and a Pi Camera Module~v2. N1 runs the RA-TDMAs+ node
 software and \texttt{alphabot\_node.py}, which manages video streaming, motor
 control, and telemetry.
 
-\textbf{Node~2 (N2) --- Relay.} A Raspberry Pi~4B running only the RA-TDMAs+
+\textbf{Node~2 (N2) --- Relay.} A Raspberry Pi~5 running only the RA-TDMAs+
 node software. It originates and consumes no application data; it forwards
 traffic between N1 and N3 when the direct link is unavailable.
 
@@ -112,9 +114,10 @@ the RA-TDMAs+ node software and \texttt{base\_station.py}, which displays the
 incoming video and translates DualShock~4 input into teleoperation commands.
 All measurements were taken at N3.
 
-The AlphaBot2-Pi was chosen because it matches the hardware used by
-Morais~\cite{morais2024synchronization}, enabling comparison under identical
-physical conditions.
+The AlphaBot2-Pi platform was chosen because it matches the mobile robot used
+by Morais~\cite{morais2024synchronization}, enabling comparison under
+equivalent physical conditions; the on-board single-board computers were
+Raspberry Pi~5 units.
 
 \subsection{Network and Software Configuration}
 \label{subsec:netconfig}
@@ -280,6 +283,7 @@ round-trip samples were recorded at N3. The test was performed over the direct
 link and over the relay path. Figure~\ref{fig:rtt-direct} shows the result for
 the direct link.
 
+\vspace{0.4cm}
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{RTT_over_the_direct_link.png}
@@ -292,6 +296,7 @@ strongly bimodal, with the two clusters separated by exactly one TDMA frame
 quantisation.}
 \label{fig:rtt-direct}
 \end{figure}
+\vspace{0.5cm}
 
 The RTT does not concentrate around a single value; it splits into two
 well-separated clusters with an empty band between roughly 60 and 190\,ms.
@@ -312,6 +317,7 @@ separately instead (Table~\ref{tab:rtt}).
 
 The same test over the relay path is shown in Figure~\ref{fig:rtt-relay}.
 
+\vspace{0.4cm}
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{RTT_over_the_relay_path.png}
@@ -322,6 +328,7 @@ same two clusters, the same one-frame separation. Relaying therefore adds no
 significant latency to the control channel.}
 \label{fig:rtt-relay}
 \end{figure}
+\vspace{0.5cm}
 
 The relay distribution is practically identical to the direct one: the same
 two clusters and the same one-frame separation. Forwarding the control packet
@@ -463,6 +470,7 @@ the inter-arrival times of consecutive video packets were extracted from the
 captures over a 30\,s window, separately for the direct and relay conditions.
 Figures~\ref{fig:ia-direct} and~\ref{fig:ia-relay} show the histograms.
 
+\vspace{0.4cm}
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{ia_direct.png}
@@ -473,6 +481,7 @@ $\approx 140$--$150$\,ms (the inter-burst gap of one frame, during which N2
 and N3 hold the channel and N1 cannot transmit).}
 \label{fig:ia-direct}
 \end{figure}
+\vspace{0.5cm}
 
 The distribution has two peaks: $\approx 88\,\%$ of inter-arrivals fall below
 10\,ms (packets within the same burst) and $\approx 11\,\%$ fall in the
@@ -486,6 +495,7 @@ n_{\mathrm{pkts}} = \frac{558{,}000 \times 0.150}{8 \times 1316} \approx 8\,\tex
 \end{equation}
 consistent with the observed burst size of 8--9 packets.
 
+\vspace{0.4cm}
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{ia_relay.png}
@@ -496,6 +506,7 @@ burst by about one slot, but leaves the intra-burst and inter-burst timing
 unchanged.}
 \label{fig:ia-relay}
 \end{figure}
+\vspace{0.5cm}
 
 The relay histogram is statistically indistinguishable from the direct one:
 the burst fraction and the inter-burst gap are identical, and only the rare
@@ -534,6 +545,7 @@ structure. The beacons captured at N3 were wrapped to the 150\,ms frame and
 attributed to their source node; Figure~\ref{fig:slots} shows the result over
 a sequence of rounds.
 
+\vspace{0.4cm}
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{slot_occupancy.png}
@@ -544,6 +556,7 @@ N1\,$\to$\,N2\,$\to$\,N3, separated from the next by approximately one slot
 that the nodes respect the TDMA schedule.}
 \label{fig:slots}
 \end{figure}
+\vspace{0.5cm}
 
 The three nodes occupy three disjoint regions in the cyclic order
 N1\,$\to$\,N2\,$\to$\,N3, each separated from the next by approximately one
