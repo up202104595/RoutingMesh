@@ -14,10 +14,13 @@ Problema que resolve:
       outro com nada — a medição rouba pacotes ao vídeo e fica errada.
 
 Solução:
-  Um socket AF_PACKET (raw) observa as tramas no fio e filtra só o UDP destinado
-  à porta de vídeo. NÃO faz bind à porta 5000 → nunca colide e NÃO rouba pacotes
-  ao ffplay. Requer root (CAP_NET_RAW); sem root cai automaticamente para o
-  método antigo de SO_REUSEPORT.
+  Um socket AF_PACKET em modo SOCK_DGRAM (cooked) observa os pacotes e o kernel
+  REMOVE o cabeçalho de link — os dados começam sempre no cabeçalho IP, quer a
+  interface seja Ethernet (wlp5s0) quer TUN (tun0, sem Ethernet). Isto é crucial:
+  o vídeo UDP/5000 (IPs 10.0.0.x) é entregue na tun0 já desencapsulado do TDMA,
+  e a tun0 NÃO tem cabeçalho Ethernet. Captura sem fazer bind à porta 5000 → nunca
+  colide com o ffplay e NÃO lhe rouba pacotes. Requer root (CAP_NET_RAW); sem root
+  cai automaticamente para o método antigo de SO_REUSEPORT.
 
 Uso (no chamador):
     tap = VideoTap(5000, iface="wlp5s0")   # iface opcional (None = todas)
@@ -54,8 +57,14 @@ class VideoTapError(Exception):
 
 
 def _open_raw(iface=None):
+    """
+    AF_PACKET em modo SOCK_DGRAM (cooked): o kernel remove o cabeçalho de link,
+    por isso recv() devolve o pacote a começar no cabeçalho IP — funciona tanto
+    em Ethernet (wlp5s0) como em TUN (tun0, que não tem Ethernet). Sem bind a
+    interface, captura de todas; com iface, só dessa.
+    """
     try:
-        s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_ALL))
+        s = socket.socket(socket.AF_PACKET, socket.SOCK_DGRAM, socket.htons(ETH_P_ALL))
     except PermissionError as e:
         raise PermissionFallback(f"sem permissão para AF_PACKET ({e}) — corre com sudo")
     except AttributeError:
@@ -87,36 +96,30 @@ def _open_reuseport(port, bind_ip="0.0.0.0"):
     return s
 
 
-def _udp_payload_len_to_port(frame, want_dport):
+def _udp_payload_len_to_port(pkt, want_dport):
     """
-    Recebe uma trama Ethernet crua e devolve o tamanho do PAYLOAD UDP (bytes de
-    aplicação, = len que o recvfrom devolveria) se for UDP destinado a
-    `want_dport`. Caso contrário devolve None.
+    Recebe um pacote a começar no cabeçalho IP (modo SOCK_DGRAM já removeu o
+    cabeçalho de link) e devolve o tamanho do PAYLOAD UDP (bytes de aplicação,
+    = len que o recvfrom devolveria) se for IPv4/UDP destinado a `want_dport`.
+    Caso contrário devolve None.
     """
-    n = len(frame)
-    if n < 14:
+    n = len(pkt)
+    if n < 20:
         return None
-    eth_proto = struct.unpack("!H", frame[12:14])[0]
-    off = 14
-    if eth_proto == 0x8100:           # tag VLAN 802.1Q
-        if n < 18:
-            return None
-        eth_proto = struct.unpack("!H", frame[16:18])[0]
-        off = 18
-    if eth_proto != ETH_P_IP:
+    if (pkt[0] >> 4) != 4:            # só IPv4
         return None
-    if n < off + 20:
+    ihl = (pkt[0] & 0x0F) * 4
+    if ihl < 20:
         return None
-    ihl = (frame[off] & 0x0F) * 4
-    if frame[off + 9] != 17:          # protocolo != UDP
+    if pkt[9] != 17:                  # protocolo != UDP
         return None
-    udp_off = off + ihl
+    udp_off = ihl
     if n < udp_off + 8:
         return None
-    dport = struct.unpack("!H", frame[udp_off + 2:udp_off + 4])[0]
+    dport = struct.unpack("!H", pkt[udp_off + 2:udp_off + 4])[0]
     if dport != want_dport:
         return None
-    udp_len = struct.unpack("!H", frame[udp_off + 4:udp_off + 6])[0]
+    udp_len = struct.unpack("!H", pkt[udp_off + 4:udp_off + 6])[0]
     return max(0, udp_len - 8)         # tira o cabeçalho UDP (8 B)
 
 
