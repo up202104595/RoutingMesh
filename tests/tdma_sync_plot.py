@@ -310,11 +310,11 @@ def plot_histogram(wrapped, out_path):
     print(f"[PLOT] Histograma guardado: {out_path}")
 
 # ── Estatísticas por nó ───────────────────────────────────────────────────────
-def print_stats(wrapped):
-    print("\n─── Estatísticas de sincronização TDMA ───────────────────────────")
+def print_stats(wrapped, title="Estatísticas de sincronização TDMA"):
+    print(f"\n─── {title} ───────────────────")
     print(f"{'Nó':>4}  {'Slot esperado':>14}  {'N pkts':>7}  {'μ (ms)':>8}  "
-          f"{'σ (ms)':>8}  {'% dentro slot':>14}")
-    print("─" * 68)
+          f"{'σ circ':>8}  {'% dentro slot':>14}  {'veredito':>9}")
+    print("─" * 80)
     results = {}
     for node in [1, 2, 3]:
         positions = wrapped.get(node, [])
@@ -322,17 +322,21 @@ def print_stats(wrapped):
             print(f"   N{node}   —  sem dados")
             continue
         arr = np.array(positions)
-        mu  = np.mean(arr)
-        sig = np.std(arr)
+        mu  = _circ_mean(arr)         # média CIRCULAR (lida com o wrap 0/150)
+        sig = _circ_std(arr)          # σ CIRCULAR (não enganado pelo wrap)
         sl_s = SLOT_START[node]
         sl_e = sl_s + SLOT_MS
         inside = np.sum((arr >= sl_s) & (arr < sl_e))
         pct = 100.0 * inside / len(arr)
+        # veredito: cluster apertado (σ<10ms) E maioria no slot certo (>80%)
+        verdict = 'OK' if (sig < 10 and pct > 80) else \
+                  ('LIMITE' if (sig < 18 and pct > 50) else 'DESSINC')
         print(f"   N{node}   {sl_s:.0f}–{sl_e:.0f} ms      {len(arr):>7}  {mu:>8.2f}  "
-              f"{sig:>8.2f}  {pct:>13.1f}%")
-        results[f'N{node}'] = {'n': len(arr), 'mean_ms': round(mu,2),
-                                'std_ms': round(sig,2), 'pct_in_slot': round(pct,1)}
-    print("─" * 68)
+              f"{sig:>8.2f}  {pct:>13.1f}%  {verdict:>9}")
+        results[f'N{node}'] = {'n': len(arr), 'mean_ms': round(float(mu),2),
+                                'std_circ_ms': round(float(sig),2),
+                                'pct_in_slot': round(pct,1), 'verdict': verdict}
+    print("─" * 80)
     return results
 
 
@@ -366,50 +370,33 @@ def _drift_rate_ms_per_s(packets, ref_node):
     return slope
 
 
-def print_relative_stats(packets):
-    """
-    Métrica CORRETA para sincronização RELATIVA (RA-TDMA+): a separação entre os
-    beacons de cada nó e os do nó de referência, medida ronda a ronda. É
-    INVARIANTE à deriva do frame — se a separação observada for ~50 ms (nós
-    adjacentes) com σ pequeno, os nós ESTÃO sincronizados entre si, por muito que
-    o frame inteiro esteja a rodar em wall-clock.
-    """
-    times = defaultdict(list)
-    for ts, node in packets:
-        times[node].append(ts)
-    nodes = sorted(times)
-    if len(nodes) < 2:
-        print("\n[REL] Só um nó na captura — sem separação relativa para medir.")
-        return
-    ref = nodes[0]
-    ref_t = np.array(sorted(times[ref]))
+def global_drift_rate(packets):
+    """Ritmo de deriva GLOBAL do frame (ms/s). No RA-TDMA+ do Diogo todos os nós
+    avançam o slot ~igual por ronda (ele NÃO compensa a latência de transmissão:
+    'delay_ms -= 0'), por isso o frame inteiro roda em conjunto. Estima-se pelo nó
+    com mais beacons (mais robusto)."""
+    by_node = defaultdict(int)
+    for _, node in packets:
+        by_node[node] += 1
+    if not by_node:
+        return 0.0
+    ref = max(by_node, key=by_node.get)
+    d = _drift_rate_ms_per_s(packets, ref)
+    return 0.0 if d is None else d
 
-    drift = _drift_rate_ms_per_s(packets, ref)
-    print("\n─── Sincronização RELATIVA (invariante à deriva do frame) ──────────")
-    if drift is not None:
-        print(f"   Deriva do frame (ref N{ref}): {drift:+.2f} ms/s  "
-              f"(≈ rotação do frame em wall-clock; >0 é normal e não é dessync)")
-    print(f"   {'Par':>8}  {'esperado':>9}  {'observado μ':>12}  {'σ circ':>8}  "
-          f"{'avaliação':>12}")
-    print("─" * 64)
-    for node in nodes:
-        if node == ref:
-            continue
-        seps = []
-        for t in times[node]:
-            i = int(np.argmin(np.abs(ref_t - t)))
-            seps.append(((t - ref_t[i]) * 1000.0) % FRAME_MS)
-        expected = ((node - ref) * SLOT_MS) % FRAME_MS
-        mu  = _circ_mean(seps)
-        sig = _circ_std(seps)
-        # erro de alinhamento relativo (distância circular ao esperado)
-        err = abs(((mu - expected + FRAME_MS / 2) % FRAME_MS) - FRAME_MS / 2)
-        verdict = 'OK' if (err < 10 and sig < 12) else ('LIMITE' if err < 20 else 'DESSINC')
-        print(f"   N{node}–N{ref}  {expected:>7.0f}ms  {mu:>10.1f}ms  {sig:>6.1f}ms  "
-              f"{verdict:>12}")
-    print("─" * 64)
-    print("   Interpretação: erro<10ms & σ<12ms = sincronizados; a posição")
-    print("   ABSOLUTA do slot (tabela acima) não importa em sync relativa.")
+
+def derotate(packets, drift):
+    """Remove a rotação linear do frame: devolve os pacotes com timestamps
+    'des-rodados', de modo a anular a deriva do frame (drift ms/s). Equivale a
+    capturar só poucas rondas, como a Ana fez na Fig. 4.34 — assim a posição
+    wrapped deixa de esborratar e cada nó assenta no seu slot. NÃO altera a
+    sincronização RELATIVA entre nós (todos rodam juntos), só tira a rotação
+    comum para a tornar visível."""
+    if not packets:
+        return packets
+    t0 = packets[0][0]
+    # ts' = ts - drift_ms_per_s * (ts - t0) / 1000  (em segundos)
+    return [(ts - drift * (ts - t0) / 1000.0, node) for ts, node in packets]
 
 
 # ── Análise de protocolo: TCP (directo) vs UDP/MPEG TS (relay) ────────────────
@@ -582,20 +569,39 @@ def main():
 
     print(f"[INFO] {len(packets)} pacotes carregados ({len(set(n for _,n in packets))} nós)")
 
+    base = os.path.splitext(path)[0]
+
+    # ── (1) Absoluto (wall-clock cru) ───────────────────────────────────────
+    # Numa captura LONGA o frame roda (deriva do Diogo) e isto esborrata a
+    # posição — útil só para ver a deriva, não para validar a sincronização.
     offset  = frame_offset(packets)
     wrapped = wrap_to_frame(packets, offset)
-    stats   = print_stats(wrapped)
-    print_relative_stats(packets)
+    stats   = print_stats(wrapped, title="ABSOLUTO (wall-clock) — afetado pela deriva")
 
-    base = os.path.splitext(path)[0]
-    plot_rounds    (packets, base + '_rounds.png', offset=offset)
-    plot_scatter   (wrapped, base + '_scatter.png')
-    plot_histogram (wrapped, base + '_histogram.png')
+    drift = global_drift_rate(packets)
+    print(f"\n[DERIVA] Frame a rodar a {drift:+.2f} ms/s — comportamento do "
+          f"RA-TDMA+ do Diogo (não compensa latência de TX).")
+
+    # ── (2) Des-rotado (validação à Ana, Fig. 4.34) ─────────────────────────
+    # Tira a rotação comum do frame (que NÃO afeta a sincronização entre nós) e
+    # revela cada nó no seu slot, como numa captura curta de poucas rondas.
+    packets_d = derotate(packets, drift)
+    offset_d  = frame_offset(packets_d)
+    wrapped_d = wrap_to_frame(packets_d, offset_d)
+    stats_d   = print_stats(wrapped_d,
+                            title="DES-ROTADO (validação à Ana) — sincronização real")
+
+    # gráficos: o que interessa para a tese é o DES-ROTADO
+    plot_rounds    (packets,   base + '_rounds.png', offset=offset)        # cru (mostra deriva)
+    plot_rounds    (packets_d, base + '_rounds_derot.png', offset=offset_d)# des-rotado (Ana)
+    plot_scatter   (wrapped_d, base + '_scatter.png')
+    plot_histogram (wrapped_d, base + '_histogram.png')
 
     # Guarda JSON com estatísticas
     json_path = base + '_stats.json'
     with open(json_path, 'w') as f:
-        json.dump(stats, f, indent=2)
+        json.dump({'drift_ms_per_s': round(float(drift), 3),
+                   'absolute': stats, 'derotated': stats_d}, f, indent=2)
     print(f"[INFO] Estatísticas JSON: {json_path}")
 
 if __name__ == '__main__':
