@@ -43,7 +43,9 @@ ACTUALIZACOES SEGUINTES (so git pull + recompilar + copiar):
     sudo systemctl stop meshnode alphabot
     make clean && make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
     sudo cp meshnode /usr/local/bin/meshnode
-    sudo systemctl start meshnode alphabot
+    sudo systemctl start meshnode
+    # NAO arrancar o alphabot (video) ainda — ver seccao 0.1 (validar sync).
+    # So depois do sync assentar:  sudo systemctl start alphabot
 
   Raspberry Relay (No 2):
     cd ~/Documents/RoutingMeshNet/RoutingMesh
@@ -63,6 +65,48 @@ ACTUALIZACOES SEGUINTES (so git pull + recompilar + copiar):
 
 NOTA: O "sudo systemctl stop" antes do "cp" e obrigatorio —
       o binario fica bloqueado enquanto o servico estiver activo.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+0.1 VALIDAR SINCRONIZACAO  (fazer SEMPRE depois de atualizar o codigo)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IMPORTANTE: o video pesado (TCP + relay) compete com a convergencia da
+sincronizacao. Por isso deixa o sync ASSENTAR PRIMEIRO, com o meshnode
+a correr SEM video, e so depois liga o video.
+
+PASSO A — Atualizar o codigo nos 3 nos (secção 0 acima).
+          No No 1, ao reiniciar NAO arranques o alphabot ainda.
+
+PASSO B — Arrancar SO o meshnode nos 3 (sem video):
+
+  No 1:  sudo systemctl restart meshnode
+         sudo systemctl stop alphabot        # garante SEM video
+  No 2:  sudo systemctl restart meshnode
+  No 3:  sudo systemctl restart meshnode
+         # no No 3 NAO corras base_station.py nem ffplay ainda
+
+PASSO C — Confirmar que o codigo novo esta a correr (nos 3):
+
+  grep -c sync_in_slot src/node.c            # tem de dar 2
+
+PASSO D — Deixar convergir ~1-2 min e ver os logs de sync (qualquer no):
+
+  journalctl -u meshnode -f | grep "\[SYNC\]"
+  # o "delta" deve ir diminuindo ate ~0 (slots a assentar)
+
+PASSO E — Capturar beacons no No 3 (Wireshark, filtro:  udp portrange 7001-7003)
+          ~30s, exportar CSV, e correr no PC:
+
+  python3 tests/tdma_sync_plot.py captura_beacons.csv
+  # SUCESSO = sigma pequeno (poucos ms) e os 3 nos separados nos slots
+
+PASSO F — SO DEPOIS de o sync ter assentado, ligar o video:
+
+  No 1:  sudo systemctl start alphabot       # arranca o stream de video
+  No 3:  python3 base_station.py             # ou ffplay (ver seccao 4)
+
+NOTA: se o sigma ficar grande (~30ms, slots a vaguear), o sync nao
+      convergiu — guarda os logs [SYNC] dos 3 nos e analisa-os.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. COMPILAR
