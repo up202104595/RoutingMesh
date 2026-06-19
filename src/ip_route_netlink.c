@@ -12,6 +12,7 @@
  */
 
 #include "ip_route_netlink.h"
+#include "routing.h"   /* MESH_PHY_IFACE */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -198,6 +199,67 @@ int ip_route_add(const char *dest_ip, const char *gw_ip, const char *iface)
 
 
 /* ─────────────────────────────────────────────────────────────
+ * ip_route_add_t() — igual a ip_route_add mas numa tabela específica
+ * ───────────────────────────────────────────────────────────── */
+int ip_route_add_t(const char *dest_ip, const char *gw_ip,
+                   const char *iface, uint32_t table_id)
+{
+    nl_route_req_t req;
+    memset(&req, 0, sizeof(req));
+
+    req.nlh.nlmsg_len   = NLMSG_LENGTH(sizeof(struct rtmsg));
+    req.nlh.nlmsg_type  = RTM_NEWROUTE;
+    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK
+                        | NLM_F_CREATE  | NLM_F_REPLACE;
+    req.nlh.nlmsg_seq   = 1;
+
+    req.rtm.rtm_family   = AF_INET;
+    req.rtm.rtm_dst_len  = 32;
+    req.rtm.rtm_table    = (table_id <= 255) ? (uint8_t)table_id : RT_TABLE_UNSPEC;
+    req.rtm.rtm_protocol = RTPROT_STATIC;
+    req.rtm.rtm_scope    = RT_SCOPE_UNIVERSE;
+    req.rtm.rtm_type     = RTN_UNICAST;
+
+    if (table_id > 255)
+        nl_add_attr(&req, RTA_TABLE, &table_id, sizeof(table_id));
+
+    struct in_addr dst_addr;
+    if (inet_pton(AF_INET, dest_ip, &dst_addr) != 1) {
+        fprintf(stderr, "[IP_ROUTE] IP destino inválido: %s\n", dest_ip);
+        return -1;
+    }
+    nl_add_attr(&req, RTA_DST, &dst_addr, sizeof(dst_addr));
+
+    struct in_addr gw_addr;
+    if (inet_pton(AF_INET, gw_ip, &gw_addr) != 1) {
+        fprintf(stderr, "[IP_ROUTE] IP gateway inválido: %s\n", gw_ip);
+        return -1;
+    }
+    nl_add_attr(&req, RTA_GATEWAY, &gw_addr, sizeof(gw_addr));
+
+    int ifindex = (int)if_nametoindex(iface);
+    if (ifindex == 0) {
+        fprintf(stderr, "[IP_ROUTE] interface '%s' não encontrada\n", iface);
+        return -1;
+    }
+    nl_add_attr(&req, RTA_OIF, &ifindex, sizeof(ifindex));
+
+    return nl_send(&req);
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+ * ip_route_flush_table() — flush de uma tabela de routing
+ * ───────────────────────────────────────────────────────────── */
+void ip_route_flush_table(uint32_t table_id)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "ip route flush table %u 2>/dev/null", table_id);
+    system(cmd);
+}
+
+
+/* ─────────────────────────────────────────────────────────────
  * ip_route_del()
  *
  * Remove:  ip route del <dest_ip>/32
@@ -250,7 +312,8 @@ void ip_route_flush_mesh(const char *net_base, uint8_t num_nodes,
     char dest_ip[32];
     for (uint8_t i = 1; i <= num_nodes; i++) {
         snprintf(dest_ip, sizeof(dest_ip), "%s.%u", net_base, i);
-        ip_route_del(dest_ip, iface);   /* ignora erros — rota pode não existir */
+        ip_route_del(dest_ip, iface);
     }
+    ip_route_flush_table(200);
     printf("[IP_ROUTE] Rotas mesh removidas do kernel\n");
 }

@@ -161,9 +161,33 @@ int tun_open(uint8_t node_id) {
     system(cmd);
 
 #ifndef RELAY_METHOD_ARP
-    /* ip_forward — só necessário neste modo */
+    /* ip_forward + rp_filter */
     system("echo 1 > /proc/sys/net/ipv4/ip_forward");
-    printf("[TUN] ip_forward activado\n");
+    system("echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter");
+    system("echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter");
+    system("echo 0 > /proc/sys/net/ipv4/conf/" MESH_PHY_IFACE "/rp_filter");
+    printf("[TUN] ip_forward activado, rp_filter desactivado\n");
+
+    /* ip rule: pacotes que CHEGAM pela tun (injectados via tun_write para relay)
+     * usam tabela 200 → wlan0 ip_forward directo para o destino.
+     * Baseado em iif (interface de entrada) em vez de src IP para capturar
+     * qualquer src (10.0.0.X ou 172.20.10.X) injectado pelo relay. */
+    snprintf(cmd, sizeof(cmd),
+        "ip rule del iif tun%u lookup 200 2>/dev/null; "
+        "ip rule add iif tun%u lookup 200 priority 100",
+        node_id, node_id);
+    system(cmd);
+    printf("[TUN] ip rule: iif tun%u → tabela 200 (wlan0)\n", node_id);
+
+    /* iptables FORWARD: permite relay entre tun e wlan0 */
+    snprintf(cmd, sizeof(cmd),
+        "iptables -D FORWARD -i tun%u -o " MESH_PHY_IFACE " -j ACCEPT 2>/dev/null; "
+        "iptables -D FORWARD -i " MESH_PHY_IFACE " -o tun%u -j ACCEPT 2>/dev/null; "
+        "iptables -I FORWARD -i tun%u -o " MESH_PHY_IFACE " -j ACCEPT; "
+        "iptables -I FORWARD -i " MESH_PHY_IFACE " -o tun%u -j ACCEPT",
+        node_id, node_id, node_id, node_id);
+    system(cmd);
+    printf("[TUN] iptables FORWARD: tun%u <-> " MESH_PHY_IFACE " ACCEPT\n", node_id);
 #endif
 
     /* iptables */
@@ -187,13 +211,15 @@ int tun_open(uint8_t node_id) {
 void tun_close(int tun_fd, uint8_t node_id) {
     if (tun_fd >= 0) {
         close(tun_fd);
-        char cmd[256];
+        char cmd[512];
         snprintf(cmd, sizeof(cmd),
                  "iptables -t mangle -F OUTPUT 2>/dev/null; "
                  "ip rule del fwmark 1 table 100 2>/dev/null; "
                  "ip route flush table 100 2>/dev/null; "
+                 "ip rule del iif tun%u lookup 200 2>/dev/null; "
+                 "ip route flush table 200 2>/dev/null; "
                  "ip route del 10.0.0.0/24 dev tun%u 2>/dev/null; "
-                 "ip link delete tun%u 2>/dev/null", node_id, node_id);
+                 "ip link delete tun%u 2>/dev/null", node_id, node_id, node_id);
         system(cmd);
         printf("[TUN] Interface tun%u removida\n", node_id);
     }

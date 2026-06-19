@@ -37,6 +37,18 @@ int ip_route_add(const char *dest_ip, const char *gw_ip, const char *iface);
 int ip_route_del(const char *dest_ip, const char *iface);
 
 /*
+ * Adiciona rota numa tabela de routing específica:
+ *   ip route add <dest_ip>/32 via <gw_ip> dev <iface> table <table_id>
+ */
+int ip_route_add_t(const char *dest_ip, const char *gw_ip,
+                   const char *iface, uint32_t table_id);
+
+/*
+ * Flush de uma tabela de routing específica.
+ */
+void ip_route_flush_table(uint32_t table_id);
+
+/*
  * Remove todas as rotas /32 da rede mesh.
  * Chamar em routing_manager_destroy().
  *
