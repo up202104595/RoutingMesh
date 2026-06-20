@@ -121,21 +121,28 @@ def circ_std(pos_ms, period=FRAME_MS):
     return np.sqrt(-2.0 * np.log(R)) / (2 * np.pi) * period
 
 
-def drift_rate_ms_per_s(packets, ref_node, t0):
-    """Frame rotation speed (ms/s) tracked on one node, by unwrapping its
-    wrapped position over time and fitting a line. The synchroniser advances
-    all slots together every round, so the whole frame rotates; this measures
-    that common rotation so it can be removed."""
-    pts = [ts for ts, n in packets if n == ref_node]
-    if len(pts) < 3:
+def estimate_drift(packets, t0, lo=-150.0, hi=150.0):
+    """Frame rotation rate (ms/s) that best concentrates each node's wrapped
+    position. Robust to many packets per frame and to non-linear drift over a
+    long capture (use together with a short --last-rounds window). It searches
+    the rotation that maximises the per-node circular concentration, instead of
+    unwrap+linear-fit, which breaks on dense captures. Coarse grid, then refine."""
+    if len(packets) < 5:
         return 0.0
-    t = np.array([ts - t0 for ts in pts])
-    p = np.array([((ts - t0) * 1000.0) % FRAME_MS for ts in pts])
-    unwrapped = np.unwrap(p * 2 * np.pi / FRAME_MS) / (2 * np.pi) * FRAME_MS
-    if t.max() - t.min() < 1e-6:
+    t = np.array([ts - t0 for ts, _ in packets])
+    nodes = np.array([n for _, n in packets])
+    masks = [(nodes == nd) for nd in (1, 2, 3) if (nodes == nd).sum() >= 2]
+    if not masks:
         return 0.0
-    slope, _ = np.polyfit(t, unwrapped, 1)
-    return slope
+
+    def concentration(d):
+        ang = 2 * np.pi * ((t * (1000.0 - d)) % FRAME_MS) / FRAME_MS
+        s, c = np.sin(ang), np.cos(ang)
+        return sum(np.hypot(s[m].mean(), c[m].mean()) * m.sum() for m in masks)
+
+    coarse = max(np.arange(lo, hi + 0.5, 0.5), key=concentration)
+    fine = max(np.arange(coarse - 0.5, coarse + 0.5, 0.02), key=concentration)
+    return float(fine)
 
 
 def derotate(packets, drift, t0):
@@ -271,12 +278,26 @@ def main():
 
     print(f"[INFO] {len(beacons)} beacons, {len(video)} N1 video packets")
 
-    # Common time origin and common drift (measured on the beacons, the reference).
-    all_pkts = beacons + video
-    t0 = min(ts for ts, _ in all_pkts)
-    ref_node = max((n for _, n in beacons),
-                   key=lambda nd: sum(1 for _, n in beacons if n == nd))
-    drift = drift_rate_ms_per_s(beacons, ref_node, t0)
+    # Global time origin shared by beacons and video (one common frame).
+    t0 = min(ts for ts, _ in (beacons + video))
+
+    # Restrict to the last N rounds BEFORE estimating drift. Over a short window
+    # the frame rotation is near-linear and de-rotation is reliable, even when
+    # the full capture is long and the drift wanders (which smears a single
+    # linear de-rotation applied to the whole capture).
+    if args.last_rounds > 0:
+        last = max(int((ts - t0) * 1000.0 // FRAME_MS) for ts, _ in (beacons + video))
+        lo_round = last - args.last_rounds + 1
+        in_window = lambda P: [(ts, n) for ts, n in P
+                               if int((ts - t0) * 1000.0 // FRAME_MS) >= lo_round]
+        beacons, video = in_window(beacons), in_window(video)
+        print(f"[INFO] window: rounds {lo_round}-{last} "
+              f"({len(beacons)} beacons, {len(video)} video)")
+        if not beacons:
+            sys.exit("ERROR: no beacons in the selected window.")
+
+    # Robust drift measured on the (windowed) beacons, shared by both streams.
+    drift = estimate_drift(beacons, t0)
     print(f"[INFO] frame rotation {drift:+.2f} ms/s (removed via de-rotation)")
 
     # De-rotate BOTH streams with the same drift so they share one frame.
