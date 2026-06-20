@@ -299,22 +299,62 @@ quantisation.}
 \end{figure}
 \vspace{0.5cm}
 
+\paragraph{The two slot waits that compose a round trip.}
 The RTT does not concentrate around a single value; it splits into two
 well-separated clusters with an empty band between roughly 60 and 190\,ms.
-This is a direct consequence of the slot structure. A round trip traverses two
-slot waits: the request waits for N3's slot, and the reply waits for N1's
-slot. Because each leg can depart only within its node's slot, the reply
-either reaches N1's transmit opportunity in the immediately following frame
---- giving the lower cluster ($\approx 52$\,ms, set by the fixed encapsulation
-and the once-per-frame transmission overhead) --- or narrowly misses it and
-must wait one entire frame, giving the upper cluster ($\approx 52 + 150 =
-202$\,ms). The cluster separation of exactly one frame (150\,ms) is the
-signature of TDMA round quantisation: latency is lost only in whole-frame
-units, which is why no values fall between the clusters. The proportion of
-pings in each cluster varies between runs, because the free-running 10\,Hz
-probe cadence beats against the 150\,ms frame; the mean and median are
-therefore not representative single numbers, and the two clusters are reported
-separately instead (Table~\ref{tab:rtt}).
+This is a direct consequence of the slot structure, and it is best understood
+by following a single probe through the schedule. The round trip is made of
+two independent legs, and each leg can leave its node only during that node's
+50\,ms slot. When N3 wishes to send the echo request it cannot transmit
+immediately: it must wait until N3's slot comes round, so the request is held
+in the transmit queue for up to one frame before it even enters the medium.
+Once the request reaches N1, the reply faces the symmetric constraint --- it
+can depart only inside N1's slot. The total RTT is therefore the sum of the
+data-plane transmission time, the processing at each end, and, dominating all
+of these, the two quantised waits for the respective slots. Because a wait for
+a slot is, by construction, a wait for a position in a periodic 150\,ms frame,
+the RTT is built up from whole-frame and fractional-frame components rather
+than from a smoothly varying delay.
+
+\paragraph{Why the distribution is bimodal rather than spread.}
+The two clusters correspond to the two possible outcomes of the second, decisive
+slot wait. After the request arrives, the reply either reaches N1's transmit
+opportunity in the immediately following frame --- producing the lower cluster
+at $\approx 52$\,ms, a value fixed by the data-plane encapsulation and the
+once-per-frame transmission overhead rather than by any variable queueing ---
+or it misses that opportunity by a small margin and must wait one entire frame
+for the next one, producing the upper cluster at $\approx 52 + 150 = 202$\,ms.
+There is no intermediate outcome: a leg cannot wait ``half a slot extra'',
+because the next transmit opportunity is always exactly one frame away. The
+cluster separation of precisely one frame (150\,ms), and the empty band between
+the clusters, are therefore the signature of TDMA round quantisation --- latency
+is gained or lost only in whole-frame units. This is the point at which the
+present results differ in \emph{shape} from the reference: Morais reports a
+broadly triangular RTT histogram, a continuum of values filling the range,
+whereas here the histogram is cleanly two-valued. Both shapes arise from the
+same slot-waiting mechanism, but the geometry differs. In the reference, with
+four nodes and the probe and reply slots not adjacent, the residual wait is
+distributed almost uniformly across a round and fills the histogram into a
+triangle; here, with three nodes and the requester and responder slots adjacent
+across the frame boundary, the reply either just catches the next slot or just
+misses it, collapsing the continuum into two discrete levels.
+
+\paragraph{Why the cluster proportions vary, and why averages are uninformative.}
+The fraction of pings that lands in each cluster is not fixed: it changes from
+run to run, and even drifts slowly within a single run. This is not noise but a
+deterministic beat. The probe is emitted by a free-running 10\,Hz timer, i.e.\
+once every 100\,ms, while the schedule repeats every 150\,ms; because these two
+periods are incommensurate, the phase at which successive probes meet N3's slot
+walks steadily through the frame, so a probe that catches its slot now will,
+several pings later, just miss it, and the samples migrate between the two
+clusters in slow blocks --- exactly the block structure visible in the
+left-hand time series of Figure~\ref{fig:rtt-direct}. A consequence is that the
+arithmetic mean and the median of the raw RTT are not meaningful descriptors:
+their value depends only on the accidental ratio of fast to slow samples in a
+given capture, and a number such as ``a mean of 130\,ms'' describes neither
+cluster and would not be reproduced by a second run. For this reason the two
+clusters and their separation are reported separately in
+Table~\ref{tab:rtt}, rather than a single summary statistic.
 
 The same test over the relay path is shown in Figure~\ref{fig:rtt-relay}.
 
@@ -331,18 +371,41 @@ significant latency to the control channel.}
 \end{figure}
 \vspace{0.5cm}
 
+\paragraph{The relay path leaves the distribution unchanged.}
 The relay distribution is practically identical to the direct one: the same
-two clusters and the same one-frame separation. Forwarding the control packet
-through N2 adds no significant latency, which is consistent with the
-throughput result of the next subsection --- the kernel forwarding engine at
-N2 relays each packet within the same slot in which it arrives. The 100\,\%
-PDR and the bounded maximum (below two frames) in both conditions confirm that
-the slots are respected: a desynchronised network would instead exhibit
-unbounded, unstructured latency and packet loss, whereas the clean two-level
-quantisation observed here is positive evidence that the schedule holds.
-Normalising by the frame period, the mean RTT of $\approx 0.9$ frame is
-consistent with the value reported by Morais~\cite{morais2024synchronization}
-(0.88 frame), confirming equivalent TDMA-level latency behaviour.
+two clusters, in the same positions, with the same one-frame separation. This
+is a stronger statement than it may appear. Inserting N2 into the path could,
+in principle, have added a third slot wait --- the forwarded packet waiting for
+N2's own transmit opportunity --- which would have shifted the whole
+distribution up by one slot or introduced a third cluster. No such shift is
+observed. The explanation is the same as on the data plane: N2 forwards the
+control packet through the kernel routing engine within the handling of the
+slot in which it arrives, rather than re-queueing it as fresh application
+traffic for N2's next slot, so the extra hop costs only a few milliseconds of
+processing rather than a full slot of scheduling latency. The control-plane and
+data-plane results are thus two views of the same property: the relay is
+transparent because forwarding happens below the application and does not
+consume a separate scheduling step.
+
+\paragraph{Why the bimodal, lossless RTT is positive evidence of slot compliance.}
+It is worth stating explicitly why this RTT behaviour supports, rather than
+merely fails to contradict, the central claim that the nodes respect their
+slots. If the nodes were \emph{not} synchronised --- if slots overlapped or
+drifted unboundedly --- the medium would suffer collisions and contention, and
+the resulting RTT would be unstructured: a long, ragged tail of values with no
+preferred levels, accompanied by packet loss from collided transmissions.
+What is observed is the opposite. The latency is confined to two sharp levels
+separated by exactly one frame, the maximum stays below two frames, and the
+packet delivery ratio is $100\,\%$ in both the direct and relay conditions:
+every one of the 100 probes was answered. A network can only produce
+quantisation this clean, with no loss, if each node is in fact transmitting
+within a well-defined slot and the slots are correctly ordered; the structure
+of the RTT is therefore a direct, if indirect-looking, measurement of slot
+compliance. Normalising by the frame period, the mean RTT of $\approx 0.9$
+frame matches the value reported by Morais~\cite{morais2024synchronization}
+(0.88 frame): although the histogram shape differs, the underlying
+TDMA-level latency --- a round trip costing a little under one frame on average
+--- is the same, as expected from a shared synchroniser and slot structure.
 
 \begin{table}[h]
 \centering
@@ -596,12 +659,22 @@ reports the results.
 \vspace{0.5cm}
 
 The median convergence time of the two repetitions that produced a measurable
-gap is $\approx 2.8$\,s, equivalent to about 18~TDMA frames. In the third
-repetition the relay route was still installed in the routing tables from the
-previous repetition, so the stream switched paths in less than the $0.4$\,s
-detection threshold and no gap was recorded; this case is reported separately
-and excluded from the median.
+gap is $\approx 2.8$\,s, equivalent to about 18~TDMA frames. The two
+recovered values (2675 and 2863\,ms) are close, which already hints that the
+delay is governed by a fixed timeout rather than by a variable process such as
+contention or retransmission, whose spread would have been far wider. The third
+repetition is qualitatively different and is reported separately: the relay
+route was still installed in the routing tables from the previous repetition,
+so when the direct link was cut the stream switched paths in less than the
+$0.4$\,s detection threshold and no gap was recorded at all. Rather than being
+discarded as a failed measurement, this case is itself informative --- it shows
+that the cost of convergence is almost entirely the cost of \emph{detecting}
+the failure, not of computing or installing the new route, because when
+detection is bypassed (the route is already present) the failover is effectively
+instantaneous. It is excluded from the median only because it does not measure
+the same quantity as the other two.
 
+\paragraph{What governs the detection time.}
 The dominant component of the convergence time is the \emph{link-failure
 detection}, which is governed by the node-aging mechanism of the RA-TDMAs+
 adjacency matrix. Each node keeps, for every neighbour, the timestamp of the
@@ -610,10 +683,18 @@ since that beacon. On every round the function \texttt{removeDeadLinks()}
 compares each age against the constant \texttt{MAX\_AGE}, and a neighbour whose
 age reaches \texttt{MAX\_AGE} is declared dead and removed from the matrix. In
 this implementation \texttt{MAX\_AGE} $= 2.0$\,s, so when the direct link to N1
-is severed, N3 stops receiving N1's beacons and continues to treat N1 as a live
-neighbour for a full $2.0$\,s before the link is removed. Only then does the
-topology change and the route via N2 become installable. The recovery chain
-therefore comprises the three stages of Table~\ref{tab:conv-breakdown}.
+is severed, N3 stops receiving N1's beacons but continues to treat N1 as a live
+neighbour for a full $2.0$\,s before the link is removed. This is a deliberate
+design feature, not an accident of timing: because the three nodes share one
+collision domain, an individual beacon is occasionally lost to a transient
+collision even when the link is perfectly healthy, and declaring a neighbour
+dead on the first missed beacon would cause the topology to flap continuously.
+The aging timeout is the hysteresis that prevents this --- it requires the
+absence of beacons to persist for $2.0$\,s, i.e.\ for roughly thirteen
+consecutive missed beacons at the 150\,ms frame, before believing the link is
+truly gone. Only once N1 has aged out does the topology change and the route via
+N2 become installable. The recovery chain therefore comprises the three stages
+of Table~\ref{tab:conv-breakdown}.
 
 \vspace{0.4cm}
 \begin{table}[h]
@@ -637,12 +718,26 @@ Relay-path establishment and first forwarded video packet & $\approx 0.8$\,s \\
 The breakdown shows that the route computation itself is negligible
 (microseconds on a three-node graph): the convergence time is set almost
 entirely by the $2.0$\,s aging timeout, plus a sub-second tail for the relay
-path to be established and the first forwarded packet to arrive. The most
-direct way to accelerate convergence is therefore to reduce \texttt{MAX\_AGE},
-at the cost of a higher risk of declaring a transient beacon loss as a
-permanent failure; the chosen value of $2.0$\,s is a deliberate trade-off
-between recovery speed and robustness to sporadic beacon loss in the shared
-collision domain.
+path to be established and the first forwarded packet to arrive. This
+localisation of the cost has a clear practical consequence. Because detection
+dominates and route installation is essentially free, the convergence time is
+not a property of the routing layer's efficiency at all --- a faster routing
+algorithm or a smaller graph would not change it --- but a property of a single
+tunable constant. The most direct way to accelerate convergence is therefore to
+reduce \texttt{MAX\_AGE}: halving it to $1.0$\,s would roughly halve the
+recovery time, and the lower bound on detection is set only by how aggressively
+one is willing to age out links. That aggressiveness is precisely the trade-off.
+A shorter timeout recovers faster from genuine failures but is more likely to
+mistake a transient burst of collisions for a dead link, tearing down and
+rebuilding a healthy route and momentarily interrupting the very stream it is
+meant to protect; a longer timeout is more robust to sporadic beacon loss but
+slower to react. The chosen value of $2.0$\,s sits deliberately on the
+conservative side of this trade-off, favouring stability of the topology in the
+shared collision domain over raw recovery speed, which is the appropriate
+choice for a teleoperation link where a spurious route flap is more disruptive
+than a bounded, one-off recovery delay. Tuning this constant, or replacing the
+fixed timeout with an adaptive scheme that reacts to the recent beacon-loss
+rate, is identified as a concrete avenue for future work.
 
 \subsection{Packet Inter-Arrival Timing}
 \label{subsec:res-ia}
@@ -730,28 +825,77 @@ that the nodes respect the TDMA schedule.}
 \end{figure}
 \vspace{0.5cm}
 
+\paragraph{How the measurement was taken.}
+The data underlying Figure~\ref{fig:slots} were obtained by capturing the
+beacon traffic at N3 with a passive sniffer and recording, for each beacon, its
+arrival instant and its source node (identifiable from the physical address and
+the source port, 7001--7003). The capture taps the wireless interface directly,
+below the firewall, which is important for two reasons. First, it sees every
+beacon that reaches the antenna regardless of any \texttt{iptables} rule, so the
+same method works unchanged in the direct and relay conditions. Second, it
+observes the transmissions as they actually occur on the medium, which is what a
+claim about slot occupancy must be about. This differs from the external
+monitor-mode capture used in the reference work: rather than introducing a
+fourth, passive observer node, the synchronisation is verified from the
+perspective of an active participant, N3, which is sufficient because N3 is in
+radio range of both other nodes and therefore receives all three beacons.
+
+\paragraph{Reading the figure: ordering, spacing, and occupancy.}
 The three nodes occupy three disjoint regions in the cyclic order
 N1\,$\to$\,N2\,$\to$\,N3, each separated from the next by approximately one
-slot, and each remains in its region across rounds. After removing the common
-frame rotation, the per-node standard deviation of the transmission instant is
-$\approx 16$\,ms and 84--89\,\% of beacons fall within the assigned slot. Two
-characteristics of the synchroniser should be noted when reading the figure.
-First, the absolute phase of the frame is arbitrary: with no global clock,
-only the relative ordering and spacing of the nodes carry meaning. Second, the
-synchroniser advances all slots by a small common amount each round, so the
-whole frame rotates slowly in wall-clock time ($\approx 18$\,ms/s); this
-rotation is removed before evaluating the clustering, and over a short window
-of a few rounds it is negligible and the slots appear stationary, as in
-Figure~\ref{fig:slots}.
+slot, and each remains in its region across rounds. Quantitatively, after the
+processing described below, the per-node standard deviation of the transmission
+instant is $\approx 16$\,ms --- small relative to the 50\,ms slot --- and
+84--89\,\% of all beacons fall within their node's assigned slot, the remainder
+lying in the 5\,ms guard band or spilling marginally into a neighbour's slot
+under transient load. That the three clouds neither overlap nor exchange order
+across the captured rounds is the direct, transmitter-side evidence that the
+schedule is being respected: each node is in fact confining its transmissions
+to its own slot, which is the property the whole evaluation set out to
+establish.
 
+\paragraph{Two properties of the synchroniser that must be accounted for.}
+Two characteristics of the RA-TDMAs+ synchroniser must be understood to read
+the figure correctly, and both stem from the fact that the network has no
+global clock. First, the absolute phase of the frame is arbitrary: there is no
+external reference that fixes where ``time zero'' of the frame lies, so only the
+\emph{relative} ordering and spacing of the nodes carry physical meaning. A plot
+in which all three clouds were shifted bodily by the same amount would describe
+an equally valid, equally synchronised network; it is the gaps between the
+nodes, not their absolute positions, that matter. Second, the synchroniser does
+not hold the frame fixed in wall-clock time. To keep the nodes aligned it
+advances all slots by a small common amount on every round, with the effect that
+the entire frame rotates slowly against wall-clock time, at $\approx 18$\,ms/s
+in these captures. This common rotation is a property of all nodes together and
+says nothing about their mutual alignment, so it is removed (the per-round
+common offset is subtracted) before the clustering is evaluated; what remains is
+the relative synchronisation between nodes, which is the quantity of interest.
+Over the short window of a few rounds shown in Figure~\ref{fig:slots} the
+rotation is small enough to be neglected and the slots appear stationary, but
+over a longer capture it must be de-rotated explicitly or the clouds would
+smear across the frame and obscure the very alignment they are meant to show.
+
+\paragraph{The relay condition, and an apparent paradox resolved.}
 Under relay conditions the same analysis confirms that the cyclic ordering is
-maintained. As noted in Section~\ref{subsec:linkfail}, with the direct link
-blocked N3's application no longer receives N1's beacons (they are discarded by
-\texttt{iptables} before the socket), so N3 synchronises through the two-hop
-chain N1\,$\to$\,N2\,$\to$\,N3; the capture still records N1's beacons because
-it taps the interface before the firewall. The slots remain occupied and
-ordered, the only effect being a slightly looser alignment of N3 relative to
-N1, consistent with N3 synchronising indirectly through N2.
+maintained. This case requires care, because a naive reading of the capture
+seems paradoxical: with the direct link to N1 blocked, how can N1's beacons
+still appear at N3 and still fall in N1's slot? The resolution lies in the
+distinction, established in Section~\ref{subsec:linkfail}, between the firewall
+and the capture. The \texttt{iptables} rule discards N1's packets at the IP
+layer, \emph{above} the point where the sniffer taps the interface, so N1's
+beacons are removed from N3's TDMA \emph{application} --- which is why N3 stops
+treating N1 as a direct neighbour and falls back to synchronising through the
+two-hop chain N1\,$\to$\,N2\,$\to$\,N3 --- while still being \emph{recorded} by
+the capture, because they continue to reach the antenna. The capture thus shows
+the true state of the medium (N1 is still transmitting, still in its slot),
+whereas the routing layer reflects the logical topology (N1 is unreachable
+directly). Far from undermining the result, this confirms two things at once:
+that N1 keeps its slot regardless of how N3 routes to it, and that the
+link-failure abstraction is being imposed at the right layer. The only
+observable effect of the relay condition is a slightly looser alignment of N3
+relative to N1, which is expected, since N3 now derives its timing indirectly
+through N2 rather than directly from N1 and therefore inherits one extra hop of
+synchronisation slack.
 
 Together, the inter-arrival analysis (streaming data, N1's slot) and this
 beacon analysis (all three slots) establish the central claim of this
