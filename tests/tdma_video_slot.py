@@ -43,7 +43,9 @@ SLOT_MS   = 50.0      # slot duration (ms)
 
 # Physical addresses (wlan0). The node id is the last octet.
 IP_TO_NODE = {'172.20.10.1': 1, '172.20.10.2': 2, '172.20.10.3': 3}
-N1_PHYS    = '172.20.10.1'      # robot: the only source of video
+N1_PHYS    = '172.20.10.1'      # robot, physical plane: source of direct video
+N1_MESH    = '10.0.0.1'         # robot, mesh plane: in case capture is on tun
+N1_VIDEO_SRC = (N1_PHYS, N1_MESH)
 
 NODE_COLORS = {1: '#2196F3', 2: '#4CAF50', 3: '#F44336'}
 SLOT_START  = {1: 0.0, 2: 50.0, 3: 100.0}
@@ -64,6 +66,7 @@ def load_full_capture(path):
     + large length (which excludes the tiny TCP ACKs flowing the other way).
     """
     beacons, video = [], []
+    diag = {'rows': 0, 'max_len': 0, 'big_by_src': defaultdict(int)}
     with open(path, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames:
@@ -83,16 +86,21 @@ def load_full_capture(path):
             except (ValueError, KeyError):
                 continue
 
+            diag['rows'] += 1
+            diag['max_len'] = max(diag['max_len'], ln)
+            if ln >= VIDEO_MIN_LEN:
+                diag['big_by_src'][src] += 1
+
             node = IP_TO_NODE.get(src)
             if node is None:
                 continue
 
             if ln <= BEACON_MAX_LEN:
                 beacons.append((ts, node))           # control beacon
-            elif src == N1_PHYS and ln >= VIDEO_MIN_LEN:
-                video.append((ts, node))             # N1 video data packet
+            elif src in N1_VIDEO_SRC and ln >= VIDEO_MIN_LEN:
+                video.append((ts, 1))                # N1 video data packet
 
-    return beacons, video
+    return beacons, video, diag
 
 
 # ── Frame math (circular, drift, de-rotation) ──────────────────────────────────
@@ -236,13 +244,28 @@ def main():
     if not os.path.exists(args.csv):
         sys.exit(f"ERROR: file not found: {args.csv}")
 
-    beacons, video = load_full_capture(args.csv)
+    beacons, video, diag = load_full_capture(args.csv)
     if not beacons:
         sys.exit("ERROR: no TDMA beacons found. Capture wlan0 unfiltered, "
                  "so both beacons (<=120 B) and video (>=200 B) are present.")
     if not video:
-        print("WARNING: no N1 video packets found (src 172.20.10.1, >=200 B). "
-              "Was the video running over the DIRECT link during the capture?")
+        print("WARNING: no N1 video packets found "
+              f"(src {N1_PHYS} or {N1_MESH}, length >= {VIDEO_MIN_LEN} B).")
+        print(f"  Diagnosis: {diag['rows']} packets parsed, "
+              f"largest packet = {diag['max_len']} B.")
+        if diag['max_len'] < VIDEO_MIN_LEN:
+            print("  -> This capture has NO video at all: every packet is small "
+                  "(control plane only).")
+            print("     Re-capture wlan0 WITHOUT any filter WHILE the video is "
+                  "streaming N1->N3 on the direct link.")
+        elif diag['big_by_src']:
+            top = sorted(diag['big_by_src'].items(), key=lambda kv: -kv[1])[:5]
+            print("  -> Large packets exist but not from N1. Sources of >=200 B "
+                  "packets:")
+            for s, n in top:
+                print(f"       {s}: {n}")
+            print("     Check the video source address, or tell me the correct one.")
+        sys.exit(1)
 
     print(f"[INFO] {len(beacons)} beacons, {len(video)} N1 video packets")
 
