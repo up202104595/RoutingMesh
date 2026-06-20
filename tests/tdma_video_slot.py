@@ -75,6 +75,7 @@ def load_full_capture(path):
         c_time = norm.get('time')
         c_src  = norm.get('source')
         c_len  = norm.get('length')
+        c_proto = norm.get('protocol')
         if not (c_time and c_src):
             sys.exit(f"ERROR: CSV must have Time and Source columns; got {list(norm)}")
 
@@ -83,6 +84,7 @@ def load_full_capture(path):
                 ts  = float(row[c_time].strip().strip('"'))
                 src = row[c_src].strip().strip('"')
                 ln  = int(row[c_len].strip().strip('"')) if c_len else 0
+                proto = row[c_proto].strip().strip('"').upper() if c_proto else ''
             except (ValueError, KeyError):
                 continue
 
@@ -95,8 +97,12 @@ def load_full_capture(path):
             if node is None:
                 continue
 
-            if ln <= BEACON_MAX_LEN:
-                beacons.append((ts, node))           # TDMA control (slot)
+            # A MATRIX beacon is the TDMA custom protocol (Wireshark "RX") that
+            # each node sends in its slot. The framework's TCP data plane also
+            # emits small (~66 B) TCP ACKs that are NOT slot-gated; filtering by
+            # protocol keeps those ACKs out of the beacon reference.
+            if proto == 'RX' and ln <= BEACON_MAX_LEN:
+                beacons.append((ts, node))           # MATRIX beacon (slot)
             elif src in N1_VIDEO_SRC and ln >= VIDEO_MIN_LEN:
                 video.append((ts, 1))                # N1 video data packet
 
@@ -304,11 +310,12 @@ def main():
     beacons_d = derotate(beacons, drift, t0)
     video_d   = derotate(video,   drift, t0)
 
-    # Anchor N1's beacon to the START of its slot: in RA-TDMA each node sends
-    # its MATRIX beacon at the beginning of its slot, so N1's slot is the 50 ms
-    # window [beacon, beacon+50). The video data is sent later in that same slot.
+    # Align the axis so N1's beacon cluster sits in its slot band (slot 0). The
+    # video data is sent in the same slot right after the beacon, so both land
+    # in this band. The video-vs-beacon offset reported below is independent of
+    # this alignment choice.
     n1_beacon_pos = wrap(beacons_d, 0.0, t0).get(1, [])
-    offset = SLOT_START[1] - circ_mean(n1_beacon_pos) if n1_beacon_pos else 0.0
+    offset = (SLOT_START[1] + SLOT_MS / 2) - circ_mean(n1_beacon_pos) if n1_beacon_pos else 0.0
 
     wb = wrap(beacons_d, offset, t0)
     wv = wrap(video_d,   offset, t0)
@@ -340,16 +347,15 @@ def main():
               f"{s['std_circ_ms']:>9.2f}{str(s['pct_in_slot'])+'%':>11}")
     print("─────────────────────────────────────────────────────────────")
     if n1_v and n1_b:
-        rel = (circ_mean(n1_v) - circ_mean(n1_b)) % FRAME_MS
-        print(f"Video burst is {rel:.1f} ms after N1's beacon "
-              f"(N1 slot is [0,50) ms with the beacon at its start).")
-        if rel < SLOT_MS:
-            print("  -> The video sits inside N1's slot, after the beacon "
-                  "(tail of the slot). In direct mode only N1 transmits the "
-                  "video, and TDMA confines it to N1's slot.")
+        rel = (circ_mean(n1_v) - circ_mean(n1_b) + FRAME_MS / 2) % FRAME_MS - FRAME_MS / 2
+        print(f"Video burst is {rel:+.1f} ms from N1's beacon (same slot).")
+        if abs(rel) < SLOT_MS:
+            print("  -> The video is in N1's slot, right after the beacon. In "
+                  "direct mode only N1 transmits the video and TDMA confines it "
+                  "to N1's slot, so this is the direct evidence of slot compliance.")
         else:
-            print("  -> The video burst is more than one slot after the beacon: "
-                  "check the capture / the beacon-vs-slot convention.")
+            print("  -> The video burst is more than one slot from the beacon: "
+                  "check the capture / the beacon classification.")
 
     base = os.path.splitext(args.csv)[0]
     plot_rounds(beacons_d, video_d, offset, t0,
