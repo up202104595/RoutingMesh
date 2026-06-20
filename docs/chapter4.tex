@@ -500,6 +500,47 @@ through N2 likewise added no measurable latency. The two observations reinforce
 each other: the same forwarding mechanism that leaves the round-trip
 distribution unchanged also leaves the delivered throughput unchanged.
 
+\paragraph{Why no per-hop throughput collapse is observed.}
+At first sight this $\approx 1\,\%$ result appears to contradict the reference
+work of Morais~\cite{morais2024synchronization}, which reported a severe
+throughput reduction with relaying --- to roughly one half of the
+single-hop value with one relay, and to about one fifth with two relays. The
+apparent contradiction dissolves once the two measurements are recognised as
+probing different regimes, and the contrast is itself informative.
+
+The reduction reported in the reference is the classic capacity collapse of a
+single-channel multi-hop wireless chain. When every node shares one radio
+channel and the medium is half-duplex, a packet forwarded by a relay must be
+\emph{received} and then \emph{re-transmitted} on the same channel; the relay's
+two transmissions, plus those of the source, contend for one shared resource,
+so the maximum end-to-end rate falls roughly as $C/n$ with the number of hops
+$n$. Crucially, that ceiling is only \emph{reached}, and therefore only
+\emph{measured}, by a flow that deliberately saturates the link. The reference
+obtained its figures with \texttt{iperf3}, whose explicit purpose is to push as
+much TCP traffic as the medium will accept until congestion and retransmissions
+cap the rate; under that load, and under CSMA/CA with no slotting, the per-hop
+halving is exactly what should appear.
+
+The measurement here is of a fundamentally different kind. The video is a
+\emph{fixed-rate, non-saturating} application stream of $\approx 558$\,kbps,
+which is between one and two per cent of the per-hop capacity --- even after a
+single relay hop has halved that capacity, several megabits per second of
+headroom remain. The quantity of interest is therefore not the link's maximum
+capacity but whether the offered rate is \emph{preserved} end to end, and at a
+load this far below the ceiling the second hop forwards the stream without ever
+throttling it. The bottleneck that produces the collapse binds only as the
+offered load approaches capacity; our application never operates in that
+regime. Two further factors widen the gap: the TDMA schedule eliminates the
+CSMA/CA collisions and retransmissions that account for much of the reference's
+loss, and, as established above, the kernel forward at N2 does not consume a
+separate TDMA slot. In the interest of intellectual honesty, a saturating
+\texttt{iperf3} test over our relay path would still be expected to exhibit a
+per-hop reduction, for the same capacity-sharing reason; the point is precisely
+that the teleoperation video does not, and is never intended to, operate at
+saturation. For the application that this system is built to carry, the
+operationally relevant regime is the source-limited one, and in that regime the
+relay is transparent.
+
 \paragraph{Temporal behaviour of the throughput.}
 The 558/552\,kbps figures are time-averages, but the instantaneous delivery is
 far from flat: because N1 may transmit only inside its slot, the video arrives
