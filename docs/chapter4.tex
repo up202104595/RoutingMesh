@@ -7,7 +7,7 @@
 %%   RTT_over_the_relay_path.png    (\ref{fig:rtt-relay})
 %%   ia_timing.png                  (\ref{fig:ia})  — combinada direto vs relay
 %%   throughput.png                 (\ref{fig:throughput})
-%%   ao_rounds.png                  (\ref{fig:slots})       — de-rotated, stays in slot
+%%   ao_rounds_derot.png            (\ref{fig:slots})       — de-rotated, stays in slot
 %%   ao_scatter.png                 (\ref{fig:slots-drift}) — raw, shows the drift
 
 \chapter{Experimental Evaluation}
@@ -920,7 +920,7 @@ a sequence of rounds.
 \vspace{0.4cm}
 \begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{ao_rounds.png}
+\includegraphics[width=\textwidth]{ao_rounds_derot.png}
 \caption{Beacon transmission instant wrapped to the TDMA frame, per round, for
 the three nodes, after the common frame rotation has been removed. Each node
 occupies its own slot in the strict cyclic order
