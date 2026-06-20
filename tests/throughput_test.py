@@ -37,6 +37,7 @@ def measure(duration, label, topology, iface=None):
     rx_bytes = 0
     t_start  = None
     pkt_sizes = []
+    arr_t     = []   # tempos de chegada (s) relativos ao 1º pacote — p/ série temporal
 
     deadline = time.perf_counter() + duration + 3.0  # 3s extra para arranque
 
@@ -58,6 +59,7 @@ def measure(duration, label, topology, iface=None):
         rx_pkts  += 1
         rx_bytes += plen
         pkt_sizes.append(plen)
+        arr_t.append(now - t_start)
 
         if rx_pkts % 500 == 0:
             elapsed = now - t_start
@@ -76,6 +78,17 @@ def measure(duration, label, topology, iface=None):
     throughput_kbps = (rx_bytes * 8) / elapsed / 1000
     avg_pkt      = statistics.mean(pkt_sizes) if pkt_sizes else 0
     pps          = rx_pkts / elapsed
+
+    # série temporal de throughput (kbps por bin de 1s) — para o gráfico de onda.
+    # usa os MESMOS pacotes/bytes da medição, por isso é a mesma medida veridica.
+    BIN_S = 1.0
+    nbins = max(1, int(elapsed / BIN_S) + 1)
+    bin_bytes = [0] * nbins
+    for t, b in zip(arr_t, pkt_sizes):
+        idx = int(t / BIN_S)
+        if 0 <= idx < nbins:
+            bin_bytes[idx] += b
+    series_kbps = [round(bb * 8 / BIN_S / 1000, 1) for bb in bin_bytes]
 
     print(f"\n{'='*50}")
     print(f"  Label:      {label}")
@@ -99,6 +112,8 @@ def measure(duration, label, topology, iface=None):
         "pps":             round(pps, 1),
         "pkt_size_bytes":  round(avg_pkt, 1),   # alias esperado por results_summary.py
         "avg_pkt_bytes":   round(avg_pkt, 1),
+        "bin_s":           BIN_S,
+        "series_kbps":     series_kbps,         # throughput por segundo → gráfico de onda
         "timestamp":       time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
