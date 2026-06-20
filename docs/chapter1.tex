@@ -1,0 +1,242 @@
+%% chapter1.tex: Introduction
+
+\chapter{Introduction}
+\label{chap:intro}
+
+This chapter introduces the context and motivation for this work in
+Section~\ref{sec:context}, states the problem addressed in
+Section~\ref{sec:problem}, defines the objectives in
+Section~\ref{sec:objectives}, lists the contributions in
+Section~\ref{sec:contributions}, and outlines the document structure in
+Section~\ref{sec:structure}.
+
+%% -----------------------------------------------------------------------
+\section{Context and Motivation}
+\label{sec:context}
+
+The deployment of autonomous mobile robots in environments where human presence
+is dangerous, impractical, or impossible has grown considerably in recent years.
+Search and rescue missions in disaster zones, industrial inspections in
+hazardous facilities, and surveillance operations in areas without fixed
+infrastructure all share a fundamental requirement: the robot must maintain a
+reliable communication link with a remote operator, even when the two are not
+within direct radio range. The absence of cellular towers, WiFi access points,
+or any fixed networking equipment means that the communication network must be
+created and maintained dynamically by the nodes themselves.
+
+In such scenarios, Mobile Ad-hoc Networks (MANETs) emerge as the enabling
+technology~\cite{conti2014mobile}. Each node becomes simultaneously a data
+source, a data destination, and a potential relay that forwards packets on
+behalf of others. This multi-hop communication paradigm extends the effective
+range far beyond what direct wireless links could achieve: a robot operating
+deep inside a building can stream video to an operator outside by having one
+or more intermediate nodes relay each packet hop-by-hop until it reaches its
+destination, even when source and destination lack a direct radio path.
+
+A defining characteristic of robotic MANETs is the rapid and continuous
+topology change caused by node mobility. Unlike sensor networks where devices
+remain stationary after deployment, mobile robots navigate freely through their
+environment following mission requirements. A link that exists at one moment
+may vanish seconds later when a robot turns a corner, enters a different room,
+or simply moves beyond radio range. Routing (the process of determining
+paths for data to flow from source to destination) cannot rely on static
+precomputation but must adapt continuously as the topology evolves.
+
+A further challenge arises when the application traffic is a real-time video
+stream. Video streaming imposes strict constraints on latency, jitter, and
+packet loss: degradation below a perceptual threshold renders the stream
+unusable for teleoperation, with direct consequences for the safety and
+effectiveness of the mission. Routing adaptation must therefore occur quickly
+enough to avoid prolonged stream interruptions when a link fails and an
+alternative relay path must be activated.
+
+Time Division Multiple Access (TDMA) provides an effective foundation for
+organising transmissions in the shared wireless medium. By assigning each node
+an exclusive time slot within a periodic frame, collisions are avoided by
+construction and channel access is predictable. The RA-TDMAs+ protocol
+developed at FEUP~\cite{oliveira2018clockless} extends this model to ad-hoc
+mesh networks with relative synchronisation (that is, without requiring a
+global clock) and distributes topology information via periodic beacon
+packets. A software framework implementing RA-TDMAs+ was originally developed
+by Luís Pinto and subsequently refactored by Diogo
+Almeida~\cite{almeida2023synchronization} into a modular, event-based
+architecture. This framework serves as the direct foundation upon which the
+present work is built.
+
+%% -----------------------------------------------------------------------
+\section{Problem Statement}
+\label{sec:problem}
+
+The RA-TDMAs+ framework provides collision-free medium access and distributes
+a connectivity matrix among nodes via periodic beacons. What it does not
+provide is a routing layer: a mechanism that translates topology information
+into forwarding decisions that allow arbitrary IP traffic to traverse multi-hop
+paths transparently.
+
+Several challenges arise when adding such a routing layer to a TDMA mesh
+network for robotic applications. The routing mechanism must operate within the
+strict timing constraints imposed by the TDMA slot structure, computing and
+installing forwarding decisions without disrupting the medium-access schedule.
+It must also detect link failures rapidly enough to trigger relay activation
+before the operator perceives an interruption in the video feed.
+
+How transit packets are forwarded is equally important. User-space forwarding
+planes introduce latency and implementation complexity, whereas a kernel-level
+approach offers proven performance, standard observability through tools such
+as \texttt{ping} and \texttt{traceroute}, and seamless integration with the
+operating system networking stack. A related consideration is the choice of
+link quality metric: classical measures such as hop count or received signal
+strength do not capture the slot-level packet delivery behaviour that is most
+relevant in a TDMA context, so a dedicated metric is needed to drive both route
+selection and relay activation.
+
+The choice of transport protocol for application data raises a further
+challenge. The original framework used UDP for all inter-node communication,
+which is well suited to the periodic topology beacons but provides no
+retransmission mechanism for video frames, causing lost datagrams to produce
+visible artefacts at the receiver. Prior work demonstrated that adopting TCP at
+the application layer eliminates these artefacts, but that using TCP with
+default protocol settings introduces buffering delays that are incompatible
+with real-time streaming over a TDMA network. Properly integrating TCP into
+the communication stack requires the forwarding path to be visible at the IP
+layer, since TCP connections are identified by endpoint addresses and port
+numbers. This interaction between transport protocol and forwarding
+architecture is a central design constraint of the present work.
+
+A previous attempt to address the routing problem in RA-TDMAs+ was carried
+out by Morais~\cite{morais2024synchronization}, who implemented a routing
+mechanism at the data link layer using ARP table manipulation on AlphaBot
+robotic platforms. Her work demonstrated the feasibility of multi-hop
+communication and adopted a Minimum Spanning Tree (MST) algorithm to derive
+forwarding paths from the connectivity matrix distributed by RA-TDMAs+.
+However, the existing implementation exhibited system-level instability
+during operation, including runtime failures whose precise cause was not
+fully identified. Beyond these stability issues, the Layer~2 approach
+presented inherent observability limitations: standard diagnostic tools
+such as traceroute and ping did not reflect the actual forwarding path,
+and integration with operating system networking features was constrained.
+Additionally, the source code produced by Morais was not available for
+inspection or reuse; only the TDMA framework developed by
+Almeida~\cite{almeida2023synchronization} was accessible. This context
+made an independent, clean-slate implementation the natural path forward:
+a system built from the ground up on top of Diogo Almeida's TDMA
+codebase, following Morais' thesis as a reference for the routing
+strategy, adopting the same MST approach, but employing different
+architectural methods at the network layer so that the two approaches
+can be meaningfully compared.
+
+This dissertation addresses these problems through the design and experimental
+validation of a routing mechanism for RA-TDMAs+ networks, evaluated across
+multiple network configurations and topology conditions to assess routing
+robustness and adaptability.
+
+%% -----------------------------------------------------------------------
+\section{Objectives}
+\label{sec:objectives}
+
+The primary objective of this dissertation is to design, implement, and
+evaluate a routing mechanism for a MANET built on top of the RA-TDMAs+
+framework, enabling peer-to-peer IP communication between any two nodes in
+the network independently of the current topology.
+
+This primary objective decomposes into the following specific objectives:
+
+\begin{enumerate}
+
+    \item Define a \textbf{link quality metric} that quantifies the reliability
+    of each wireless link based on TDMA beacon reception statistics, and use it
+    to drive both Minimum Spanning Tree (MST) computation and relay triggering;
+
+    \item Implement a \textbf{topology-aware routing algorithm} that derives
+    next-hop decisions from an MST computed over the link quality graph
+    disseminated by the MATRIX beacon protocol, and installs the resulting
+    routes into the Linux kernel routing table;
+
+    \item Integrate the relay forwarding mechanism with the \textbf{Linux
+    kernel networking stack} using a dual routing table architecture, so that
+    transit packets are forwarded by the kernel's own IP forwarding engine
+    without user-space intervention;
+
+    \item Separate the communication stack into a \textbf{UDP control plane}
+    for MATRIX topology beacons and a \textbf{TCP data plane} for application
+    data, providing reliable in-order delivery of video frames without modifying
+    the beacon mechanism inherited from the base framework;
+
+    \item \textbf{Validate} the complete system through practical
+    experimentation, measuring routing convergence time after a link failure,
+    end-to-end round-trip latency, video stream inter-arrival regularity, and
+    throughput under both direct and relay communication conditions.
+
+\end{enumerate}
+
+%% -----------------------------------------------------------------------
+\section{Contributions}
+\label{sec:contributions}
+
+This dissertation makes the following contributions:
+
+\begin{itemize}
+
+    \item Design and implementation of a Layer~3 routing mechanism for
+    RA-TDMAs+ networks, enabling transparent IP communication between any
+    two nodes independently of the current topology;
+
+    \item Definition of a link quality metric derived from TDMA beacon
+    statistics, used to drive both route computation and relay activation;
+
+    \item Integration of the routing and relay forwarding mechanism with
+    the Linux kernel networking stack, using standard operating system
+    interfaces and leveraging the kernel's built-in IP forwarding;
+
+    \item Separation of the communication stack into a UDP control plane and
+    a TCP data plane, with per-peer TCP connections and a complete socket
+    configuration for low-latency, failure-resilient operation in a mobile
+    mesh network;
+
+    \item Reconstruction of the Layer~2 routing approach described by
+    Morais~\cite{morais2024synchronization} from published documentation,
+    establishing a reference design for comparison between the two
+    architectures (a side-by-side re-run on the same testbed is left as
+    future work);
+
+    \item Experimental evaluation of the complete system on physical
+    hardware, with a test methodology and automation scripts for measuring
+    routing convergence, latency, throughput, and video stream continuity.
+
+\end{itemize}
+
+%% -----------------------------------------------------------------------
+\section{Document Structure}
+\label{sec:structure}
+
+The remainder of this document is organised as follows:
+
+\begin{itemize}
+
+    \item \textbf{Chapter~\ref{chap:background}} presents the theoretical
+    background relevant to this work. It covers the characteristics and
+    challenges of MANETs, introduces the RA-TDMAs+ TDMA framework and its
+    beacon-based topology dissemination mechanism, reviews routing algorithms
+    for ad-hoc networks with emphasis on MST-based approaches, and analyses
+    related work on Layer 2 routing in RA-TDMAs+ networks.
+
+    \item \textbf{Chapter~\ref{chap:implementation}} describes the design and
+    implementation of the proposed system. It covers the separation of control
+    and data planes into UDP and TCP transports, the MST computation and
+    next-hop derivation, the Netlink-based kernel route installation, the dual
+    routing table architecture for traffic separation, the per-link PDR quality
+    metric, and the thread model that coordinates these components within the
+    TDMA slot structure.
+
+    \item \textbf{Chapter~\ref{chap:evaluation}} presents the experimental
+    evaluation. It describes the hardware platform, the three-node test
+    scenario and the methodology used to induce and measure topology changes,
+    and discusses the results obtained for convergence time, round-trip
+    latency, video stream inter-arrival regularity, and throughput under direct
+    and relay communication.
+
+    \item \textbf{Chapter~\ref{chap:conclusion}} summarises the work, draws
+    conclusions from the experimental results, and identifies directions for
+    future research.
+
+\end{itemize}

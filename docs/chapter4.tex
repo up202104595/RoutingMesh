@@ -294,14 +294,14 @@ of the round trip can leave its node only during that node's slot.
 \label{subsec:m-pdr}
 
 The packet delivery ratio is the fraction of echo requests that are answered
-within a timeout, expressed as a percentage in Equation~\ref{eq:pdr}, where
+within a timeout, expressed as a percentage in Equation~\ref{eq:pdr-m}, where
 $N_{\mathrm{rx}}$ is the number of replies received and $N_{\mathrm{tx}}$ the
 number of requests sent. It is the complement of the packet loss ratio and
 measures the reliability of the path.
 
 \begin{equation}
 \mathrm{PDR} = \frac{N_{\mathrm{rx}}}{N_{\mathrm{tx}}} \times 100\,\%
-\label{eq:pdr}
+\label{eq:pdr-m}
 \end{equation}
 
 \subsection{Jitter}
