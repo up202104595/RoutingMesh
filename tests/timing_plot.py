@@ -49,6 +49,7 @@ def main():
     ap.add_argument("files", nargs="+", help="JSON(s) do tdma_timing_test (aceita globs)")
     ap.add_argument("--out", default="timing_tdma.png", help="ficheiro PNG de saída")
     ap.add_argument("--bucket", type=float, default=10.0, help="largura do bucket (ms)")
+    ap.add_argument("--title", default=None, help="título da figura (default: nenhum)")
     args = ap.parse_args()
 
     paths = []
@@ -99,9 +100,8 @@ def main():
         ax.set_title(titles[topo], fontsize=12, fontweight="bold")
         ax.grid(axis="y", alpha=0.3)
 
-    fig.suptitle("Video TDMA timing — bimodal inter-arrival distribution\n"
-                 "burst within the slot (0–10 ms) + one-frame gap (~140–150 ms)",
-                 fontsize=12, fontweight="bold")
+    if args.title:
+        fig.suptitle(args.title, fontsize=12, fontweight="bold")
     plt.tight_layout()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     plt.savefig(args.out, dpi=150)

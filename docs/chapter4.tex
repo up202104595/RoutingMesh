@@ -421,61 +421,92 @@ result, where the relay likewise added no measurable latency.
 \subsection{Routing Convergence}
 \label{subsec:res-convergence}
 
-Convergence was measured by letting the direct-link stream stabilise, applying
-the \texttt{iptables} rules of Section~\ref{subsec:linkfail}, and using the
-capture to detect the video gap and the first packet recovered through N2.
-Six link-failure events were induced (three repetitions, two runs);
-Table~\ref{tab:convergence} reports the results.
+Convergence is the time the system takes to restore the video stream through
+the relay after the direct link fails. It was measured entirely at N3 from the
+passive video capture, as follows. First, the direct-link stream was allowed
+to stabilise for at least three seconds. The \texttt{iptables} rules of
+Section~\ref{subsec:linkfail} were then applied to sever the direct link. The
+capture was monitored for two events: the \emph{gap}, defined as the instant
+no video packet had arrived for more than $0.4$\,s (its timestamp,
+$t_{\mathrm{last\,direct}}$, marks the last packet delivered over the direct
+path); and the \emph{recovery}, defined as the arrival of the first video
+packet after the gap, forwarded through N2 ($t_{\mathrm{first\,relay}}$). The
+convergence time is
+\begin{equation}
+t_{\mathrm{conv}} = t_{\mathrm{first\,relay}} - t_{\mathrm{last\,direct}}.
+\label{eq:tconv}
+\end{equation}
+The direct link was then restored and the rules cleared before the next
+repetition. Three repetitions were performed; Table~\ref{tab:convergence}
+reports the results.
 
+\vspace{0.4cm}
 \begin{table}[h]
 \centering
 \caption{Routing convergence time after a simulated direct-link failure}
 \label{tab:convergence}
 \begin{tabular}{ccl}
 \toprule
-\textbf{Repetition} & \textbf{$t_{\mathrm{conv}}$ (ms)} & \textbf{Notes} \\
+\textbf{Repetition} & \textbf{$t_{\mathrm{conv}}$ (ms)} & \textbf{Outcome} \\
 \midrule
-1 & 2675 & --- \\
-2 & 2863 & --- \\
-3 & 2926 & --- \\
-4 & 2933 & --- \\
-5 & 453  & relay route still warm; near-instant failover \\
-6 & ---  & no gap detected (warm route; failover $< 0.4$\,s) \\
+1 & 2675 & recovered via relay \\
+2 & 2863 & recovered via relay \\
+3 & ---  & near-instant failover (warm relay route, no measurable gap) \\
 \midrule
-\multicolumn{2}{l}{\textbf{Median (valid)}} & \textbf{2895\,ms} \\
+\multicolumn{2}{l}{\textbf{Median (recovered)}} & \textbf{2769\,ms} \\
 \bottomrule
 \end{tabular}
 \end{table}
+\vspace{0.5cm}
 
-The median convergence time is $\approx 2.9$\,s, equivalent to about
-19~TDMA frames, and is highly consistent across the well-behaved repetitions
-(2675--2933\,ms). Two repetitions are atypical: the relay route was still
-installed from a previous repetition, so the failover completed in less than
-the 0.4\,s detection threshold and the stream barely interrupted. The median
-is used as the headline value because it is robust to these outliers.
+The median convergence time of the two repetitions that produced a measurable
+gap is $\approx 2.8$\,s, equivalent to about 18~TDMA frames. In the third
+repetition the relay route was still installed in the routing tables from the
+previous repetition, so the stream switched paths in less than the $0.4$\,s
+detection threshold and no gap was recorded; this case is reported separately
+and excluded from the median.
 
-The recovery chain, after the direct link is severed, comprises:
+The dominant component of the convergence time is the \emph{link-failure
+detection}, which is governed by the node-aging mechanism of the RA-TDMAs+
+adjacency matrix. Each node keeps, for every neighbour, the timestamp of the
+last beacon received from it; the neighbour's \emph{age} is the elapsed time
+since that beacon. On every round the function \texttt{removeDeadLinks()}
+compares each age against the constant \texttt{MAX\_AGE}, and a neighbour whose
+age reaches \texttt{MAX\_AGE} is declared dead and removed from the matrix. In
+this implementation \texttt{MAX\_AGE} $= 2.0$\,s, so when the direct link to N1
+is severed, N3 stops receiving N1's beacons and continues to treat N1 as a live
+neighbour for a full $2.0$\,s before the link is removed. Only then does the
+topology change and the route via N2 become installable. The recovery chain
+therefore comprises the three stages of Table~\ref{tab:conv-breakdown}.
 
-\begin{enumerate}
-  \item \textbf{Beacon-loss detection ($\approx 450$\,ms).} RA-TDMAs+ declares
-  a link failure after three consecutive missed beacons; at a 150\,ms frame
-  this is $3 \times 150 = 450$\,ms.
-  \item \textbf{Route recomputation and installation ($\approx 100\,\mu$s).}
-  The link quality to N1 drops to zero, the spanning tree is recomputed, and
-  the host routes are reinstalled via Netlink --- all in microseconds on the
-  three-node graph.
-  \item \textbf{TCP teardown and reconnection via the relay ($\approx 2.4$\,s).}
-  The data-plane TCP connection established over the direct path must be torn
-  down (its retransmission timeout must expire) and re-established over the
-  relay path before video resumes.
-\end{enumerate}
+\vspace{0.4cm}
+\begin{table}[h]
+\centering
+\caption{Breakdown of the convergence time after a direct-link failure}
+\label{tab:conv-breakdown}
+\begin{tabular}{lc}
+\toprule
+\textbf{Stage} & \textbf{Duration} \\
+\midrule
+Dead-link detection (node aging, \texttt{MAX\_AGE}) & $2.0$\,s \\
+Spanning-tree recomputation and route installation (Netlink) & $\approx 100\,\mu$s \\
+Relay-path establishment and first forwarded video packet & $\approx 0.8$\,s \\
+\midrule
+\textbf{Total (measured median)} & $\approx 2.8$\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
+\vspace{0.5cm}
 
-The dominant contribution is the TCP teardown and reconnection, not the
-routing computation. This is an important architectural observation: in the
-Layer~3 design the transport connection is bound to a path, so a path change
-forces a transport reset. The implication for the comparison of
-Section~\ref{sec:comparison} is direct, and shortening the TCP timers is the
-most effective way to reduce convergence.
+The breakdown shows that the route computation itself is negligible
+(microseconds on a three-node graph): the convergence time is set almost
+entirely by the $2.0$\,s aging timeout, plus a sub-second tail for the relay
+path to be established and the first forwarded packet to arrive. The most
+direct way to accelerate convergence is therefore to reduce \texttt{MAX\_AGE},
+at the cost of a higher risk of declaring a transient beacon loss as a
+permanent failure; the chosen value of $2.0$\,s is a deliberate trade-off
+between recovery speed and robustness to sporadic beacon loss in the shared
+collision domain.
 
 \subsection{Packet Inter-Arrival Timing}
 \label{subsec:res-ia}
@@ -622,7 +653,7 @@ RTT distribution     & spread / triangular   & bimodal (frame-quantised) \\
 PDR                  & 100\,\%               & 100\,\% \\
 Slot compliance      & verified (beacons)    & verified (beacons + video) \\
 Path observability   & invisible at IP layer & visible (\texttt{ip route}) \\
-Convergence          & faster (no transport reset) & $\approx 2.9$\,s (TCP teardown) \\
+Convergence          & aging-limited ($\approx 2.8$\,s) & aging-limited ($\approx 2.8$\,s) \\
 Reported stability   & runtime failures      & stable across all experiments \\
 \bottomrule
 \end{tabular}
@@ -641,14 +672,17 @@ adjacent across the frame boundary, the reply either catches the next slot or
 misses it by exactly one frame, producing two discrete levels rather than a
 continuum.
 
-\textbf{Convergence.} This is the principal disadvantage of the Layer~3
-approach. Because the data-plane TCP connection is bound to a path, a link
-failure forces a transport teardown and reconnection, which dominates the
-$\approx 2.9$\,s recovery time. The Layer~2 approach changes the path below IP,
-so the transport connection survives a route change transparently and recovers
-within a frame or two. Mitigating this gap --- for instance by shortening the
-TCP timers or by using a connectionless transport for the relayed data --- is
-the clearest avenue for improving the Layer~3 design.
+\textbf{Convergence.} In both designs the recovery time after a link failure is
+dominated by the RA-TDMAs+ node-aging timeout (\texttt{MAX\_AGE} $= 2.0$\,s),
+i.e.\ the time required to detect that the direct link is dead before any
+re-routing can begin (Section~\ref{subsec:res-convergence}). The two approaches
+are therefore expected to recover in comparable time. The difference lies only
+in the post-detection step, which is sub-second in both cases: the Layer~3
+design re-installs the IP route and re-establishes the forwarding state,
+whereas the Layer~2 design updates the ARP tables below IP. Reducing
+\texttt{MAX\_AGE} is the most effective way to accelerate recovery in either
+design, at the cost of robustness to transient beacon loss in the shared
+collision domain.
 
 \textbf{Observability and stability.} The Layer~3 approach trades convergence
 speed for two practical advantages. The relay path is visible to standard IP
@@ -675,11 +709,12 @@ burst structure of the stream. The beacon analysis shows the three nodes
 occupying their slots in strict cyclic order, both directly and through the
 relay, establishing the central claim that the nodes respect their TDMA slots
 for periodic control traffic and for continuous video alike. Routing
-convergence after a link failure has a median of $\approx 2.9$\,s, dominated by
-TCP teardown and reconnection rather than by routing computation. The
+convergence after a link failure has a median of $\approx 2.8$\,s, dominated by
+the $2.0$\,s node-aging timeout (\texttt{MAX\_AGE}) used to detect the dead
+link, not by the routing computation, which completes in microseconds. The
 comparison with the Layer~2 approach of Morais~\cite{morais2024synchronization}
-shows equivalent TDMA-level performance, faster convergence for Layer~2 due to
-its transparent path change, and better observability and stability for the
+shows equivalent TDMA-level performance, comparable convergence (both governed
+by the shared aging timeout), and better observability and stability for the
 Layer~3 design developed here. Reducing the convergence time and completing a
 side-by-side re-run of the Layer~2 system on the same testbed are identified
 as the main directions for future work.

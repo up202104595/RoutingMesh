@@ -145,11 +145,11 @@ def main():
         print_summary(label, samples, args.frame)
         all_samples.append(samples)
 
-        display = args.title or f"TDMA RTT — {label}"
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
         plot_timeseries(a1, samples, args.frame, 'RTT per sequence')
         plot_histogram(a2, samples, args.frame, 'RTT distribution')
-        fig.suptitle(display, fontsize=13, fontweight='bold')
+        if args.title:
+            fig.suptitle(args.title, fontsize=13, fontweight='bold')
         plt.tight_layout()
         out = os.path.join(args.out, f"{_fname(args.title) if args.title else 'rtt_'+label}.png")
         plt.savefig(out, dpi=150); plt.close()
@@ -159,11 +159,11 @@ def main():
     if len(all_samples) > 1:
         agg = np.concatenate(all_samples)
         print_summary("AGGREGATE (all runs)", agg, args.frame)
-        agg_title = args.title or f"TDMA RTT — aggregate of {len(all_samples)} runs"
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
         plot_timeseries(a1, agg, args.frame, 'RTT per sequence')
         plot_histogram(a2, agg, args.frame, 'RTT distribution')
-        fig.suptitle(agg_title, fontsize=13, fontweight='bold')
+        if args.title:
+            fig.suptitle(args.title, fontsize=13, fontweight='bold')
         plt.tight_layout()
         out = os.path.join(args.out, f"{_fname(args.title) if args.title else 'rtt_aggregate'}.png")
         plt.savefig(out, dpi=150); plt.close()

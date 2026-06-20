@@ -33,7 +33,7 @@ def main():
     ap = argparse.ArgumentParser(description='Video throughput bar chart (direct vs relay)')
     ap.add_argument('files', nargs='+', help='throughput_*.json (accepts globs)')
     ap.add_argument('--out', default='throughput.png', help='output PNG')
-    ap.add_argument('--title', default='Video stream throughput', help='figure title')
+    ap.add_argument('--title', default=None, help='figure title (default: none)')
     ap.add_argument('--target', type=float, default=500.0,
                     help='encoder target in kbps for the reference line (0 to disable)')
     args = ap.parse_args()
@@ -77,7 +77,8 @@ def main():
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS.get(t, t) for t in order])
     ax.set_ylabel('Throughput (kbps)')
-    ax.set_title(args.title, fontsize=12, fontweight='bold')
+    if args.title:
+        ax.set_title(args.title, fontsize=12, fontweight='bold')
     ax.set_ylim(0, max(means) * 1.25)
     ax.grid(axis='y', alpha=0.3)
 
