@@ -366,12 +366,44 @@ Jitter                              & 15.2\,ms          & 14.6\,ms          \\
 \subsection{Video Throughput}
 \label{subsec:res-throughput}
 
-Video throughput was measured by streaming continuously from N1 to N3 and
-recording every video packet with a passive capture at N3 for 15\,s; because
-the capture does not occupy port~5000, it does not perturb the live stream.
-The test was repeated three times over the direct link and three times over
-the relay path. Figure~\ref{fig:throughput} and Table~\ref{tab:throughput}
-report the means.
+\paragraph{Measurement methodology.}
+Throughput is the rate at which video payload is \emph{delivered} to the base
+station, and it was measured in a way that is both non-intrusive and fair to
+compare between the direct and relay conditions. The video stream produced by
+N1 was left running continuously, and a passive capture at N3 observed the
+flow for a 15\,s window, recording the size and arrival instant of every video
+datagram. The capture is passive in a strict sense: it attaches a raw
+\texttt{AF\_PACKET} socket to the interface and reads a copy of each frame,
+rather than binding UDP port~5000. This distinction matters. Had the
+measurement tool bound port~5000 it would either have collided with the
+\texttt{ffplay} receiver (the operating system does not allow two ordinary
+sockets to own the same port) or, worse, silently stolen datagrams from the
+player and distorted the very quantity being measured. By reading a copy below
+the socket layer, the tool coexists with the live player and observes exactly
+the bytes the application receives, without perturbing the stream. The
+experiment was repeated three times over the direct link and three times over
+the relay path, and the results were averaged to suppress the run-to-run
+variation that the variable-bitrate encoder introduces as the scene changes.
+
+\paragraph{What is counted, and why it is the fair metric.}
+The quantity reported here is the \emph{application-level} throughput: the
+MPEG-TS video payload delivered end-to-end from N1 to N3, identified by the
+mesh flow \texttt{10.0.0.1}\,$\to$\,\texttt{10.0.0.3:5000}. It deliberately
+excludes the wire-level framing, and this choice is what makes the direct and
+relay numbers comparable. On the direct path the video is carried inside the
+TDMA framework's own transport encapsulation, whereas on the relay path N2
+forwards the raw IP datagrams; counting the encapsulated wire bytes would
+therefore measure two different things and would wrongly suggest that the relay
+halves the throughput. Counting the delivered video payload instead measures
+the same thing in both cases --- the bytes the player actually consumes --- and
+isolates the effect of the relay hop from the framing overhead. A useful
+by-product of inspecting the relay capture is direct evidence that the
+forwarding is transparent: the relayed video appears on the wire as plain
+MPEG-TS/UDP datagrams addressed \texttt{10.0.0.1}\,$\to$\,\texttt{10.0.0.3},
+\emph{not} re-wrapped in any additional framework header. The relay is thus a
+genuine network-layer forward (the kernel routing engine moving an IP packet
+from one interface to the other), not a re-origination of the stream.
+Figure~\ref{fig:throughput} and Table~\ref{tab:throughput} report the means.
 
 \vspace{0.4cm}
 \begin{figure}[H]
@@ -403,20 +435,83 @@ Relay  & 552\,kbps & 1114\,B & 61\,pkt/s \\
 \end{tabular}
 \end{table}
 
-The direct-link mean of 558\,kbps slightly exceeds the 500\,kbps encoder
-target for two reasons. First, the MPEG-TS container adds $\approx 15\,\%$
-overhead (a 4-byte header per 188-byte transport packet). Second, the encoder
-uses \texttt{-g~1}, disabling inter-frame prediction; every frame is an
-independent intra frame, producing a higher and more constant bitrate than a
-configuration with P/B-frames.
+\paragraph{Why the delivered rate exceeds the encoder target.}
+The direct-link mean of 558\,kbps sits about 12\,\% above the 500\,kbps figure
+configured in the encoder. This is expected, and decomposing it is instructive
+because the gap is structural rather than a measurement artefact. The 500\,kbps
+target governs the \emph{compressed video elementary stream} that
+\texttt{libx264} emits; it does not include the cost of packaging that stream
+for transport. Two mechanisms add the remaining bytes.
 
+First, the MPEG-TS container imposes a fixed framing tax. The elementary stream
+is segmented into 188-byte transport packets, each carrying a 4-byte header, so
+the container alone inflates the payload by $4/184 \approx 2.2\,\%$ before it
+ever reaches the network; the UDP datagrams then group seven such transport
+packets ($7 \times 188 = 1316$\,B) and, once the UDP (8\,B) and IP (20\,B)
+headers are added, the on-the-wire framing accounts for a further few per cent.
+Together the containerisation and headers explain the bulk of the excess.
+
+Second, and more significantly, the encoder is configured with \texttt{-g~1},
+which forces every frame to be coded as an independent intra (I) frame and
+disables inter-frame prediction entirely. This choice is deliberate: with an
+all-intra stream the loss of any single packet damages only one frame and the
+video self-heals on the next frame, which is the behaviour wanted for a
+low-latency teleoperation link over a lossy wireless medium. The cost is rate:
+without P- or B-frames the encoder cannot exploit temporal redundancy between
+successive frames, so each frame is encoded from scratch and the rate
+controller produces a higher and far more constant bitrate than an equivalent
+GOP-structured stream would. The 558\,kbps observed is therefore the natural
+operating point of a robustness-oriented, all-intra configuration, not a
+malfunction of the rate control.
+
+\paragraph{Headroom within the TDMA slot.}
+A 558\,kbps stream is comfortably within the capacity that the schedule grants
+to N1, which is the reason the stream is sustained without loss despite being
+confined to one slot in three. N1 may transmit only during its 50\,ms slot of
+every 150\,ms frame, i.e.\ for one third of wall-clock time. To deliver a
+mean of 558\,kbps while transmitting for only a third of the time, the
+\emph{instantaneous} rate inside the slot must be roughly three times the mean,
+about 1.7\,Mbps. This is a small fraction of the raw rate available on the
+IEEE~802.11 channel, so the slot has ample headroom: the burst of $\approx 8$
+datagrams that constitutes one frame's worth of video (derived in
+Equation~\ref{eq:pkts-per-slot}, Section~\ref{subsec:res-ia}) drains well
+within the 50\,ms slot, leaving the guard interval clear. This headroom is what
+allows the stream to coexist with the periodic beacons and the teleoperation
+control traffic inside the same slot structure without any of them being
+starved, and it is the quantitative reason the schedule is never the limiting
+factor on the video plane.
+
+\paragraph{Transparency of the relay.}
 Under relay conditions the mean throughput is 552\,kbps, a reduction of only
-$\approx 1\,\%$. This is within the run-to-run variability of the encoder as
-scene content changes, and no systematic degradation attributable to the relay
-hop is observed. The relay is therefore effectively \emph{transparent} for the
-video plane: kernel forwarding at N2 carries the stream without consuming a
-separate TDMA scheduling step. This is the data-plane counterpart of the RTT
-result, where the relay likewise added no measurable latency.
+$\approx 1\,\%$ relative to the direct path. This difference is smaller than
+the run-to-run variation the variable-bitrate encoder produces as the scene
+content changes, so it cannot be attributed to the relay hop; no systematic
+degradation is observed. The result is significant because, a priori, inserting
+an intermediate node could have cost a full extra slot of latency per frame and
+a corresponding reduction in sustained rate if N2 had to schedule the forwarded
+video into its \emph{own} transmit opportunity. It does not. As established
+above, N2 forwards the raw IP datagrams through the kernel routing engine
+rather than re-originating them as fresh application traffic, so the video is
+carried within the existing slot structure instead of consuming a separate
+TDMA scheduling step at the relay. The relay is therefore effectively
+\emph{transparent} on the video plane, and this is the data-plane counterpart
+of the control-plane result of Section~\ref{subsec:res-rtt}, where forwarding
+through N2 likewise added no measurable latency. The two observations reinforce
+each other: the same forwarding mechanism that leaves the round-trip
+distribution unchanged also leaves the delivered throughput unchanged.
+
+\paragraph{Temporal behaviour of the throughput.}
+The 558/552\,kbps figures are time-averages, but the instantaneous delivery is
+far from flat: because N1 may transmit only inside its slot, the video arrives
+in bursts separated by silent inter-burst gaps of one frame, and the mean
+throughput is the integral of this bursty profile over the observation window.
+This temporal structure is exactly what the inter-arrival analysis of
+Section~\ref{subsec:res-ia} quantifies --- roughly 88\,\% of the datagrams
+arrive back-to-back within a burst and the remainder are separated by a
+one-frame gap --- and it is identical for the direct and relay conditions. The
+flatness of the \emph{averaged} throughput over the window therefore does not
+contradict the burstiness of the stream; it is the expected consequence of a
+constant-rate encoder feeding a periodic slot, sampled over many frames.
 
 \subsection{Routing Convergence}
 \label{subsec:res-convergence}
