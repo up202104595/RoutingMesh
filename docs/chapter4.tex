@@ -165,7 +165,15 @@ On N1, \texttt{rpicam-vid} captures raw YUV~4:2:0 frames and pipes them to
 \texttt{ffmpeg}, which encodes them with \texttt{libx264}, wraps the output in
 MPEG-TS, and sends each transport-stream segment as a UDP datagram to
 \texttt{10.0.0.3:5000}. Because the destination is a mesh (TUN) address, the
-datagram enters the TDMA routing layer transparently. On N3,
+datagram enters the TDMA routing layer transparently. It is worth noting the
+two transport layers involved, because they matter for the throughput and
+convergence analyses. The video application itself uses UDP, which is the
+natural choice for a real-time stream; that UDP traffic is then carried between
+the physical nodes by the TDMA framework, whose data plane is built on a TCP
+connection over the wireless interface (the framework's periodic beacons, in
+contrast, are sent over UDP). The relay therefore forwards the IP datagrams
+below this framework transport, a distinction that becomes important in
+Sections~\ref{subsec:res-throughput} and~\ref{subsec:res-convergence}. On N3,
 \texttt{base\_station.py} receives each datagram, timestamps it, and forwards
 it to \texttt{ffplay}. Table~\ref{tab:app-params} lists the parameters.
 
@@ -210,61 +218,134 @@ TCP data plane, and forcing traffic onto the relay path
 N1\,$\to$\,N2\,$\to$\,N3. The rules are cleared between repetitions with
 \texttt{iptables -F}.
 
-A subtlety relevant to the synchronisation analysis
-(Section~\ref{subsec:res-slots}) is that \texttt{iptables} filters at the IP
-layer, whereas a packet \emph{capture} (\texttt{tcpdump}) taps the interface
-\emph{before} the firewall. A capture taken at N3 with the link blocked
-therefore still records N1's beacons (they reach the antenna), even though
-N3's TDMA application no longer receives them. The block changes which node N3
-synchronises to (it falls back to synchronising through N2), without removing
-N1's transmissions from the medium. To confirm that the block was effective
-for the data plane, each relay measurement was preceded by a check that N1's
-physical address was unreachable (\texttt{ping} to \texttt{172.20.10.1}
-failing), since the physical address --- unlike the mesh address --- is not
-reachable through the relay.
+To confirm that the block was effective before each relay measurement, N3
+attempted to reach N1's physical address with \texttt{ping}
+(\texttt{172.20.10.1}); the physical address, unlike the mesh address, is not
+reachable through the relay, so a failing ping confirms that the direct link was
+genuinely severed and that any subsequent traffic must have travelled through
+N2.
 
 
 %% =======================================================================
 \section{Metrics}
 \label{sec:metrics}
 
-\paragraph{Round-trip time (RTT).}
-$\mathrm{RTT}_k = t^{\mathrm{rx}}_k - t^{\mathrm{tx}}_k$, the elapsed time from
-N3 sending a UDP echo request to receiving N1's reply. In a TDMA network the
-RTT reflects the slot structure: each leg of the round trip can depart only
-within its node's slot.
+This section defines the metrics used throughout the evaluation. They are the
+standard quantities used to characterise a packet network, adapted where
+necessary to the TDMA context in which each leg of a transmission can only
+depart within its node's slot.
 
-\paragraph{Packet delivery ratio (PDR).}
-$\mathrm{PDR} = N_{\mathrm{rx}}/N_{\mathrm{tx}} \times 100\,\%$, the fraction
-of echo requests answered within a timeout.
+\subsection{Round-Trip Time (RTT)}
+\label{subsec:m-rtt}
 
-\paragraph{Jitter.}
-$J = \frac{1}{N-1}\sum_{k=2}^{N}\lvert \mathrm{RTT}_k - \mathrm{RTT}_{k-1}\rvert$,
-the mean absolute deviation of consecutive RTT samples.
+The round-trip time is the elapsed time between N3 sending a UDP echo request to
+N1 and receiving the corresponding reply. For the $k$-th probe it is given by
+Equation~\ref{eq:rtt}, where $t^{\mathrm{tx}}_k$ is the instant the request is
+sent and $t^{\mathrm{rx}}_k$ the instant the reply is received, both timestamped
+at N3.
 
-\paragraph{Throughput.}
-$T = 8\,B_{\mathrm{total}} / \Delta t$ [kbps], where $B_{\mathrm{total}}$ is
-the sum of UDP video payload bytes received in an observation window
-$\Delta t$.
+\begin{equation}
+\mathrm{RTT}_k = t^{\mathrm{rx}}_k - t^{\mathrm{tx}}_k
+\label{eq:rtt}
+\end{equation}
 
-\paragraph{Convergence time.}
-$t_{\mathrm{conv}} = t_{\mathrm{first\,relay}} - t_{\mathrm{last\,direct}}$,
-the gap between the last video packet on the direct path and the first packet
-recovered through the relay.
+In a TDMA network the RTT reflects the slot structure directly, since each leg
+of the round trip can leave its node only during that node's slot.
 
-\paragraph{Inter-arrival time (IA).}
-$\mathrm{IA}_k = t_{k+1} - t_k$, the time between consecutive video packets.
-Its distribution reveals the TDMA burst structure and allows verification that
-relay forwarding preserves it.
+\subsection{Packet Delivery Ratio (PDR)}
+\label{subsec:m-pdr}
 
-\paragraph{Slot occupancy.}
-The transmission instant of each captured beacon is wrapped to the frame,
-$\phi = t \bmod T_{\mathrm{frame}}$, and attributed to its source node. A node
-respects its slot if its beacons cluster within its assigned 50\,ms interval.
-Because the RA-TDMAs+ synchroniser advances all slots by a common amount each
-round, the whole frame rotates slowly in wall-clock time; this common rotation
-is removed before evaluating the per-node clustering, leaving the
-\emph{relative} synchronisation between nodes.
+The packet delivery ratio is the fraction of echo requests that are answered
+within a timeout, expressed as a percentage in Equation~\ref{eq:pdr}, where
+$N_{\mathrm{rx}}$ is the number of replies received and $N_{\mathrm{tx}}$ the
+number of requests sent. It is the complement of the packet loss ratio and
+measures the reliability of the path.
+
+\begin{equation}
+\mathrm{PDR} = \frac{N_{\mathrm{rx}}}{N_{\mathrm{tx}}} \times 100\,\%
+\label{eq:pdr}
+\end{equation}
+
+\subsection{Jitter}
+\label{subsec:m-jitter}
+
+Jitter quantifies the variability of the latency, which is critical for
+real-time applications such as a live video link. The average relative jitter
+used here is the mean absolute difference between consecutive RTT samples,
+defined in Equation~\ref{eq:jitter} over $N$ measurements for a given pair of
+nodes.
+
+\begin{equation}
+J = \frac{1}{N-1}\sum_{k=2}^{N}\bigl\lvert \mathrm{RTT}_k - \mathrm{RTT}_{k-1}\bigr\rvert
+\label{eq:jitter}
+\end{equation}
+
+\subsection{Throughput}
+\label{subsec:m-throughput}
+
+Throughput is the rate at which application data is successfully delivered to
+the destination over an observation window. It is computed from the delivered
+video payload as in Equation~\ref{eq:throughput}, where $B_{\mathrm{total}}$ is
+the sum of the video payload bytes received at N3 during a window of duration
+$\Delta t$, and the factor of eight converts bytes to bits.
+
+\begin{equation}
+T = \frac{8\,B_{\mathrm{total}}}{\Delta t} \quad [\text{kbps}]
+\label{eq:throughput}
+\end{equation}
+
+The video application emits an MPEG-TS stream over UDP into the mesh interface;
+this traffic is then carried between physical nodes by the TDMA framework, whose
+data plane uses a TCP connection (the framework's beacons, by contrast, use
+UDP). Throughput is measured at the application level --- the delivered video
+payload --- so that the direct and relay conditions count the same quantity
+regardless of how the framework encapsulates it on the wire
+(Section~\ref{subsec:res-throughput}).
+
+\subsection{Convergence Time}
+\label{subsec:m-conv}
+
+The convergence time is the interval during which the video stream is
+interrupted while the system re-routes through the relay after the direct link
+fails. It is measured as in Equation~\ref{eq:tconv-m}, the gap between the last
+video packet delivered over the direct path and the first packet recovered
+through N2.
+
+\begin{equation}
+t_{\mathrm{conv}} = t_{\mathrm{first\,relay}} - t_{\mathrm{last\,direct}}
+\label{eq:tconv-m}
+\end{equation}
+
+\subsection{Inter-Arrival Time (IA)}
+\label{subsec:m-ia}
+
+The inter-arrival time is the interval between two consecutive video packets
+arriving at N3, defined in Equation~\ref{eq:ia}. Its distribution reveals the
+TDMA burst structure of the stream and allows verification that relay forwarding
+preserves it.
+
+\begin{equation}
+\mathrm{IA}_k = t_{k+1} - t_k
+\label{eq:ia}
+\end{equation}
+
+\subsection{Slot Occupancy}
+\label{subsec:m-slot}
+
+To verify that each node transmits only within its assigned slot, the
+transmission instant of every captured beacon is wrapped to the frame period, as
+in Equation~\ref{eq:phi}, and attributed to its source node.
+
+\begin{equation}
+\phi = t \bmod T_{\mathrm{frame}}
+\label{eq:phi}
+\end{equation}
+
+A node respects its slot if its beacons cluster within its assigned 50\,ms
+interval. Because the RA-TDMAs+ synchroniser advances all slots by a common
+amount on every round, the whole frame rotates slowly in wall-clock time; this
+common rotation is removed before the per-node clustering is evaluated, leaving
+the relative synchronisation between the nodes.
 
 
 %% =======================================================================
@@ -299,7 +380,6 @@ quantisation.}
 \end{figure}
 \vspace{0.5cm}
 
-\paragraph{The two slot waits that compose a round trip.}
 The RTT does not concentrate around a single value; it splits into two
 well-separated clusters with an empty band between roughly 60 and 190\,ms.
 This is a direct consequence of the slot structure, and it is best understood
@@ -316,7 +396,6 @@ a slot is, by construction, a wait for a position in a periodic 150\,ms frame,
 the RTT is built up from whole-frame and fractional-frame components rather
 than from a smoothly varying delay.
 
-\paragraph{Why the distribution is bimodal rather than spread.}
 The two clusters correspond to the two possible outcomes of the second, decisive
 slot wait. After the request arrives, the reply either reaches N1's transmit
 opportunity in the immediately following frame --- producing the lower cluster
@@ -339,7 +418,6 @@ triangle; here, with three nodes and the requester and responder slots adjacent
 across the frame boundary, the reply either just catches the next slot or just
 misses it, collapsing the continuum into two discrete levels.
 
-\paragraph{Why the cluster proportions vary, and why averages are uninformative.}
 The fraction of pings that lands in each cluster is not fixed: it changes from
 run to run, and even drifts slowly within a single run. This is not noise but a
 deterministic beat. The probe is emitted by a free-running 10\,Hz timer, i.e.\
@@ -371,7 +449,6 @@ significant latency to the control channel.}
 \end{figure}
 \vspace{0.5cm}
 
-\paragraph{The relay path leaves the distribution unchanged.}
 The relay distribution is practically identical to the direct one: the same
 two clusters, in the same positions, with the same one-frame separation. This
 is a stronger statement than it may appear. Inserting N2 into the path could,
@@ -387,7 +464,6 @@ data-plane results are thus two views of the same property: the relay is
 transparent because forwarding happens below the application and does not
 consume a separate scheduling step.
 
-\paragraph{Why the bimodal, lossless RTT is positive evidence of slot compliance.}
 It is worth stating explicitly why this RTT behaviour supports, rather than
 merely fails to contradict, the central claim that the nodes respect their
 slots. If the nodes were \emph{not} synchronised --- if slots overlapped or
@@ -429,7 +505,6 @@ Jitter                              & 15.2\,ms          & 14.6\,ms          \\
 \subsection{Video Throughput}
 \label{subsec:res-throughput}
 
-\paragraph{Measurement methodology.}
 Throughput is the rate at which video payload is \emph{delivered} to the base
 station, and it was measured in a way that is both non-intrusive and fair to
 compare between the direct and relay conditions. The video stream produced by
@@ -448,7 +523,6 @@ experiment was repeated three times over the direct link and three times over
 the relay path, and the results were averaged to suppress the run-to-run
 variation that the variable-bitrate encoder introduces as the scene changes.
 
-\paragraph{What is counted, and why it is the fair metric.}
 The quantity reported here is the \emph{application-level} throughput: the
 MPEG-TS video payload delivered end-to-end from N1 to N3, identified by the
 mesh flow \texttt{10.0.0.1}\,$\to$\,\texttt{10.0.0.3:5000}. It deliberately
@@ -498,7 +572,6 @@ Relay  & 552\,kbps & 1114\,B & 61\,pkt/s \\
 \end{tabular}
 \end{table}
 
-\paragraph{Why the delivered rate exceeds the encoder target.}
 The direct-link mean of 558\,kbps sits about 12\,\% above the 500\,kbps figure
 configured in the encoder. This is expected, and decomposing it is instructive
 because the gap is structural rather than a measurement artefact. The 500\,kbps
@@ -527,7 +600,6 @@ GOP-structured stream would. The 558\,kbps observed is therefore the natural
 operating point of a robustness-oriented, all-intra configuration, not a
 malfunction of the rate control.
 
-\paragraph{Headroom within the TDMA slot.}
 A 558\,kbps stream is comfortably within the capacity that the schedule grants
 to N1, which is the reason the stream is sustained without loss despite being
 confined to one slot in three. N1 may transmit only during its 50\,ms slot of
@@ -544,7 +616,6 @@ control traffic inside the same slot structure without any of them being
 starved, and it is the quantitative reason the schedule is never the limiting
 factor on the video plane.
 
-\paragraph{Transparency of the relay.}
 Under relay conditions the mean throughput is 552\,kbps, a reduction of only
 $\approx 1\,\%$ relative to the direct path. This difference is smaller than
 the run-to-run variation the variable-bitrate encoder produces as the scene
@@ -563,7 +634,6 @@ through N2 likewise added no measurable latency. The two observations reinforce
 each other: the same forwarding mechanism that leaves the round-trip
 distribution unchanged also leaves the delivered throughput unchanged.
 
-\paragraph{Why no per-hop throughput collapse is observed.}
 At first sight this $\approx 1\,\%$ result appears to contradict the reference
 work of Morais~\cite{morais2024synchronization}, which reported a severe
 throughput reduction with relaying --- to roughly one half of the
@@ -604,7 +674,6 @@ saturation. For the application that this system is built to carry, the
 operationally relevant regime is the source-limited one, and in that regime the
 relay is transparent.
 
-\paragraph{Temporal behaviour of the throughput.}
 The 558/552\,kbps figures are time-averages, but the instantaneous delivery is
 far from flat: because N1 may transmit only inside its slot, the video arrives
 in bursts separated by silent inter-burst gaps of one frame, and the mean
@@ -674,7 +743,6 @@ detection is bypassed (the route is already present) the failover is effectively
 instantaneous. It is excluded from the median only because it does not measure
 the same quantity as the other two.
 
-\paragraph{What governs the detection time.}
 The dominant component of the convergence time is the \emph{link-failure
 detection}, which is governed by the node-aging mechanism of the RA-TDMAs+
 adjacency matrix. Each node keeps, for every neighbour, the timestamp of the
@@ -825,7 +893,6 @@ that the nodes respect the TDMA schedule.}
 \end{figure}
 \vspace{0.5cm}
 
-\paragraph{How the measurement was taken.}
 The data underlying Figure~\ref{fig:slots} were obtained by capturing the
 beacon traffic at N3 with a passive sniffer and recording, for each beacon, its
 arrival instant and its source node (identifiable from the physical address and
@@ -840,7 +907,6 @@ fourth, passive observer node, the synchronisation is verified from the
 perspective of an active participant, N3, which is sufficient because N3 is in
 radio range of both other nodes and therefore receives all three beacons.
 
-\paragraph{Reading the figure: ordering, spacing, and occupancy.}
 The three nodes occupy three disjoint regions in the cyclic order
 N1\,$\to$\,N2\,$\to$\,N3, each separated from the next by approximately one
 slot, and each remains in its region across rounds. Quantitatively, after the
@@ -854,7 +920,6 @@ schedule is being respected: each node is in fact confining its transmissions
 to its own slot, which is the property the whole evaluation set out to
 establish.
 
-\paragraph{Two properties of the synchroniser that must be accounted for.}
 Two characteristics of the RA-TDMAs+ synchroniser must be understood to read
 the figure correctly, and both stem from the fact that the network has no
 global clock. First, the absolute phase of the frame is arbitrary: there is no
@@ -875,18 +940,17 @@ rotation is small enough to be neglected and the slots appear stationary, but
 over a longer capture it must be de-rotated explicitly or the clouds would
 smear across the frame and obscure the very alignment they are meant to show.
 
-\paragraph{The relay condition, and an apparent paradox resolved.}
 Under relay conditions the same analysis confirms that the cyclic ordering is
 maintained. This case requires care, because a naive reading of the capture
 seems paradoxical: with the direct link to N1 blocked, how can N1's beacons
-still appear at N3 and still fall in N1's slot? The resolution lies in the
-distinction, established in Section~\ref{subsec:linkfail}, between the firewall
-and the capture. The \texttt{iptables} rule discards N1's packets at the IP
-layer, \emph{above} the point where the sniffer taps the interface, so N1's
-beacons are removed from N3's TDMA \emph{application} --- which is why N3 stops
-treating N1 as a direct neighbour and falls back to synchronising through the
-two-hop chain N1\,$\to$\,N2\,$\to$\,N3 --- while still being \emph{recorded} by
-the capture, because they continue to reach the antenna. The capture thus shows
+still appear at N3 and still fall in N1's slot? The resolution lies in where the
+two operations act. The \texttt{iptables} rule discards N1's packets at the IP
+layer, whereas the passive sniffer taps the wireless interface below it, before
+the firewall. N1's beacons are therefore removed from N3's TDMA
+\emph{application} --- which is why N3 stops treating N1 as a direct neighbour
+and falls back to synchronising through the two-hop chain
+N1\,$\to$\,N2\,$\to$\,N3 --- while still being \emph{recorded} by the capture,
+because they continue to reach the antenna. The capture thus shows
 the true state of the medium (N1 is still transmitting, still in its slot),
 whereas the routing layer reflects the logical topology (N1 is unreachable
 directly). Far from undermining the result, this confirms two things at once:
