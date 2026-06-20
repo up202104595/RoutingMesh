@@ -196,8 +196,12 @@ def plot_rounds(beacons, video, offset, t0, out_path, max_rounds=14):
     ax.set_xlim(0, FRAME_MS)
     ax.set_xlabel('Position within TDMA frame (ms)  [wrapped 0–150 ms, de-rotated]')
     ax.set_ylabel('TDMA round')
-    ax.set_title("Direct video vs. beacons per round\n"
-                 "N1's video burst falls inside N1's slot [0–50 ms]")
+    if video:
+        ax.set_title("Direct video vs. beacons per round (de-rotated)\n"
+                     "N1's video burst falls inside N1's slot [0–50 ms]")
+    else:
+        ax.set_title("Beacon transmission per round (de-rotated)\n"
+                     "each node stays in its own slot")
     ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=9)
     ax.grid(alpha=0.3)
     plt.tight_layout()
@@ -249,23 +253,21 @@ def main():
         sys.exit("ERROR: no TDMA beacons found. Capture wlan0 unfiltered, "
                  "so both beacons (<=120 B) and video (>=200 B) are present.")
     if not video:
-        print("WARNING: no N1 video packets found "
+        print("NOTE: no N1 video packets found "
               f"(src {N1_PHYS} or {N1_MESH}, length >= {VIDEO_MIN_LEN} B).")
-        print(f"  Diagnosis: {diag['rows']} packets parsed, "
-              f"largest packet = {diag['max_len']} B.")
+        print(f"  {diag['rows']} packets parsed, largest packet = {diag['max_len']} B.")
         if diag['max_len'] < VIDEO_MIN_LEN:
-            print("  -> This capture has NO video at all: every packet is small "
-                  "(control plane only).")
-            print("     Re-capture wlan0 WITHOUT any filter WHILE the video is "
-                  "streaming N1->N3 on the direct link.")
+            print("  -> This capture has NO video: every packet is small "
+                  "(control plane only). The figure will show beacons only.")
+            print("     To also prove the video stays in slot, re-capture wlan0 "
+                  "WITHOUT any filter WHILE the video streams N1->N3 (direct).")
         elif diag['big_by_src']:
             top = sorted(diag['big_by_src'].items(), key=lambda kv: -kv[1])[:5]
-            print("  -> Large packets exist but not from N1. Sources of >=200 B "
-                  "packets:")
+            print("  -> Large packets exist but not from N1. Sources of >=200 B:")
             for s, n in top:
                 print(f"       {s}: {n}")
             print("     Check the video source address, or tell me the correct one.")
-        sys.exit(1)
+        print("  Continuing with a beacon-only slot figure.")
 
     print(f"[INFO] {len(beacons)} beacons, {len(video)} N1 video packets")
 
