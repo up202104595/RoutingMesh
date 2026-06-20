@@ -7,7 +7,8 @@
 %%   RTT_over_the_relay_path.png    (\ref{fig:rtt-relay})
 %%   ia_timing.png                  (\ref{fig:ia})  — combinada direto vs relay
 %%   throughput.png                 (\ref{fig:throughput})
-%%   slot_occupancy.png             (\ref{fig:slots})
+%%   ao_rounds.png                  (\ref{fig:slots})       — de-rotated, stays in slot
+%%   ao_scatter.png                 (\ref{fig:slots-drift}) — raw, shows the drift
 
 \chapter{Experimental Evaluation}
 \label{chap:evaluation}
@@ -199,6 +200,43 @@ RTT echo port         & UDP 19876             & \texttt{rtt\_test.py} \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Teleoperation Command Channel}
+\label{subsec:cmd-channel}
+
+The video stream described above is only one half of the teleoperation loop; the
+other half is the command channel that carries the operator's input from the
+base station back to the robot, and it is this channel whose latency ultimately
+determines how responsive the robot feels to drive. At N3, \texttt{base\_station.py}
+reads a DualShock~4 gamepad through \texttt{pygame} and translates its state into
+commands, which it sends as small JSON datagrams over UDP to the robot at
+\texttt{10.0.0.1:9000}. Three command types are produced. A \texttt{move}
+command carries the per-wheel speeds derived from the triggers and the steering
+axis (the right trigger drives forward, the left trigger reverses, and the right
+stick steers by biasing the left and right wheel speeds); a \texttt{stop}
+command is sent when no movement input is present; and a \texttt{servo} command
+carries the pan and tilt angles of the camera mount, adjusted with the
+directional pad. Movement commands are emitted at a fixed rate of 20\,Hz (one
+every 50\,ms) and servo commands at $\approx 12$\,Hz, so that the channel
+produces a steady, low-rate flow of small datagrams rather than bursts. On the
+robot, \texttt{alphabot\_node.py} receives each datagram, decodes the JSON, and
+actuates the hardware accordingly: the \texttt{move} speeds are written to the
+TB6612FNG motor driver and the \texttt{servo} angles to the PCA9685 controller.
+A complementary telemetry stream flows in the opposite direction, from the robot
+to the base station, as JSON datagrams over UDP port 9001 at 5\,Hz.
+
+Like the video, these command datagrams are addressed to a mesh (\texttt{10.0.0.x})
+address, so they are routed by the TDMA framework and are therefore subject to
+the same slot structure and, after a direct-link failure, forwarded through N2.
+Because the commands are small and slow relative to the video, they never stress
+the link capacity; what matters for them is latency and its variability, since a
+late or jittery command degrades the feel of the control loop even when no data
+is lost. The latency that these commands experience is precisely what the
+round-trip measurement of Section~\ref{subsec:res-rtt} characterises, which is
+why that measurement uses a UDP echo on the same mesh plane: the RTT probe is a
+stand-in for the command that the operator sends and the acknowledgement the
+robot would return, and its bounded, slot-quantised distribution is what makes
+the teleoperation usable.
 
 \subsection{Link-Failure Methodology}
 \label{subsec:linkfail}
@@ -882,9 +920,10 @@ a sequence of rounds.
 \vspace{0.4cm}
 \begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{slot_occupancy.png}
+\includegraphics[width=\textwidth]{ao_rounds.png}
 \caption{Beacon transmission instant wrapped to the TDMA frame, per round, for
-the three nodes. Each node occupies its own slot in the strict cyclic order
+the three nodes, after the common frame rotation has been removed. Each node
+occupies its own slot in the strict cyclic order
 N1\,$\to$\,N2\,$\to$\,N3, separated from the next by approximately one slot
 (50\,ms), and remains in its slot across rounds. This is the direct evidence
 that the nodes respect the TDMA schedule.}
@@ -930,14 +969,34 @@ nodes, not their absolute positions, that matter. Second, the synchroniser does
 not hold the frame fixed in wall-clock time. To keep the nodes aligned it
 advances all slots by a small common amount on every round, with the effect that
 the entire frame rotates slowly against wall-clock time, at $\approx 18$\,ms/s
-in these captures. This common rotation is a property of all nodes together and
-says nothing about their mutual alignment, so it is removed (the per-round
-common offset is subtracted) before the clustering is evaluated; what remains is
-the relative synchronisation between nodes, which is the quantity of interest.
-Over the short window of a few rounds shown in Figure~\ref{fig:slots} the
-rotation is small enough to be neglected and the slots appear stationary, but
-over a longer capture it must be de-rotated explicitly or the clouds would
-smear across the frame and obscure the very alignment they are meant to show.
+in these captures. This rotation is visible in Figure~\ref{fig:slots-drift},
+which plots the same beacons \emph{without} the de-rotation applied: the three
+clouds sweep diagonally across the frame as the rounds advance, each node moving
+by the same amount per round so that their mutual spacing is preserved while
+their absolute positions drift. The rotation is therefore a property of all
+nodes together and says nothing about their mutual alignment, so it is removed
+(the per-round common offset is subtracted) before the clustering is evaluated,
+which yields the stationary view of Figure~\ref{fig:slots}; what remains after
+de-rotation is the relative synchronisation between nodes, the quantity of
+interest. Over a window of only a few rounds the rotation is small and could be
+neglected, but over a longer capture it must be de-rotated explicitly or the
+clouds would smear across the frame and obscure the very alignment they are
+meant to show.
+
+\vspace{0.4cm}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{ao_scatter.png}
+\caption{The same beacon transmissions as Figure~\ref{fig:slots}, plotted
+without removing the common frame rotation. The three node clouds sweep
+diagonally across the frame as the rounds advance, drifting at $\approx
+18$\,ms/s, yet they move together and keep their mutual one-slot spacing.
+This is the raw effect of the synchroniser advancing all slots by a common
+amount each round; de-rotating it produces the stationary view of
+Figure~\ref{fig:slots}.}
+\label{fig:slots-drift}
+\end{figure}
+\vspace{0.5cm}
 
 Under relay conditions the same analysis confirms that the cyclic ordering is
 maintained. This case requires care, because a naive reading of the capture
