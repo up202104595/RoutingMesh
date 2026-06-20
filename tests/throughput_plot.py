@@ -84,7 +84,7 @@ def main():
 
     if len(order) == 2 and means[0] > 0:
         ov = (means[0] - means[1]) / means[0] * 100
-        ax.text(0.5, 0.02, f'relay overhead: {ov:+.1f}\\%',
+        ax.text(0.5, 0.02, f'relay overhead: {ov:+.1f}%',
                 transform=ax.transAxes, ha='center', fontsize=9, style='italic')
 
     plt.tight_layout()
