@@ -96,7 +96,7 @@ def load_full_capture(path):
                 continue
 
             if ln <= BEACON_MAX_LEN:
-                beacons.append((ts, node))           # control beacon
+                beacons.append((ts, node))           # TDMA control (slot)
             elif src in N1_VIDEO_SRC and ln >= VIDEO_MIN_LEN:
                 video.append((ts, 1))                # N1 video data packet
 
@@ -304,9 +304,11 @@ def main():
     beacons_d = derotate(beacons, drift, t0)
     video_d   = derotate(video,   drift, t0)
 
-    # Align the axis so N1's beacon cluster sits at the centre of slot 0.
+    # Anchor N1's beacon to the START of its slot: in RA-TDMA each node sends
+    # its MATRIX beacon at the beginning of its slot, so N1's slot is the 50 ms
+    # window [beacon, beacon+50). The video data is sent later in that same slot.
     n1_beacon_pos = wrap(beacons_d, 0.0, t0).get(1, [])
-    offset = (SLOT_START[1] + SLOT_MS / 2) - circ_mean(n1_beacon_pos) if n1_beacon_pos else 0.0
+    offset = SLOT_START[1] - circ_mean(n1_beacon_pos) if n1_beacon_pos else 0.0
 
     wb = wrap(beacons_d, offset, t0)
     wv = wrap(video_d,   offset, t0)
@@ -337,8 +339,17 @@ def main():
         print(f"  {k.replace('n1_',''):<10}{s['n']:>7}{s['mean_ms']:>10.2f}"
               f"{s['std_circ_ms']:>9.2f}{str(s['pct_in_slot'])+'%':>11}")
     print("─────────────────────────────────────────────────────────────")
-    print("Conclusion: if 'video' clusters in the same [0,50) ms band as "
-          "'beacon',\nthe direct video respects N1's TDMA slot.")
+    if n1_v and n1_b:
+        rel = (circ_mean(n1_v) - circ_mean(n1_b)) % FRAME_MS
+        print(f"Video burst is {rel:.1f} ms after N1's beacon "
+              f"(N1 slot is [0,50) ms with the beacon at its start).")
+        if rel < SLOT_MS:
+            print("  -> The video sits inside N1's slot, after the beacon "
+                  "(tail of the slot). In direct mode only N1 transmits the "
+                  "video, and TDMA confines it to N1's slot.")
+        else:
+            print("  -> The video burst is more than one slot after the beacon: "
+                  "check the capture / the beacon-vs-slot convention.")
 
     base = os.path.splitext(args.csv)[0]
     plot_rounds(beacons_d, video_d, offset, t0,
