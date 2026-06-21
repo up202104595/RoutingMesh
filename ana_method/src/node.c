@@ -230,9 +230,10 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
                node->my_mac[0], node->my_mac[1], node->my_mac[2],
                node->my_mac[3], node->my_mac[4], node->my_mac[5]);
 
-    /* rotas+ARP instaladas para os IPs MESH dos destinos, a sair por wlan0
-     * (é o kernel que faz o relay via ARP — ver net_ana.c) */
-    node->routing = routing_create(node_id, node->mesh_prefix, node->phy_iface);
+    /* ARP instalada para os IPs FÍSICOS dos destinos (on-link em wlan0).
+     * As apps endereçam 172.20.10.x (tese 3.2.5); o kernel relaya via ARP,
+     * SEM precisar de rotas/comandos de linux — só ioctl SIOCSARP. */
+    node->routing = routing_create(node_id, node->phy_prefix, node->phy_iface);
 
     sync_init(node_id, num_nodes, (uint16_t)(node->frame_duration_us / 1000));
     return node;

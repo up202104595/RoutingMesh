@@ -6,8 +6,13 @@
 
  Topologia:   N1 (robot) ── N2 (relay) ── N3 (base station)
  IDs:         N1=1  N2=2  N3=3
- Endereços:   físico 172.20.10.<id>   |   mesh/TUN 10.0.0.<id>
-              (mesmos do método Miguel -> resultados comparáveis)
+ Endereços:   físico/wlan0 172.20.10.<id>   |   tun (interna) 10.0.0.<id>
+
+ IMPORTANTE (método Ana, tese 3.2.5): as APLICAÇÕES endereçam o IP de
+ wlan0 (172.20.10.<id>) — NÃO a tun. Assim o destino fica on-link em
+ wlan0 e o relay precisa SÓ da entrada ARP (ioctl SIOCSARP), sem
+ qualquer comando de linux/rota. A tun (10.0.0.x) é a interface interna
+ do framework (papel do 192.168.3.x da Ana), não o alvo das apps.
 
  NOTA: se compilares com outro prefixo (make MESH_NET_PREFIX=192.168.2),
  troca 172.20.10 -> 192.168.2 e 10.0.0 -> 192.168.3 nos comandos abaixo.
@@ -40,11 +45,11 @@
  PASSO 2 — VÍDEO + ECO RTT  (a mesma app de teste do método Miguel)
 ------------------------------------------------------------------------------
  No N1 (robot) — stream de vídeo para o N3 e servidor de RTT:
-   # vídeo (igual ao alphabot_node.py: MPEG-TS/UDP para 10.0.0.3:5000)
+   # vídeo (igual ao alphabot_node.py: MPEG-TS/UDP para 172.20.10.3:5000)
    rpicam-vid -t 0 --codec yuv420 --width 640 --height 480 --framerate 15 -o - | \
      ffmpeg -fflags nobuffer -f rawvideo -pix_fmt yuv420p -s 640x480 -r 15 -i - \
        -c:v libx264 -preset ultrafast -tune zerolatency -b:v 500k -g 1 \
-       -f mpegts "udp://10.0.0.3:5000?pkt_size=1316" &
+       -f mpegts "udp://172.20.10.3:5000?pkt_size=1316" &
    # servidor de eco para o teste de RTT:
    python3 tests/rtt_test.py --mode server &
 
@@ -55,7 +60,7 @@
  PASSO 3 — CORRER A SUITE COMPLETA  (TUDO no N3, com sudo)
 ------------------------------------------------------------------------------
    cd ana_method
-   sudo bash tests/run_all.sh --runs 3 --node1 10.0.0.1 --node1-phy 172.20.10.1 --iface wlan0
+   sudo bash tests/run_all.sh --runs 3 --node1 172.20.10.1 --node1-phy 172.20.10.1 --iface wlan0
 
  O que faz, automaticamente:
    FASE 0  captura state.pcap (STATE packets) para a análise de slot
@@ -90,7 +95,7 @@
  PASSO 5 — TESTES ISOLADOS  (se quiseres correr um de cada vez, no N3)
 ------------------------------------------------------------------------------
    # RTT direto (100 pings):
-   python3 tests/rtt_test.py --mode client --target 10.0.0.1 --count 100 \
+   python3 tests/rtt_test.py --mode client --target 172.20.10.1 --count 100 \
        --interval 0.1 --topology direct --label direct_rtt_r1
 
    # Throughput direto (15s de vídeo já a fluir):

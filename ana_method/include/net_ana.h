@@ -39,14 +39,13 @@ void net_ana_teardown(const char *phy_iface, int tun_fd, uint8_t node_id);
 /* Lê o MAC físico da interface local para out[6]. 0 em sucesso. */
 int  net_ana_local_mac(const char *iface, uint8_t out[MAC_BYTES]);
 
-/* Instala rota + ARP para um destino:
- *   ip route replace <mesh_ip>/32 dev <phy_iface>
- *   SIOCSARP  <mesh_ip> -> <mac_str>  (estática, ATF_PERM) em phy_iface
- * O kernel passa a enviar <mesh_ip> ao MAC do next-hop sobre wlan0. */
-int  net_ana_route_set(const char *phy_iface, const char *mesh_ip,
-                       const char *mac_str);
+/* Mudança de rota para um destino = SÓ a tabela ARP, via ioctl
+ * (SIOCSARP, estática ATF_PERM). O destino é um IP da subrede de
+ * wlan0 (on-link), por isso NENHUM comando de linux/rota é preciso —
+ * a entrada ARP sozinha força o relay para o MAC do next-hop. */
+int  net_ana_arp_set(const char *phy_iface, const char *ip, const char *mac_str);
 
-/* Remove rota + ARP de um destino. */
-int  net_ana_route_del(const char *phy_iface, const char *mesh_ip);
+/* Remove a entrada ARP de um destino (ioctl SIOCDARP). */
+int  net_ana_arp_del(const char *phy_iface, const char *ip);
 
 #endif /* NET_ANA_H */

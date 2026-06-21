@@ -144,22 +144,14 @@ static int arp_del(const char *iface, const char *ip_str) {
     return 0;
 }
 
-int net_ana_route_set(const char *phy_iface, const char *mesh_ip,
-                      const char *mac_str) {
-    /* rota /32 do destino mesh para SAIR por wlan0 (não pela tun),
-     * tornando o destino "on-link" em wlan0 para a resolução ARP */
-    char cmd[160];
-    snprintf(cmd, sizeof(cmd),
-             "ip route replace %s/32 dev %s 2>/dev/null", mesh_ip, phy_iface);
-    system(cmd);
-    /* ARP estática: <mesh_ip> -> MAC do next-hop em wlan0 */
-    return arp_set(phy_iface, mesh_ip, mac_str);
+/* ── Mudança de rota = SÓ a tabela ARP, via ioctl (como a Ana) ──
+ * O destino é um IP da subrede de wlan0 (on-link), por isso NENHUM
+ * comando de linux / rota é necessário: a entrada ARP estática
+ * sozinha força o frame a sair para o MAC do next-hop (tese 3.2.4). */
+int net_ana_arp_set(const char *phy_iface, const char *ip, const char *mac_str) {
+    return arp_set(phy_iface, ip, mac_str);   /* ioctl SIOCSARP, sem shell */
 }
 
-int net_ana_route_del(const char *phy_iface, const char *mesh_ip) {
-    char cmd[160];
-    snprintf(cmd, sizeof(cmd),
-             "ip route del %s/32 dev %s 2>/dev/null", mesh_ip, phy_iface);
-    system(cmd);
-    return arp_del(phy_iface, mesh_ip);
+int net_ana_arp_del(const char *phy_iface, const char *ip) {
+    return arp_del(phy_iface, ip);            /* ioctl SIOCDARP, sem shell */
 }

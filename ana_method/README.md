@@ -14,13 +14,20 @@ Desenho de **2 subredes**, como na dissertação (3.2.5):
 - **tunN** (virtual) → prefixo **mesh** `10.0.0.x`: o IP que as aplicações
   endereçam, peer-to-peer, com o IP intacto (papel do `192.168.3.x` dela).
 
+As **aplicações endereçam o IP de wlan0** (`172.20.10.x`), não a tun — é o que a
+tese diz explicitamente (3.2.5). Por estarem na subrede de wlan0, o destino fica
+on-link e a mudança de rota é **só a tabela ARP, via `ioctl` (SIOCSARP) — sem
+qualquer comando de linux/rota**. A tun (`10.0.0.x`) é a interface interna do
+framework (papel do `192.168.3.x` dela).
+
 O framework é **apenas plano de controlo**: partilha a topologia em slots TDMA,
-calcula a MST binária e **mantém as rotas/ARP**. O **data plane é o próprio
-kernel Linux**:
+calcula a MST binária e **mantém a tabela ARP** (ioctl). O **data plane é o
+próprio kernel Linux**:
 
 - `ip_forward=1` → o nó reencaminha o que não é para si;
-- por destino: rota `10.0.0.dst/32 dev wlan0` + ARP estática
-  `10.0.0.dst → MAC do next-hop` (via `ioctl` SIOCSARP);
+- por destino: ARP estática `172.20.10.dst → MAC do next-hop` (ioctl SIOCSARP),
+  forçando o frame a sair para o next-hop (não para o destino real, mesmo
+  estando em alcance) — o truque ARP da tese (3.2.4);
 - o kernel envia o frame L2 ao next-hop sobre wlan0 e **relaya hop a hop,
   imediatamente, NÃO gated pelo slot TDMA** — com a limitação de slot que a
   própria tese assume (3.2.6).
@@ -35,9 +42,9 @@ make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
 sudo ./meshnode_ana <node_id> <num_nodes>   # configura wlan0 + tun + ip_forward + ARP
 ```
 
-As aplicações comunicam pelos IPs **mesh** (`ping`/`iperf` para `10.0.0.X`); o
-kernel resolve para o MAC do next-hop e relaya. Para teste local: `make`
-(default `127.0.0`/`lo`, valida só o plano de controlo).
+As aplicações comunicam pelos IPs de **wlan0** (`ping`/`iperf` para
+`172.20.10.X`); o kernel resolve para o MAC do next-hop (ARP estática) e relaya.
+Para teste local: `make` (default `127.0.0`/`lo`, valida só o plano de controlo).
 
 ## O que é fiel à tese (e onde está no código)
 
@@ -61,7 +68,7 @@ kernel resolve para o MAC do next-hop e relaya. Para teste local: `make`
 | | Método Ana (este projeto) | Método Miguel (projeto principal) |
 |---|---|---|
 | MST | binária | ponderada por link quality (0–100) |
-| Data plane | **kernel** (`ip_forward` + rota/32 + ARP) | overlay no framework |
+| Data plane | **kernel** (`ip_forward` + ARP estática, ioctl) | overlay no framework |
 | Transporte de dados | nenhum no framework (kernel L2) | TCP per-peer (`tcp_sockfd[]`) |
 | Header de dados | nenhum (IP intacto) | `msg_data_hdr_t` (src/dst/msg_id) |
 | Relay | Camada 2 / ARP, **não gated pelo slot** | app-level, gated pelo slot |
