@@ -853,18 +853,31 @@ path actually carry traffic again. The practical impact is a fixed sub-second
 penalty added to detection on every recovery, and a small per-packet user-space
 cost in steady state.
 
-This is precisely where the Layer~2 approach of Morais would be faster. There
-the relay forwards by rewriting the destination MAC address in the kernel, so the
-very next frame flows toward the new next hop with no transport connection to
-re-establish and no trip up to user space; this component of the recovery would
-be close to instantaneous rather than $\approx 0.8$\,s. The tail is therefore
-the price paid for operating at Layer~3 over a TCP data plane --- the same choice
-that buys reliable in-order delivery, standard observability, and kernel
-integration (Chapter~\ref{chap:implementation}). It is a deliberate trade, not an
-oversight: detection ($2.0$\,s) dominates the total today, so the penalty is
-secondary; but if \texttt{MAX\_AGE} were reduced, this establishment cost would
-become the next bottleneck, and a lighter-weight, kernel-resident forwarding
-path closer to the Layer~2 design would then be the lever to pull.
+This narrow step is where the Layer~2 approach of Morais would be faster, and it
+is worth being precise about \emph{which} step, because the rest is comparable.
+Detection is identical: that design removes a dead link through the same
+connectivity-matrix aging, so it incurs the same \texttt{MAX\_AGE} wait before
+anything can change. Route recomputation and installation are also comparable:
+the reference routing module recomputes its linked-list routes from the spanning
+tree once per round and writes the kernel ARP table in a single \texttt{ioctl()},
+just as ours recomputes from the spanning tree and installs routes through
+Netlink --- both complete in well under a slot. The difference lies solely in the
+data path. The Layer~2 forwarding is connectionless: once the ARP entry points at
+the new next hop, the very next frame is relayed by the kernel at the link layer,
+with nothing to establish. Ours is connection-oriented: the relayed traffic rides
+a TCP connection that must take over the new path and ramp up before the stream
+resumes. It is therefore this resumption --- not the detection, nor the route
+computation, nor the route install, all of which are essentially matched ---
+that the Layer~2 design would avoid, shrinking the $\approx 0.8$\,s tail toward a
+single round.
+
+The tail is thus the price paid for operating at Layer~3 over a TCP data plane,
+the same choice that buys reliable in-order delivery, standard observability, and
+kernel integration (Chapter~\ref{chap:implementation}). It is a deliberate trade,
+not an oversight: detection ($2.0$\,s) dominates the total today, so the penalty
+is secondary; but if \texttt{MAX\_AGE} were reduced, this establishment cost would
+become the next bottleneck, and a lighter-weight, connectionless forwarding path
+closer to the Layer~2 design would then be the lever to pull.
 
 \subsection{Packet Inter-Arrival Timing}
 \label{subsec:res-ia}
@@ -1181,17 +1194,20 @@ continuum.
 dominated by the RA-TDMAs+ node-aging timeout (\texttt{MAX\_AGE} $= 2.0$\,s),
 i.e.\ the time required to detect that the direct link is dead before any
 re-routing can begin (Section~\ref{subsec:res-convergence}). Because detection
-dominates, the two recover in broadly comparable time today. They differ,
-however, in the post-detection step. The Layer~2 design only updates an ARP
-entry in the kernel, after which the next frame flows toward the new next hop
-almost immediately. The Layer~3 design must instead bring its connection-oriented
-data plane back into service: a relayed packet is handled up in user space (TCP)
-before the kernel \texttt{ip\_forward}, and the path through N2 has to take over
-the stream and ramp up. This accounts for the $\approx 0.8$\,s establishment tail
-of Section~\ref{subsec:res-convergence}, which the Layer~2 approach would largely
-avoid. The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the
-floor, but it would dominate if that timeout were reduced --- at which point a
-lighter-weight, kernel-resident forwarding path would become the more effective
+dominates, the two recover in broadly comparable time today, and the steps that
+follow detection are mostly matched as well: both recompute the routes from the
+spanning tree and install them quickly --- the reference through a single
+\texttt{ioctl()} into the ARP table, this work through Netlink. The one genuine
+difference is the data path. The Layer~2 design is connectionless, so once the
+ARP entry is updated the next frame is relayed immediately by the kernel; the
+Layer~3 design must instead bring its connection-oriented TCP data plane back
+into service (a relayed packet is handled up in user space before the kernel
+\texttt{ip\_forward}, and the path through N2 has to take over the stream and
+ramp up). This resumption accounts for the $\approx 0.8$\,s establishment tail of
+Section~\ref{subsec:res-convergence}, which the Layer~2 approach largely avoids.
+The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the floor, but
+it would dominate if that timeout were reduced --- at which point a
+connectionless, kernel-resident forwarding path would become the more effective
 lever. Reducing \texttt{MAX\_AGE} remains the first-order way to accelerate
 recovery in either design, at the cost of robustness to transient beacon loss in
 the shared collision domain.
