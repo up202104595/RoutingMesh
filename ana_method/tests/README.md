@@ -1,11 +1,16 @@
 # Testes — Método Ana (`meshnode_ana`)
 
 Recriação dos mesmos testes do método Miguel (`tests/` na raiz), adaptados ao
-`meshnode_ana`, para **comparação directa lado-a-lado**. Mede as duas coisas
-pedidas:
+`meshnode_ana`, para **comparação directa lado-a-lado**. Cobre as 5 métricas:
 
-1. **Tempo de convergência** do relay (o que está no `sudo run_all.sh`).
-2. **Colocação dos pacotes por slot** (de-rotada), como feito no método Miguel.
+1. **RTT** (`rtt_test.py`) — latência direto vs relay, PDR, jitter.
+2. **Throughput** (`throughput_test.py`) — vídeo entregue, direto vs relay.
+3. **Timing TDMA** (`tdma_timing_test.py`) — inter-arrivals do vídeo.
+4. **Convergência** (`convergence_test.py`) — recuperação do relay após falha.
+5. **Colocação por slot** (`slot_occupancy.py`, de-rotada) — prova de slots.
+
+Tudo orquestrado pelo `run_all.sh`. Guia passo-a-passo com os comandos por nó
+em `../Guia.txt`.
 
 Os dois métodos usam, por defeito, o **mesmo endereçamento** (`172.20.10.x`
 físico / `10.0.0.x` mesh), as **mesmas portas de STATE** (7001–7003) e o **mesmo

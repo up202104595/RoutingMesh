@@ -1,0 +1,121 @@
+==============================================================================
+ GUIA DE EXECUÇÃO — Método Ana (meshnode_ana)
+ Recriar, no método da Ana, os MESMOS testes do método Miguel para comparar:
+   RTT · Throughput · Timing TDMA · Convergência · Colocação por slot
+==============================================================================
+
+ Topologia:   N1 (robot) ── N2 (relay) ── N3 (base station)
+ IDs:         N1=1  N2=2  N3=3
+ Endereços:   físico 172.20.10.<id>   |   mesh/TUN 10.0.0.<id>
+              (mesmos do método Miguel -> resultados comparáveis)
+
+ NOTA: se compilares com outro prefixo (make MESH_NET_PREFIX=192.168.2),
+ troca 172.20.10 -> 192.168.2 e 10.0.0 -> 192.168.3 nos comandos abaixo.
+
+------------------------------------------------------------------------------
+ PASSO 0 — BUILD (em cada um dos 3 nós, dentro de ana_method/)
+------------------------------------------------------------------------------
+   cd ana_method
+   make
+   #   (ou, para o testbed real:  make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0)
+
+------------------------------------------------------------------------------
+ PASSO 1 — ARRANCAR A MESH ANA  (uma janela por nó, com sudo)
+------------------------------------------------------------------------------
+ No N1 (robot):
+   sudo ./scripts/ana_setup.sh 1 wlan0
+   sudo ./meshnode_ana 1 3
+
+ No N2 (relay):
+   sudo ./scripts/ana_setup.sh 2 wlan0
+   sudo ./meshnode_ana 2 3
+
+ No N3 (base):
+   sudo ./scripts/ana_setup.sh 3 wlan0
+   sudo ./meshnode_ana 3 3
+
+ -> espera ~30s até os 3 se descobrirem (cada nó deve listar "Nodes: 1 2 3").
+
+------------------------------------------------------------------------------
+ PASSO 2 — VÍDEO + ECO RTT  (a mesma app de teste do método Miguel)
+------------------------------------------------------------------------------
+ No N1 (robot) — stream de vídeo para o N3 e servidor de RTT:
+   # vídeo (igual ao alphabot_node.py: MPEG-TS/UDP para 10.0.0.3:5000)
+   rpicam-vid -t 0 --codec yuv420 --width 640 --height 480 --framerate 15 -o - | \
+     ffmpeg -fflags nobuffer -f rawvideo -pix_fmt yuv420p -s 640x480 -r 15 -i - \
+       -c:v libx264 -preset ultrafast -tune zerolatency -b:v 500k -g 1 \
+       -f mpegts "udp://10.0.0.3:5000?pkt_size=1316" &
+   # servidor de eco para o teste de RTT:
+   python3 tests/rtt_test.py --mode server &
+
+ No N3 (base) — reproduzir o vídeo (confirma que está a chegar):
+   ffplay -fflags nobuffer -flags low_delay -i udp://0.0.0.0:5000 &
+
+------------------------------------------------------------------------------
+ PASSO 3 — CORRER A SUITE COMPLETA  (TUDO no N3, com sudo)
+------------------------------------------------------------------------------
+   cd ana_method
+   sudo bash tests/run_all.sh --runs 3 --node1 10.0.0.1 --node1-phy 172.20.10.1 --iface wlan0
+
+ O que faz, automaticamente:
+   FASE 0  captura state.pcap (STATE packets) para a análise de slot
+   FASE 1  DIRETO : RTT + throughput + timing TDMA   (3 runs)
+   FASE 2  RELAY  : convergência + throughput + timing (bloqueia/restaura link)
+   FASE 3  imprime o resumo (convergência mediana, RTT, throughput)
+
+ Resultados (JSON + state.pcap) ficam em:
+   ana_method/tests/results_ana_<data_hora>/
+
+ Variantes:
+   sudo bash tests/run_all.sh --runs 5          # mais repetições
+   sudo bash tests/run_all.sh --no-relay        # só link direto
+
+------------------------------------------------------------------------------
+ PASSO 4 — ANÁLISE DE COLOCAÇÃO POR SLOT  (de-rotada)
+------------------------------------------------------------------------------
+ a) Abre o state.pcap no Wireshark e exporta para CSV:
+      File -> Export Packet Dissections -> As CSV   (guarda como state.csv)
+    (colunas: No., Time, Source, Destination, Protocol, Length, Info)
+
+ b) Gera os gráficos e as estatísticas:
+      python3 tests/slot_occupancy.py state.csv --out figs/ana_slots --phy-prefix 172.20.10
+
+    Produz:
+      figs/ana_slots_scatter.png   (cru, mostra a deriva ~18 ms/s)
+      figs/ana_slots_derot.png     (de-rotado, cada nó no seu slot)
+    e imprime, por nó: centro, desvio σ (ms) e % de pacotes dentro do slot.
+    -> cada nó deve ficar em [(n-1)*50, n*50] ms, ordem N1->N2->N3.
+
+------------------------------------------------------------------------------
+ PASSO 5 — TESTES ISOLADOS  (se quiseres correr um de cada vez, no N3)
+------------------------------------------------------------------------------
+   # RTT direto (100 pings):
+   python3 tests/rtt_test.py --mode client --target 10.0.0.1 --count 100 \
+       --interval 0.1 --topology direct --label direct_rtt_r1
+
+   # Throughput direto (15s de vídeo já a fluir):
+   python3 tests/throughput_test.py --duration 15 --topology direct --label direct_thru_r1
+
+   # Timing TDMA (inter-arrivals do vídeo, 30s):
+   python3 tests/tdma_timing_test.py --duration 30 --label direct_r1
+
+   # Convergência (bloqueia o link direto e mede o gap do vídeo):
+   sudo python3 tests/convergence_test.py --label conv_r1 --node1-phy 172.20.10.1
+
+------------------------------------------------------------------------------
+ PASSO 6 — NO FIM
+------------------------------------------------------------------------------
+   sudo ./scripts/ana_teardown.sh      # em cada nó
+   # (e Ctrl-C nas janelas do meshnode_ana / vídeo / rtt server)
+
+------------------------------------------------------------------------------
+ COMO COMPARAR COM O MÉTODO MIGUEL
+------------------------------------------------------------------------------
+   Corre a suite equivalente da raiz (sudo bash tests/run_all.sh) e a análise
+   de slots do método Miguel na mesma topologia. Compara, métrica a métrica:
+     - convergência (mediana, ms)          -> convergence_*.json
+     - RTT avg / PDR                        -> rtt_results_*.json
+     - throughput direto vs relay (kbps)    -> throughput_*.json
+     - σ por nó / % no slot                 -> output do slot_occupancy.py
+     - gráfico de-rotado                    -> *_derot.png
+==============================================================================
