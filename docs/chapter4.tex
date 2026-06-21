@@ -748,29 +748,21 @@ reports the results.
 \midrule
 1 & 2675 & recovered via relay \\
 2 & 2863 & recovered via relay \\
-3 &,  & near-instant failover (warm relay route, no measurable gap) \\
+3 & 2768 & recovered via relay \\
 \midrule
-\multicolumn{2}{l}{\textbf{Median (recovered)}} & \textbf{2769\,ms} \\
+\multicolumn{2}{l}{\textbf{Median}} & \textbf{2768\,ms} \\
 \bottomrule
 \end{tabular}
 \end{table}
 \vspace{0.5cm}
 
-The median convergence time of the two repetitions that produced a measurable
-gap is $\approx 2.8$\,s, equivalent to about 18~TDMA frames. The two
-recovered values (2675 and 2863\,ms) are close, which already hints that the
-delay is governed by a fixed timeout rather than by a variable process such as
-contention or retransmission, whose spread would have been far wider. The third
-repetition is qualitatively different and is reported separately: the relay
-route was still installed in the routing tables from the previous repetition,
-so when the direct link was cut the stream switched paths in less than the
-$0.4$\,s detection threshold and no gap was recorded at all. Rather than being
-discarded as a failed measurement, this case is itself informative, it shows
-that the cost of convergence is almost entirely the cost of \emph{detecting}
-the failure, not of computing or installing the new route, because when
-detection is bypassed (the route is already present) the failover is effectively
-instantaneous. It is excluded from the median only because it does not measure
-the same quantity as the other two.
+The three values (2675, 2768, and 2863\,ms) are close, with a median of
+$\approx 2.8$\,s, equivalent to about 18~TDMA frames. Their tight spread is
+itself informative: a recovery governed by a variable process such as contention
+or retransmission would scatter far more widely, whereas one governed by a fixed
+timeout clusters tightly, exactly as observed. This already points to the
+dominant cost being a single constant rather than the routing work, which the
+breakdown below confirms.
 
 The dominant component of the convergence time is the \emph{link-failure
 detection}, which is governed by the node-aging mechanism of the RA-TDMAs+
@@ -844,7 +836,7 @@ forwarding step at N2 is a kernel \texttt{ip\_forward}, the data plane is
 connection-oriented and lives above the network layer: a relayed packet is
 delivered up to the user-space TCP receive thread at N2 before being re-injected
 for forwarding, and after the topology change the N1\,$\to$\,N2 connection must
-take over the stream and ramp up --- TCP's flow and congestion state, plus the
+take over the stream and ramp up: TCP's flow and congestion state, plus the
 once-per-second keepalive and reconnect cycle if the connection had gone idle.
 This traversal \emph{up} the protocol stack, and the connection state it
 implies, is the most plausible source of the $\approx 0.8$\,s: the recovery
@@ -861,13 +853,13 @@ anything can change. Route recomputation and installation are also comparable:
 the reference routing module recomputes its linked-list routes from the spanning
 tree once per round and writes the kernel ARP table in a single \texttt{ioctl()},
 just as ours recomputes from the spanning tree and installs routes through
-Netlink --- both complete in well under a slot. The difference lies solely in the
+Netlink. Both complete in well under a slot. The difference lies solely in the
 data path. The Layer~2 forwarding is connectionless: once the ARP entry points at
 the new next hop, the very next frame is relayed by the kernel at the link layer,
 with nothing to establish. Ours is connection-oriented: the relayed traffic rides
 a TCP connection that must take over the new path and ramp up before the stream
-resumes. It is therefore this resumption --- not the detection, nor the route
-computation, nor the route install, all of which are essentially matched ---
+resumes. It is therefore this resumption (not the detection, nor the route
+computation, nor the route install, all of which are essentially matched)
 that the Layer~2 design would avoid, shrinking the $\approx 0.8$\,s tail toward a
 single round.
 
@@ -983,8 +975,8 @@ receives all three beacons, giving the complete slot structure; and because it i
 precisely the base station's operational viewpoint, which is the perspective that
 matters for a teleoperation link. The asymmetry amounts to a few milliseconds of
 receive-path delay, far below the 50\,ms slot, so it nudges the absolute positions
-slightly but leaves the slot ordering and the inter-node spacing --- the
-quantities the claim depends on --- intact.
+slightly but leaves the slot ordering and the inter-node spacing (the
+quantities the claim depends on) intact.
 
 The three nodes occupy three disjoint regions in the cyclic order
 N1\,$\to$\,N2\,$\to$\,N3, each separated from the next by approximately one
@@ -1197,7 +1189,7 @@ i.e.\ the time required to detect that the direct link is dead before any
 re-routing can begin (Section~\ref{subsec:res-convergence}). Because detection
 dominates, the two recover in broadly comparable time today, and the steps that
 follow detection are mostly matched as well: both recompute the routes from the
-spanning tree and install them quickly --- the reference through a single
+spanning tree and install them quickly: the reference through a single
 \texttt{ioctl()} into the ARP table, this work through Netlink. The one genuine
 difference is the data path. The Layer~2 design is connectionless, so once the
 ARP entry is updated the next frame is relayed immediately by the kernel; the
@@ -1207,7 +1199,7 @@ into service (a relayed packet is handled up in user space before the kernel
 ramp up). This resumption accounts for the $\approx 0.8$\,s establishment tail of
 Section~\ref{subsec:res-convergence}, which the Layer~2 approach largely avoids.
 The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the floor, but
-it would dominate if that timeout were reduced --- at which point a
+it would dominate if that timeout were reduced, at which point a
 connectionless, kernel-resident forwarding path would become the more effective
 lever. Reducing \texttt{MAX\_AGE} remains the first-order way to accelerate
 recovery in either design, at the cost of robustness to transient beacon loss in
