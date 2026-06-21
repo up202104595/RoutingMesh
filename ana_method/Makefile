@@ -10,7 +10,7 @@
 # ═══════════════════════════════════════════════════════════════
 
 CC      = gcc
-CFLAGS  = -Wall -Wextra -pthread -g -Iinclude -DRELAY_METHOD_ARP
+CFLAGS  = -Wall -Wextra -pthread -g -Iinclude
 LDFLAGS = -pthread -lm
 
 MESH_NET_PREFIX ?= 127.0.0
@@ -19,7 +19,7 @@ CFLAGS += -DMESH_NET_PREFIX=\"$(MESH_NET_PREFIX)\"
 MESH_PHY_IFACE ?= lo
 CFLAGS += -DMESH_PHY_IFACE=\"$(MESH_PHY_IFACE)\"
 
-$(info [BUILD-ANA] phy_prefix=$(MESH_NET_PREFIX)  iface=$(MESH_PHY_IFACE)  relay=ARP/UDP  MST=binária)
+$(info [BUILD-ANA] phy_prefix=$(MESH_NET_PREFIX)  iface=$(MESH_PHY_IFACE)  relay=kernel/ARP (não-slot)  MST=binária)
 
 SRC_DIR = src
 OBJ_DIR = obj
@@ -28,9 +28,8 @@ TARGET  = meshnode_ana
 SRCS = $(SRC_DIR)/main.c         \
        $(SRC_DIR)/node.c         \
        $(SRC_DIR)/matrix.c       \
-       $(SRC_DIR)/tun.c          \
+       $(SRC_DIR)/net_ana.c      \
        $(SRC_DIR)/sync.c         \
-       $(SRC_DIR)/tx_queue.c     \
        $(SRC_DIR)/mac_table.c    \
        $(SRC_DIR)/routing_list.c
 
