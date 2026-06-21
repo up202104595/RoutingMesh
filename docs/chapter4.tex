@@ -65,9 +65,7 @@ $[\text{N1}, \text{N2}, \text{N3}]$ shown in Figure~\ref{fig:frame}.
 \fbox{\parbox{0.95\textwidth}{\centering\vspace{1.4cm}
 N1 slot $[0,50)$\,ms \qquad N2 slot $[50,100)$\,ms \qquad N3 slot $[100,150)$\,ms
 \vspace{1.4cm}}}
-\caption{TDMA frame structure with three synchronised nodes. The 150\,ms frame
-is divided into three 50\,ms slots; each node transmits only within its own
-slot.}
+\caption{TDMA frame: three 50\,ms slots in a 150\,ms period, one per node.}
 \label{fig:frame}
 \end{figure}
 \vspace{0.5cm}
@@ -409,12 +407,9 @@ the direct link.
 \centering
 \includegraphics[width=\textwidth]{RTT_over_the_direct_link.png}
 \caption{Control-channel RTT over the direct link (N3\,$\to$\,N1, 100 pings,
-PDR $= 100\,\%$). \textbf{Left:} RTT per ping sequence; the values alternate
-in blocks between a low cluster ($\approx 50$\,ms, blue) and a high cluster
-($\approx 200$\,ms, red). \textbf{Right:} the resulting distribution is
-strongly bimodal, with the two clusters separated by exactly one TDMA frame
-(150\,ms) and an empty band in between, the signature of TDMA round
-quantisation.}
+PDR $= 100\,\%$). Left: RTT per sequence, alternating between a low
+($\approx 52$\,ms) and a high ($\approx 202$\,ms) cluster. Right: bimodal
+distribution, the clusters one TDMA frame (150\,ms) apart.}
 \label{fig:rtt-direct}
 \end{figure}
 \vspace{0.5cm}
@@ -479,11 +474,9 @@ The same test over the relay path is shown in Figure~\ref{fig:rtt-relay}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{RTT_over_the_relay_path.png}
-\caption{Control-channel RTT over the relay path
-(N3\,$\to$\,N2\,$\to$\,N1, 100 pings, PDR $= 100\,\%$). The distribution is
-practically identical to the direct link in Figure~\ref{fig:rtt-direct}: the
-same two clusters, the same one-frame separation. Relaying therefore adds no
-significant latency to the control channel.}
+\caption{Control-channel RTT over the relay path (N3\,$\to$\,N2\,$\to$\,N1,
+100 pings, PDR $= 100\,\%$). Practically identical to the direct link
+(Figure~\ref{fig:rtt-direct}): relaying adds no significant latency.}
 \label{fig:rtt-relay}
 \end{figure}
 \vspace{0.5cm}
@@ -584,11 +577,9 @@ Figure~\ref{fig:throughput} and Table~\ref{tab:throughput} report the means.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.65\textwidth]{throughput.png}
-\caption{Video stream throughput at N3, direct link vs.\ relay path (mean of
-three repetitions; error bars show the standard deviation). The relay reduces
-throughput by only $\approx 1\,\%$; the dashed line marks the 500\,kbps
-encoder target, which both conditions exceed because of MPEG-TS container
-overhead and the all-intra encoder configuration.}
+\caption{Video throughput at N3, direct vs.\ relay (mean of three runs;
+error bars: standard deviation). The relay costs only $\approx 1\,\%$; the
+dashed line marks the 500\,kbps encoder target.}
 \label{fig:throughput}
 \end{figure}
 \vspace{0.5cm}
@@ -857,13 +848,10 @@ Figure~\ref{fig:ia} shows the two histograms side by side.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{ia_timing.png}
-\caption{Inter-arrival histograms of video packets at N3, direct link (left)
-and relay path (right), over 30\,s. Both distributions are strongly bimodal
-and practically identical: a dominant peak at $<10$\,ms (packets transmitted
-back-to-back within one TDMA burst) and a second peak at $\approx
-140$ to $150$\,ms (the inter-burst gap of one frame, during which N2 and N3 hold
-the channel and N1 cannot transmit). The relay preserves the burst structure
-of the stream.}
+\caption{Video inter-arrival histograms at N3, direct (left) and relay
+(right), over 30\,s. Both are bimodal and practically identical: a peak at
+$<10$\,ms (within a burst) and one at $\approx 150$\,ms (the one-frame
+inter-burst gap). The relay preserves the burst structure.}
 \label{fig:ia}
 \end{figure}
 \vspace{0.5cm}
@@ -922,12 +910,10 @@ a sequence of rounds.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{ao_rounds_derot.png}
-\caption{Beacon transmission instant wrapped to the TDMA frame, per round, for
-the three nodes, after the common frame rotation has been removed. Each node
-occupies its own slot in the strict cyclic order
-N1\,$\to$\,N2\,$\to$\,N3, separated from the next by approximately one slot
-(50\,ms), and remains in its slot across rounds. This is the direct evidence
-that the nodes respect the TDMA schedule.}
+\caption{Beacon instants wrapped to the frame, per round, after removing the
+common frame rotation. Each node keeps its own slot in cyclic order
+N1\,$\to$\,N2\,$\to$\,N3, $\approx 50$\,ms apart: direct evidence of slot
+compliance.}
 \label{fig:slots}
 \end{figure}
 \vspace{0.5cm}
@@ -940,11 +926,22 @@ below the firewall, which is important for two reasons. First, it sees every
 beacon that reaches the antenna regardless of any \texttt{iptables} rule, so the
 same method works unchanged in the direct and relay conditions. Second, it
 observes the transmissions as they actually occur on the medium, which is what a
-claim about slot occupancy must be about. This differs from the external
-monitor-mode capture used in the reference work: rather than introducing a
-fourth, passive observer node, the synchronisation is verified from the
-perspective of an active participant, N3, which is sufficient because N3 is in
-radio range of both other nodes and therefore receives all three beacons.
+claim about slot occupancy must be about.
+
+This differs from the reference work, which dedicated a fourth, passive monitor
+node to observing the medium; here the measurement is taken from N3, an
+\emph{active participant}. That choice carries a minor, known cost: the radio is
+half-duplex, so N3 cannot capture during its own transmission, and its own slot
+is therefore seen from the transmit side while the other two are seen on
+reception, a small per-node timing asymmetry; N3's own transmissions also occupy
+part of the medium it is measuring. We accept this because it needs no additional
+hardware or observer node; because N3 is in radio range of both N1 and N2 and so
+receives all three beacons, giving the complete slot structure; and because it is
+precisely the base station's operational viewpoint, which is the perspective that
+matters for a teleoperation link. The asymmetry amounts to a few milliseconds of
+receive-path delay, far below the 50\,ms slot, so it nudges the absolute positions
+slightly but leaves the slot ordering and the inter-node spacing --- the
+quantities the claim depends on --- intact.
 
 The three nodes occupy three disjoint regions in the cyclic order
 N1\,$\to$\,N2\,$\to$\,N3, each separated from the next by approximately one
@@ -988,13 +985,9 @@ meant to show.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{ao_scatter.png}
-\caption{The same beacon transmissions as Figure~\ref{fig:slots}, plotted
-without removing the common frame rotation. The three node clouds sweep
-diagonally across the frame as the rounds advance, drifting at $\approx
-18$\,ms/s, yet they move together and keep their mutual one-slot spacing.
-This is the raw effect of the synchroniser advancing all slots by a common
-amount each round; de-rotating it produces the stationary view of
-Figure~\ref{fig:slots}.}
+\caption{The same beacons as Figure~\ref{fig:slots}, without removing the
+frame rotation: the three clouds drift together at $\approx 18$\,ms/s, keeping
+their one-slot spacing. De-rotation yields Figure~\ref{fig:slots}.}
 \label{fig:slots-drift}
 \end{figure}
 \vspace{0.5cm}
@@ -1053,13 +1046,10 @@ Figure~\ref{fig:video-slot} overlays the result.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{stream_round.png}
-\caption{Video and beacon transmission instants wrapped to the 150\,ms TDMA
-frame, per round, after removing the common frame rotation. The three nodes'
-beacons occupy three disjoint slots in the order N1\,$\to$\,N2\,$\to$\,N3;
-N1's video burst (black~$\times$) falls inside N1's slot, co-located with N1's
-beacon and clearly separated from the N2 and N3 slots. This is direct evidence
-that the continuous video stream, not only the periodic beacons, respects the
-TDMA schedule.}
+\caption{Video and beacon instants wrapped to the frame, per round
+(de-rotated). N1's video burst (black~$\times$) falls in N1's slot, with N1's
+beacon and disjoint from the N2/N3 slots: the video, not just the beacons,
+respects the schedule.}
 \label{fig:video-slot}
 \end{figure}
 \vspace{0.4cm}
