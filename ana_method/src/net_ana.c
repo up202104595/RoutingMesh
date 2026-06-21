@@ -18,6 +18,12 @@
 #include <net/if_arp.h>
 #include <arpa/inet.h>
 
+/* canal ad-hoc — TEM de ser o mesmo em todos os nós (testbed usa 6).
+ * sobrepor em compilação com -DMESH_CHANNEL=N */
+#ifndef MESH_CHANNEL
+#define MESH_CHANNEL 6
+#endif
+
 int net_ana_local_mac(const char *iface, uint8_t out[MAC_BYTES]) {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return -1;
@@ -62,20 +68,25 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
                   const char *mesh_prefix, uint8_t node_id) {
     char cmd[768];
 
-    /* interface ad-hoc (igual ao testbed da tese: essid/canal fixos) */
+    /* o NetworkManager reverte o modo ad-hoc — parar primeiro (como o
+     * adhoc-start.sh do testbed Miguel) */
+    system("systemctl stop NetworkManager 2>/dev/null");
+
+    /* interface ad-hoc (igual ao testbed: essid/canal fixos, MESMO canal
+     * em todos os nós senão não comunicam) */
     snprintf(cmd, sizeof(cmd),
         "ip link set %s down 2>/dev/null; "
         "iwconfig %s mode ad-hoc 2>/dev/null; "
         "iwconfig %s essid manet-mesh 2>/dev/null; "
-        "iwconfig %s channel 1 2>/dev/null; "
+        "iwconfig %s channel %d 2>/dev/null; "
         "ip link set %s up 2>/dev/null; "
         "ip addr flush dev %s 2>/dev/null; "
         "ip addr add %s.%u/28 dev %s 2>/dev/null",
-        phy_iface, phy_iface, phy_iface, phy_iface, phy_iface,
-        phy_iface, phy_prefix, node_id, phy_iface);
+        phy_iface, phy_iface, phy_iface, phy_iface, MESH_CHANNEL,
+        phy_iface, phy_iface, phy_prefix, node_id, phy_iface);
     system(cmd);
-    printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=1 IP=%s.%u/28 dev %s\n",
-           phy_prefix, node_id, phy_iface);
+    printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=%d IP=%s.%u/28 dev %s\n",
+           MESH_CHANNEL, phy_prefix, node_id, phy_iface);
 
     /* ── sysctl (tese 3.2.2): o nó funciona como router ── */
     system("sysctl -wq net.ipv4.ip_forward=1 2>/dev/null"
