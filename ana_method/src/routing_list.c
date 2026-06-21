@@ -106,7 +106,7 @@ void routing_update(routing_ctx_t *ctx,
         if (idx_of(active_nodes, num_active, old_id) < 0) {
             char ip[40];
             snprintf(ip, sizeof(ip), "%s.%u", ctx->mesh_prefix, old_id);
-            net_ana_arp_del(ctx->phy_iface, ip);
+            net_ana_route_del(ctx->phy_iface, ip);
             mac_table_del(old_id);
             printf("[ROUTING-ANA] Node %u saiu — arp del %s\n", old_id, ip);
         }
@@ -173,7 +173,7 @@ void routing_update(routing_ctx_t *ctx,
         }
         char ip[40];
         snprintf(ip, sizeof(ip), "%s.%u", ctx->mesh_prefix, dest);
-        net_ana_arp_set(ctx->phy_iface, ip, mac); /* ioctl SIOCSARP */
+        net_ana_route_set(ctx->phy_iface, ip, mac); /* ioctl SIOCSARP */
         arp_changes++;
         if (dest == nh)
             printf("[ROUTING-ANA]   arp set %s -> %s  [directo]\n", ip, mac);

@@ -2,23 +2,28 @@
 
 Projeto **independente** que recria o algoritmo de routing da dissertação da
 Ana Morais, para comparação directa com o método deste repositório (Miguel).
-Não partilha código com o projeto principal — copia apenas os módulos do
-framework agnósticos ao método (sincronização TDMA, partilha de matriz).
+Copia apenas os módulos do framework agnósticos ao método (sincronização TDMA,
+partilha de matriz) e reimplementa o resto fiel à tese.
 
 ## Filosofia (igual à tese)
 
-O framework é **apenas plano de controlo**: partilha a topologia em slots TDMA,
-calcula a MST binária e **mantém a tabela ARP**. O **data plane é o próprio
-kernel Linux** (`ip_forward` + ARP estática): o reencaminhamento é feito pelo
-kernel à Camada 2 sobre `wlan0`, **não pelo framework e não gated pelo slot** —
-os nós intermédios reencaminham imediatamente, com a limitação de slot que a
-própria tese assume (3.2.6). É a "routing without modifying the system" da
-dissertação (Secções 3.2 e 4.4).
+Desenho de **2 subredes**, como na dissertação (3.2.5):
 
-As aplicações comunicam **directamente pelos IPs físicos** (ex.: `ping`/`iperf`
-para `172.20.10.X`); o kernel resolve o destino para o MAC do next-hop via ARP
-e reencaminha hop a hop. Os IPs origem/destino ficam intactos → comunicação
-peer-to-peer transparente.
+- **wlan0** (ad-hoc, real L2) → prefixo **físico** `172.20.10.x`: é onde vivem
+  os MACs e onde o kernel faz o relay ARP (papel do `192.168.2.x` dela).
+- **tunN** (virtual) → prefixo **mesh** `10.0.0.x`: o IP que as aplicações
+  endereçam, peer-to-peer, com o IP intacto (papel do `192.168.3.x` dela).
+
+O framework é **apenas plano de controlo**: partilha a topologia em slots TDMA,
+calcula a MST binária e **mantém as rotas/ARP**. O **data plane é o próprio
+kernel Linux**:
+
+- `ip_forward=1` → o nó reencaminha o que não é para si;
+- por destino: rota `10.0.0.dst/32 dev wlan0` + ARP estática
+  `10.0.0.dst → MAC do next-hop` (via `ioctl` SIOCSARP);
+- o kernel envia o frame L2 ao next-hop sobre wlan0 e **relaya hop a hop,
+  imediatamente, NÃO gated pelo slot TDMA** — com a limitação de slot que a
+  própria tese assume (3.2.6).
 
 ## Como compilar e correr
 
@@ -27,12 +32,12 @@ peer-to-peer transparente.
 make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
 
 # em cada nó (id = último octeto do IP):
-sudo ./meshnode_ana <node_id> <num_nodes>     # configura wlan0 + ip_forward + ARP
-
-# (o binário já aplica ad-hoc + sysctl; ana_setup.sh é opcional/documentação)
+sudo ./meshnode_ana <node_id> <num_nodes>   # configura wlan0 + tun + ip_forward + ARP
 ```
 
-Para teste local: `make` (default `127.0.0` / `lo`, só valida o plano de controlo).
+As aplicações comunicam pelos IPs **mesh** (`ping`/`iperf` para `10.0.0.X`); o
+kernel resolve para o MAC do next-hop e relaya. Para teste local: `make`
+(default `127.0.0`/`lo`, valida só o plano de controlo).
 
 ## O que é fiel à tese (e onde está no código)
 
@@ -40,35 +45,31 @@ Para teste local: `make` (default `127.0.0` / `lo`, só valida o plano de contro
 |---|---|---|
 | Prim sobre matriz **binária** (sem link quality) | 3.1.1 | `src/matrix.c` → `primAlgorithm_weighted()` (cost=1) |
 | Routing matrix → **linked list** primária/secundária | 3.1.2 / 3.2.1 | `src/routing_list.c`, `routingList_t` (= Code Block 3.3) |
-| Construção por **DFS** a partir do nó local | 3.2.4 | `dfs_collect()` |
-| **qsort** + diff incremental (só toca ARP no que muda) | 3.2.4 | `routing_update()` |
+| Construção por **DFS** + **qsort** (diff incremental) | 3.2.4 | `routing_update()` / `dfs_collect()` |
 | Relay à **Camada 2 pelo KERNEL** via ARP + `ip_forward` | 3.2 / 4.4 | `src/net_ana.c` + kernel |
 | Reenvio **não gated pelo slot** (imediato nos relays) | 3.2.6 | data plane = kernel |
-| ARP via **`ioctl()` SIOCSARP** (não popen/system) | 3.2.4 | `src/net_ana.c` → `net_ana_arp_set()` |
+| ARP via **`ioctl()` SIOCSARP** (não popen/system) | 3.2.4 | `src/net_ana.c` → `arp_set()` |
+| **2 subredes** (tun mesh + wlan0 físico) | 3.2.5 | `src/net_ana.c` `net_ana_setup()` |
 | **MAC partilhado no state packet** (6 bytes) + `macInfo_t` | 3.2.3 | `node.c` trailer + `src/mac_table.c` (= Code Block 3.2) |
 | **Tudo UDP** no framework; TCP só na aplicação | 3.2 | `node.c` (socket único `SOCK_DGRAM`, só STATE) |
 | **Sem separação MSG_DATA** (o framework não transporta dados) | 3.2 | `node.c` |
-| sysctl `ip_forward`, `accept_redirects`, `send_redirects` | 3.2.2 | `src/net_ana.c` `net_ana_setup()` |
-| Delete ARP só quando um nó **sai do grupo** | 3.2.4 | `routing_update()` (detecção `prev_active`) |
+| sysctl `ip_forward`, `accept_redirects`, `send_redirects` | 3.2.2 | `src/net_ana.c` |
+| Delete ARP só quando um nó **sai do grupo** | 3.2.4 | `routing_update()` (`prev_active`) |
 
 ## Diferenças face ao método Miguel (objeto da comparação)
 
 | | Método Ana (este projeto) | Método Miguel (projeto principal) |
 |---|---|---|
 | MST | binária | ponderada por link quality (0–100) |
-| Data plane | **kernel** (`ip_forward` + ARP) | overlay no framework |
+| Data plane | **kernel** (`ip_forward` + rota/32 + ARP) | overlay no framework |
 | Transporte de dados | nenhum no framework (kernel L2) | TCP per-peer (`tcp_sockfd[]`) |
 | Header de dados | nenhum (IP intacto) | `msg_data_hdr_t` (src/dst/msg_id) |
 | Relay | Camada 2 / ARP, **não gated pelo slot** | app-level, gated pelo slot |
-| Routing struct | linked list + tabela ARP | tabela plana + rotas /32 Netlink |
-| Update | incremental (qsort diff) | rebuild total por ronda |
+| Routing | linked list + rota/ARP por destino | tabela plana + rotas /32 Netlink |
 
-## Nota sobre os slots
+## Testes
 
-Como na tese, o relay **não respeita o slot TDMA**: o kernel reencaminha o pacote
-no momento em que o recebe (dentro do slot da origem), pelo que um pacote enviado
-perto do fim do slot pode não completar o multi-hop a tempo — exactamente a
-limitação descrita em 3.2.6 e proposta como *future work* (atraso de transmissão
-adaptativo). Os pacotes de **estado/sincronização** do framework continuam em
-slots; os de **dados** fluem pelo kernel. A análise de colocação de pacotes por
-slot mostra precisamente esta distinção.
+Ver `tests/` (suite de convergência + colocação por slot) e `Guia.txt`.
+A análise de slots mostra os **STATE packets** confinados aos slots, enquanto os
+**dados** (relayed pelo kernel) fluem fora dos slots — precisamente a limitação
+de 3.2.6.

@@ -29,8 +29,10 @@ typedef struct node {
     uint64_t  frame_duration_us;
     uint8_t   my_mac[MAC_BYTES];
 
+    int       tun_fd;                         /* tun (IP mesh das apps) */
     char      phy_iface[16];                  /* ex. "wlan0" */
-    char      phy_prefix[24];                 /* ex. "172.20.10" */
+    char      phy_prefix[24];                 /* físico, ex. "172.20.10" */
+    char      mesh_prefix[24];                /* mesh/tun, ex. "10.0.0"  */
     char      peer_ips[MAX_NODES + 1][32];    /* IPs físicos dos vizinhos */
 
     routing_ctx_t *routing;

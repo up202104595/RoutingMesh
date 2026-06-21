@@ -45,6 +45,9 @@
 #ifndef MESH_PHY_IFACE
 #define MESH_PHY_IFACE "wlan0"
 #endif
+#ifndef MESH_VIRT_PREFIX
+#define MESH_VIRT_PREFIX "10.0.0"     /* prefixo mesh/tun (apps) */
+#endif
 
 static volatile int g_running = 1;
 static void on_sigint(int s) { (void)s; g_running = 0; }
@@ -181,18 +184,22 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
     node->port              = BASE_PORT + node_id;
     node->running           = 1;
     node->frame_duration_us = (uint64_t)num_nodes * SLOT_DURATION_US;
-    snprintf(node->phy_iface,  sizeof(node->phy_iface),  "%s", MESH_PHY_IFACE);
-    snprintf(node->phy_prefix, sizeof(node->phy_prefix), "%s", MESH_NET_PREFIX);
+    snprintf(node->phy_iface,   sizeof(node->phy_iface),   "%s", MESH_PHY_IFACE);
+    snprintf(node->phy_prefix,  sizeof(node->phy_prefix),  "%s", MESH_NET_PREFIX);
+    snprintf(node->mesh_prefix, sizeof(node->mesh_prefix), "%s", MESH_VIRT_PREFIX);
 
     printf("\n====================================================\n");
     printf("  RA-TDMAs+  Node %u  (MÉTODO ANA — relay de kernel/ARP)\n", node_id);
     printf("====================================================\n");
-    printf("[Node %u] Porta=%d  Slot=%d  Frame=%.1fms  iface=%s  rede=%s.x\n",
+    printf("[Node %u] Porta=%d  Slot=%d  Frame=%.1fms  wlan0=%s.x  mesh=%s.x\n",
            node_id, node->port, node_id - 1, node->frame_duration_us / 1000.0,
-           node->phy_iface, node->phy_prefix);
+           node->phy_prefix, node->mesh_prefix);
 
-    /* ── setup de rede: ad-hoc + ip_forward + ARP estática (kernel relay) ── */
-    net_ana_setup(node->phy_iface, node->phy_prefix, node_id);
+    /* ── setup: wlan0 ad-hoc + tun (IP mesh) + ip_forward + sysctl ── */
+    node->tun_fd = net_ana_setup(node->phy_iface, node->phy_prefix,
+                                 node->mesh_prefix, node_id);
+    if (node->tun_fd < 0)
+        fprintf(stderr, "[Node %u] AVISO: tun não criada\n", node_id);
 
     node->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (node->sockfd < 0) { perror("socket"); free(node); return NULL; }
@@ -223,8 +230,9 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
                node->my_mac[0], node->my_mac[1], node->my_mac[2],
                node->my_mac[3], node->my_mac[4], node->my_mac[5]);
 
-    /* a tabela ARP é instalada na subrede FÍSICA (é o kernel que faz o relay) */
-    node->routing = routing_create(node_id, node->phy_prefix, node->phy_iface);
+    /* rotas+ARP instaladas para os IPs MESH dos destinos, a sair por wlan0
+     * (é o kernel que faz o relay via ARP — ver net_ana.c) */
+    node->routing = routing_create(node_id, node->mesh_prefix, node->phy_iface);
 
     sync_init(node_id, num_nodes, (uint16_t)(node->frame_duration_us / 1000));
     return node;
@@ -247,7 +255,7 @@ void node_destroy(node_t *node) {
     if (!node) return;
     uint8_t id = node->node_id;
     node->running = 0;
-    net_ana_teardown(node->phy_iface, node->node_id);
+    net_ana_teardown(node->phy_iface, node->tun_fd, node->node_id);
     if (node->routing) routing_destroy(node->routing);
     close(node->sockfd);
     free(node);

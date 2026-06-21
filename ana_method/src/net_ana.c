@@ -1,7 +1,8 @@
 /*
- * net_ana.c — Setup de rede + tabela ARP (MÉTODO ANA MORAIS)
+ * net_ana.c — Setup de rede + rotas/ARP (MÉTODO ANA MORAIS)
  *
- * Data plane = kernel Linux (ip_forward + ARP estática). Ver net_ana.h.
+ * Data plane = kernel Linux (ip_forward + rota /32 dev wlan0 + ARP
+ * estática). Ver net_ana.h para o desenho de 2 subredes.
  */
 
 #include "net_ana.h"
@@ -9,8 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <linux/if_tun.h>
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <arpa/inet.h>
@@ -28,7 +31,35 @@ int net_ana_local_mac(const char *iface, uint8_t out[MAC_BYTES]) {
     return 0;
 }
 
-int net_ana_setup(const char *iface, const char *prefix, uint8_t node_id) {
+/* cria a interface TUN e atribui-lhe o IP mesh (mesh_prefix.node_id/24) */
+static int tun_create(const char *mesh_prefix, uint8_t node_id) {
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "ip link delete tun%u 2>/dev/null", node_id);
+    system(cmd);
+
+    int fd = open("/dev/net/tun", O_RDWR);
+    if (fd < 0) { perror("[NET-ANA] open /dev/net/tun"); return -1; }
+
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+    snprintf(ifr.ifr_name, IFNAMSIZ, "tun%u", node_id);
+    if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
+        perror("[NET-ANA] TUNSETIFF"); close(fd); return -1;
+    }
+
+    snprintf(cmd, sizeof(cmd),
+        "ip addr add %s.%u/24 dev tun%u 2>/dev/null; "
+        "ip link set tun%u up 2>/dev/null",
+        mesh_prefix, node_id, node_id, node_id);
+    system(cmd);
+    printf("[NET-ANA] tun%u criada: IP mesh %s.%u/24\n",
+           node_id, mesh_prefix, node_id);
+    return fd;
+}
+
+int net_ana_setup(const char *phy_iface, const char *phy_prefix,
+                  const char *mesh_prefix, uint8_t node_id) {
     char cmd[768];
 
     /* interface ad-hoc (igual ao testbed da tese: essid/canal fixos) */
@@ -40,10 +71,11 @@ int net_ana_setup(const char *iface, const char *prefix, uint8_t node_id) {
         "ip link set %s up 2>/dev/null; "
         "ip addr flush dev %s 2>/dev/null; "
         "ip addr add %s.%u/28 dev %s 2>/dev/null",
-        iface, iface, iface, iface, iface, iface, prefix, node_id, iface);
+        phy_iface, phy_iface, phy_iface, phy_iface, phy_iface,
+        phy_iface, phy_prefix, node_id, phy_iface);
     system(cmd);
     printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=1 IP=%s.%u/28 dev %s\n",
-           prefix, node_id, iface);
+           phy_prefix, node_id, phy_iface);
 
     /* ── sysctl (tese 3.2.2): o nó funciona como router ── */
     system("sysctl -wq net.ipv4.ip_forward=1 2>/dev/null"
@@ -53,18 +85,24 @@ int net_ana_setup(const char *iface, const char *prefix, uint8_t node_id) {
     system("sysctl -wq net.ipv4.conf.all.send_redirects=0 2>/dev/null");
     system("sysctl -wq net.ipv4.conf.default.send_redirects=0 2>/dev/null");
     printf("[NET-ANA] ip_forward=1, accept_redirects=1, send_redirects=0\n");
-    return 0;
+
+    /* ── tun (IP mesh que as aplicações endereçam) ── */
+    return tun_create(mesh_prefix, node_id);
 }
 
-void net_ana_teardown(const char *iface, uint8_t node_id) {
-    (void)node_id;
+void net_ana_teardown(const char *phy_iface, int tun_fd, uint8_t node_id) {
+    if (tun_fd >= 0) close(tun_fd);
     char cmd[256];
-    snprintf(cmd, sizeof(cmd), "ip neigh flush dev %s 2>/dev/null", iface);
+    snprintf(cmd, sizeof(cmd),
+        "ip neigh flush dev %s 2>/dev/null; "
+        "ip link delete tun%u 2>/dev/null", phy_iface, node_id);
     system(cmd);
-    printf("[NET-ANA] ARP flush em %s\n", iface);
+    printf("[NET-ANA] teardown: ARP flush em %s, tun%u removida\n",
+           phy_iface, node_id);
 }
 
-int net_ana_arp_set(const char *iface, const char *ip_str, const char *mac_str) {
+/* ARP estática via ioctl (SIOCSARP): <ip_str> -> <mac_str> em iface */
+static int arp_set(const char *iface, const char *ip_str, const char *mac_str) {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("[NET-ANA] socket"); return -1; }
 
@@ -82,19 +120,17 @@ int net_ana_arp_set(const char *iface, const char *ip_str, const char *mac_str) 
     for (int i = 0; i < 6; i++)
         req.arp_ha.sa_data[i] = (char)mac[i];
 
-    /* entrada estática e permanente → sobrepõe-se à resolução dinâmica,
-     * forçando o relay para o MAC do next-hop (tese 3.2.4) */
     req.arp_ha.sa_family = ARPHRD_ETHER;
-    req.arp_flags = ATF_COM | ATF_PERM;
+    req.arp_flags = ATF_COM | ATF_PERM;      /* estática → força o relay */
     strncpy(req.arp_dev, iface, sizeof(req.arp_dev) - 1);
 
-    int rc = ioctl(sock, SIOCSARP, &req);   /* batch via ioctl, não popen/system */
+    int rc = ioctl(sock, SIOCSARP, &req);    /* batch via ioctl, não popen */
     close(sock);
     if (rc < 0) { perror("[NET-ANA] SIOCSARP"); return -1; }
     return 0;
 }
 
-int net_ana_arp_del(const char *iface, const char *ip_str) {
+static int arp_del(const char *iface, const char *ip_str) {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return -1;
     struct arpreq req;
@@ -106,4 +142,24 @@ int net_ana_arp_del(const char *iface, const char *ip_str) {
     ioctl(sock, SIOCDARP, &req);
     close(sock);
     return 0;
+}
+
+int net_ana_route_set(const char *phy_iface, const char *mesh_ip,
+                      const char *mac_str) {
+    /* rota /32 do destino mesh para SAIR por wlan0 (não pela tun),
+     * tornando o destino "on-link" em wlan0 para a resolução ARP */
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd),
+             "ip route replace %s/32 dev %s 2>/dev/null", mesh_ip, phy_iface);
+    system(cmd);
+    /* ARP estática: <mesh_ip> -> MAC do next-hop em wlan0 */
+    return arp_set(phy_iface, mesh_ip, mac_str);
+}
+
+int net_ana_route_del(const char *phy_iface, const char *mesh_ip) {
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd),
+             "ip route del %s/32 dev %s 2>/dev/null", mesh_ip, phy_iface);
+    system(cmd);
+    return arp_del(phy_iface, mesh_ip);
 }

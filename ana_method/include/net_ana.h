@@ -1,16 +1,22 @@
 /*
  * ═══════════════════════════════════════════════════════════════
- * net_ana.h — Setup de rede + tabela ARP (MÉTODO ANA MORAIS)
+ * net_ana.h — Setup de rede + rotas/ARP (MÉTODO ANA MORAIS)
  *
- * No método da Ana o DATA PLANE é o próprio kernel Linux:
- *   • ip_forward=1  → o nó reencaminha pacotes não destinados a si
- *   • tabela ARP estática (ioctl SIOCSARP) → IP destino resolve para
- *     o MAC do next-hop, fazendo o relay à Camada 2 sobre wlan0
- *   • os nós intermédios reencaminham IMEDIATAMENTE (não gated pelo
- *     slot TDMA) — exactamente como na tese (3.2 / 3.2.6 / 4.4)
+ * Desenho de 2 subredes, como na dissertação (3.2.5):
+ *   • wlan0 (ad-hoc, real L2)  → prefixo FÍSICO  (ex. 172.20.10.x)
+ *       é aqui que vivem os MACs e onde o kernel faz o relay ARP
+ *   • tunN  (virtual)          → prefixo MESH    (ex. 10.0.0.x)
+ *       é o IP que as aplicações endereçam (peer-to-peer, IP intacto)
  *
- * O framework apenas: partilha topologia, calcula a MST e mantém a
- * tabela ARP. NÃO transporta dados.
+ * DATA PLANE = kernel Linux:
+ *   • ip_forward=1 → o nó reencaminha o que não é para si
+ *   • por destino: rota  <mesh_ip>/32 dev wlan0  + ARP estática
+ *     <mesh_ip> -> MAC do next-hop  → o kernel envia o frame L2 ao
+ *     next-hop sobre wlan0 e relaya hop a hop, IMEDIATAMENTE (não
+ *     gated pelo slot TDMA) — exactamente como na tese (3.2 / 3.2.6)
+ *
+ * O framework apenas partilha topologia, calcula a MST e mantém estas
+ * entradas. NÃO transporta dados.
  * ═══════════════════════════════════════════════════════════════
  */
 
@@ -21,21 +27,26 @@
 
 #define MAC_BYTES 6
 
-/* Configura a interface ad-hoc (wlan0), atribui o IP físico do nó,
- * activa ip_forward e os sysctl de redirects (tese 3.2.2). */
-int  net_ana_setup(const char *iface, const char *prefix, uint8_t node_id);
+/* Configura wlan0 ad-hoc (IP físico), cria a tunN (IP mesh), activa
+ * ip_forward e os sysctl de redirects (tese 3.2.2). Devolve o fd da
+ * tun (>=0) ou -1 em erro. */
+int  net_ana_setup(const char *phy_iface, const char *phy_prefix,
+                   const char *mesh_prefix, uint8_t node_id);
 
-/* Reverte regras adicionadas no arranque (best-effort). */
-void net_ana_teardown(const char *iface, uint8_t node_id);
+/* Fecha a tun e limpa rotas/ARP/tun (best-effort). */
+void net_ana_teardown(const char *phy_iface, int tun_fd, uint8_t node_id);
 
 /* Lê o MAC físico da interface local para out[6]. 0 em sucesso. */
 int  net_ana_local_mac(const char *iface, uint8_t out[MAC_BYTES]);
 
-/* Instala/actualiza entrada ARP estática (ioctl SIOCSARP):
- *   ip_str (destino) -> mac_str (next-hop), na interface iface. */
-int  net_ana_arp_set(const char *iface, const char *ip_str, const char *mac_str);
+/* Instala rota + ARP para um destino:
+ *   ip route replace <mesh_ip>/32 dev <phy_iface>
+ *   SIOCSARP  <mesh_ip> -> <mac_str>  (estática, ATF_PERM) em phy_iface
+ * O kernel passa a enviar <mesh_ip> ao MAC do next-hop sobre wlan0. */
+int  net_ana_route_set(const char *phy_iface, const char *mesh_ip,
+                       const char *mac_str);
 
-/* Remove entrada ARP (ioctl SIOCDARP). */
-int  net_ana_arp_del(const char *iface, const char *ip_str);
+/* Remove rota + ARP de um destino. */
+int  net_ana_route_del(const char *phy_iface, const char *mesh_ip);
 
 #endif /* NET_ANA_H */
