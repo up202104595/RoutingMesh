@@ -378,11 +378,11 @@ detected through the connectivity matrix:
     propagates through the network in the following broadcast.
 
   \item \textbf{Node leaves:} when a node's row has not been refreshed
-    for longer than \texttt{MAX\_AGE} (2.0\,s in the implementation
-    used in this work, roughly thirteen rounds at a 150\,ms frame),
-    all nodes independently detect the departure, remove the
-    corresponding row and column, decrement $N$, and contract the
-    round accordingly.
+    for longer than the dead-link timeout \texttt{MAX\_AGE} (2.0\,s in
+    the implementation used in this work, roughly thirteen rounds at a
+    150\,ms frame), all nodes independently detect the departure,
+    remove the corresponding row and column, decrement $N$, and contract
+    the round accordingly.
 \end{itemize}
 
 Because every node applies the same deterministic rules to the same
@@ -520,10 +520,10 @@ packets and updates the local matrix. \texttt{MATRIX\_share()} serialises and br
 local matrix to the network.
 
 Before \texttt{MATRIX\_share()} transmits the local information, it first removes stale entries:
-any row whose age exceeds \texttt{MAX\_AGE} (2.0\,s, roughly thirteen rounds at a 150\,ms
-frame) is considered to belong to a node that has left the network, and both its row and its
-slot assignment are removed. The remaining rows are then
-aged, the local row is refreshed with the currently active links observed during the
+any row whose age exceeds the dead-link timeout \texttt{MAX\_AGE} (2.0\,s in this implementation)
+is considered to belong to a node that has left the network, and both its row and its slot
+assignment are removed. The remaining rows are then
+aged by one, the local row is refreshed with the currently active links observed during the
 preceding round, and the updated structure is serialised and broadcast.
 
 When a packet is received, \texttt{MATRIX\_parsePkt()} deserialises it into a local
@@ -664,16 +664,6 @@ offers diminishing returns and the protocol's overhead approaches that of standa
 flooding. The protocol is also more complex to implement and to tune than DSDV, requiring
 careful selection of Hello and TC intervals to balance responsiveness against overhead.
 
-% TODO FIGURE: OLSR MPR selection example
-% Suggested image: a 6-7 node graph showing MPR nodes highlighted and the
-% resulting TC message propagation paths vs full flooding.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.78\textwidth]{FILENAME}
-% \caption{Caption.}
-% \label{fig:olsr-mpr}
-% \end{figure}
-
 \subsection{Reactive Routing Protocols}
 
 Reactive protocols, also called on-demand protocols, do not maintain routing tables for
@@ -712,15 +702,6 @@ still incurs the discovery latency inherent to all reactive approaches. In highl
 environments, the balance between route lifetime and rediscovery frequency requires careful
 parameter tuning. Table~\ref{tab:protocols} provides a summary comparison of all four
 protocols.
-
-% TODO FIGURE: Reactive route discovery diagram (RREQ propagation and RREP return)
-% Suggested image: a 4-node topology showing a RREQ flood and RREP unicast reply.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.78\textwidth]{FILENAME}
-% \caption{Caption.}
-% \label{fig:reactive-discovery}
-% \end{figure}
 
 \begin{table}[h]
 \centering
@@ -1094,10 +1075,6 @@ starting point. The combination of these constraints, together with the architec
 of the Layer~2 approach, motivated the decision to build an entirely new routing system from
 scratch, adopting a different operating layer and different design principles while reusing only
 the underlying TDMA framework.
-
-
-
-
 
 
 %% -----------------------------------------------------------------------

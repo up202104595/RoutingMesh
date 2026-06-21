@@ -135,20 +135,6 @@ connection. The thread would remain stuck, the PDR module would stop receiving s
 number updates for that peer, and stale link quality data would continue to influence routing
 decisions long after the link had effectively failed.
 
-% TODO FIGURE: Protocol split diagram
-% Suggested image: two-column diagram. Left column labelled "Control Plane": MATRIX beacon
-% arrow going from one node to all others via UDP multicast. Right column labelled "Data Plane":
-% dedicated TCP arrows between specific node pairs (tcp_sockfd[peer_id]). Clearly shows that
-% MATRIX stays UDP and MSG_DATA moves to TCP, with no interference between planes.
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.80\textwidth]{FILENAME}
-% \caption{Separation of the communication stack into a UDP control plane (MATRIX beacons)
-% and a TCP data plane (MSG\_DATA). Each data-plane stream is a dedicated per-peer TCP
-% connection.}
-% \label{fig:proto-split}
-% \end{figure}
-
 
 %% -----------------------------------------------------------------------
 \section{Architecture Overview}
@@ -298,8 +284,7 @@ connection, records the peer socket in the \texttt{tcp\_sockfd[]} array and spaw
 \texttt{recv()} with \texttt{MSG\_WAITALL} in a tight loop, processing one complete framed
 message per iteration: it first reads the four-byte length prefix, then reads exactly that many
 bytes for the payload. On delivery, it passes the packet to the routing layer, which either
-injects it into \texttt{tun0} for local consumption or pushes it back into the transmission
-queue for forwarding.
+injects it into \texttt{tun0} for local consumption or forwards it toward the next hop.
 
 The TCP keepalive thread complements the kernel-level keep-alive mechanism with an
 application-level health check. Every second it probes each peer socket with a non-blocking
@@ -478,8 +463,8 @@ next-hop peer ID, and sends the framed packet over the corresponding TCP connect
 When a relay node receives a TCP packet destined for a further node, it injects the IP
 payload into \texttt{tun\textit{id}} via \texttt{tun\_write()}. From the kernel's
 perspective the packet appears as traffic arriving on the TUN interface and requiring IP
-forwarding. A policy rule with priority~100 — lower than the default table priority of
-32766 — directs all packets ingressing on \texttt{tun\textit{id}} to table~200, where
+forwarding. A policy rule with priority~100, lower than the default table priority of
+32766, directs all packets ingressing on \texttt{tun\textit{id}} to table~200, where
 the Routing module installs a \texttt{/32} host route per destination. Each host route
 specifies the physical \texttt{172.20.10.\textit{x}} address of the next-hop node as the
 gateway and \texttt{wlan0} as the outgoing interface, so forwarded packets exit directly
@@ -584,7 +569,7 @@ received packets:
 \begin{equation}
 \mathrm{PDR}_{ij} = \frac{\text{packets received from peer } j}{%
   \text{packets expected from peer } j} \times 100
-\label{eq:pdr}
+\label{eq:pdr-impl}
 \end{equation}
 
 The PDR value, an integer in $[0,\,100]$, is used as the edge weight in the MST computation.
@@ -650,18 +635,17 @@ peer. If the slot boundary is reached, remaining packets are held for the follow
 The \texttt{tcp\_rx\_peer\_loop} thread receives the framed packet, updates the PDR estimate
 for the source link, and inspects the destination IP address. Because the destination is not
 the local node, the IP payload is written to \texttt{tun0} via \texttt{tun\_write()}. From
-there the kernel's own IP forwarding engine takes over: the policy rule for traffic ingressing
-on \texttt{tun0} directs the packet to table~200, whose \texttt{/32} host route sends it
-straight out of \texttt{wlan0} to the physical address (\texttt{172.20.10.x}) of the next
-hop. The relay therefore forwards the datagram at the network layer, without re-queueing it
-for the framework's TCP data plane, so the forwarded packet appears on the air as a plain IP
-datagram rather than re-encapsulated framework traffic.
+there the kernel's own IP forwarding engine takes over: the policy rule for traffic
+ingressing on \texttt{tun0} directs the packet to table~200, whose \texttt{/32} host route
+sends it straight out of \texttt{wlan0} to the physical \texttt{172.20.10.x} address of the
+next hop. The relay therefore forwards the datagram at the network layer, without
+re-queueing it for the framework's TCP data plane, so the forwarded packet travels on the
+air as a plain IP datagram rather than re-encapsulated framework traffic.
 
 \paragraph{Destination node.}
-The packet arrives at the destination as a plain IP datagram on \texttt{wlan0} and is
-delivered by the kernel to the application via \texttt{tun0}. Because TCP between the source
-and the relay has ensured loss-free, in-order transfer of every datagram up to the relay, the
-application receives a contiguous, gapless sequence of video frames.
+The destination receives the forwarded IP datagram on \texttt{wlan0} and the kernel delivers
+it to the application through \texttt{tun0}. The application thus receives the video stream
+transparently, regardless of whether it arrived directly or through the relay.
 
 
 
