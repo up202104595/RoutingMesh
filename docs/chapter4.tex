@@ -836,6 +836,36 @@ than a bounded, one-off recovery delay. Tuning this constant, or replacing the
 fixed timeout with an adaptive scheme that reacts to the recent beacon-loss
 rate, is identified as a concrete avenue for future work.
 
+It is worth being precise about the origin of the sub-second tail, because it
+exposes an architectural cost of the present design relative to the Layer~2
+reference. The tail is not route computation, which is microseconds, but the
+time for the \emph{data path} through the relay to become active. Although the
+forwarding step at N2 is a kernel \texttt{ip\_forward}, the data plane is
+connection-oriented and lives above the network layer: a relayed packet is
+delivered up to the user-space TCP receive thread at N2 before being re-injected
+for forwarding, and after the topology change the N1\,$\to$\,N2 connection must
+take over the stream and ramp up --- TCP's flow and congestion state, plus the
+once-per-second keepalive and reconnect cycle if the connection had gone idle.
+This traversal \emph{up} the protocol stack, and the connection state it
+implies, is the most plausible source of the $\approx 0.8$\,s: the recovery
+spends it not deciding \emph{where} to send but making the connection-oriented
+path actually carry traffic again. The practical impact is a fixed sub-second
+penalty added to detection on every recovery, and a small per-packet user-space
+cost in steady state.
+
+This is precisely where the Layer~2 approach of Morais would be faster. There
+the relay forwards by rewriting the destination MAC address in the kernel, so the
+very next frame flows toward the new next hop with no transport connection to
+re-establish and no trip up to user space; this component of the recovery would
+be close to instantaneous rather than $\approx 0.8$\,s. The tail is therefore
+the price paid for operating at Layer~3 over a TCP data plane --- the same choice
+that buys reliable in-order delivery, standard observability, and kernel
+integration (Chapter~\ref{chap:implementation}). It is a deliberate trade, not an
+oversight: detection ($2.0$\,s) dominates the total today, so the penalty is
+secondary; but if \texttt{MAX\_AGE} were reduced, this establishment cost would
+become the next bottleneck, and a lighter-weight, kernel-resident forwarding
+path closer to the Layer~2 design would then be the lever to pull.
+
 \subsection{Packet Inter-Arrival Timing}
 \label{subsec:res-ia}
 
@@ -1150,14 +1180,21 @@ continuum.
 \textbf{Convergence.} In both designs the recovery time after a link failure is
 dominated by the RA-TDMAs+ node-aging timeout (\texttt{MAX\_AGE} $= 2.0$\,s),
 i.e.\ the time required to detect that the direct link is dead before any
-re-routing can begin (Section~\ref{subsec:res-convergence}). The two approaches
-are therefore expected to recover in comparable time. The difference lies only
-in the post-detection step, which is sub-second in both cases: the Layer~3
-design re-installs the IP route and re-establishes the forwarding state,
-whereas the Layer~2 design updates the ARP tables below IP. Reducing
-\texttt{MAX\_AGE} is the most effective way to accelerate recovery in either
-design, at the cost of robustness to transient beacon loss in the shared
-collision domain.
+re-routing can begin (Section~\ref{subsec:res-convergence}). Because detection
+dominates, the two recover in broadly comparable time today. They differ,
+however, in the post-detection step. The Layer~2 design only updates an ARP
+entry in the kernel, after which the next frame flows toward the new next hop
+almost immediately. The Layer~3 design must instead bring its connection-oriented
+data plane back into service: a relayed packet is handled up in user space (TCP)
+before the kernel \texttt{ip\_forward}, and the path through N2 has to take over
+the stream and ramp up. This accounts for the $\approx 0.8$\,s establishment tail
+of Section~\ref{subsec:res-convergence}, which the Layer~2 approach would largely
+avoid. The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the
+floor, but it would dominate if that timeout were reduced --- at which point a
+lighter-weight, kernel-resident forwarding path would become the more effective
+lever. Reducing \texttt{MAX\_AGE} remains the first-order way to accelerate
+recovery in either design, at the cost of robustness to transient beacon loss in
+the shared collision domain.
 
 \textbf{Observability and stability.} The Layer~3 approach trades convergence
 speed for two practical advantages. The relay path is visible to standard IP
