@@ -70,6 +70,28 @@ static uint8_t ip_dst_node(const uint8_t *ip_pkt, size_t len) {
     return (uint8_t)(ntohl(iph->daddr) & 0xFF);
 }
 
+/* Re-injecta um pacote IP raw no kernel via raw socket (tese 3.2.5):
+ * SOCK_RAW/IPPROTO_RAW com IP_HDRINCL, ligado ao IP de DESTINO (não à
+ * interface) para o kernel tratar routing/fragmentação. O kernel entrega
+ * localmente se o destino for nosso, ou faz ip_forward via ARP se for de
+ * outro nó. Relay 100% kernel, IP de origem intacto. */
+static ssize_t raw_inject(const uint8_t *ip_pkt, size_t len) {
+    if (len < sizeof(struct iphdr)) return -1;
+    int s = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+    if (s < 0) { perror("[RX] raw socket"); return -1; }
+    int one = 1;
+    setsockopt(s, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
+    const struct iphdr *iph = (const struct iphdr *)ip_pkt;
+    struct sockaddr_in dst = {0};
+    dst.sin_family      = AF_INET;
+    dst.sin_addr.s_addr = iph->daddr;          /* ligar ao destino (3.2.5) */
+    ssize_t w = sendto(s, ip_pkt, len, 0,
+                       (struct sockaddr *)&dst, sizeof(dst));
+    if (w < 0) perror("[RX] sendto raw");
+    close(s);
+    return w;
+}
+
 /* ═══════════════════════════════════════════════════════════════
  * THREAD TUN — lê os pacotes de aplicação desviados para a tun e
  * enfileira-os para serem enviados no slot (Figura 3.13, origem)
@@ -130,16 +152,21 @@ static void* receiver_loop(void *arg) {
             printf("[RX] STATE de Node %u (%zd bytes)\n", hdr->slot_id, n);
 
         } else if (hdr->type == MSG_DATA) {
-            /* DATA = pacote IP raw da app logo após o cabeçalho TDMA.
-             * Só os nós destino recebem aqui (os relays são feitos pelo
-             * kernel via ARP, sem chegar à socket do framework). Escreve
-             * o IP raw na tun -> o kernel entrega à app local (IP intacto). */
+            /* DATA = [tdma_header][pacote IP raw da app].
+             * Entrega/relay 100% PELO KERNEL via raw socket (tese 3.2.5):
+             * re-injectamos o IP raw com SOCK_RAW/IPPROTO_RAW ligado ao
+             * IP de destino. O kernel processa o pacote — se o destino for
+             * local entrega à app (com reassembly); se não, faz ip_forward
+             * via a ARP estática (dst -> MAC do next-hop) para o próximo
+             * salto. O IP de origem fica intacto (relay transparente). */
             uint8_t *ip_pkt = buffer + sizeof(tdma_header_t);
             ssize_t  ip_len = n - (ssize_t)sizeof(tdma_header_t);
-            if (ip_len >= (ssize_t)sizeof(struct iphdr) && node->tun_fd >= 0) {
-                ssize_t w = write(node->tun_fd, ip_pkt, (size_t)ip_len);
-                printf("[RX] DATA ENTREGUE de Node %u  %zd bytes IP  (write=%zd)\n",
-                       hdr->slot_id, ip_len, w);
+            if (ip_len >= (ssize_t)sizeof(struct iphdr)) {
+                ssize_t w = raw_inject(ip_pkt, (size_t)ip_len);
+                uint8_t fd = ip_dst_node(ip_pkt, (size_t)ip_len);
+                printf("[RX] DATA de Node %u dst=%u %zd bytes -> kernel (raw, %s)  sent=%zd\n",
+                       hdr->slot_id, fd, ip_len,
+                       fd == node->node_id ? "entrega local" : "relay ip_forward/ARP", w);
             }
         }
     }
