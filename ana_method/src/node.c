@@ -110,12 +110,12 @@ static void* tun_reader_loop(void *arg) {
         if (node->tun_fd < 0) break;
         ssize_t n = read(node->tun_fd, buf, sizeof(buf));
         if (n <= 0) continue;
-        uint8_t dst = ip_dst_node(buf, (size_t)n);
-        if (dst != 0 && dst != node->node_id) {
-            tx_queue_push(node->tx_queue, buf, (size_t)n, dst);
-            printf("[TUN] Pacote %zd bytes  dst=%u  queue=%d\n",
-                   n, dst, tx_queue_size(node->tx_queue));
-        }
+        /* No método Ana os dados são encaminhados PELO KERNEL na subrede
+         * mesh (rota /32 dev wlan0 + ARP estática instaladas pelo
+         * routing_list). O framework NÃO reenvia dados por UDP: qualquer
+         * pacote que ainda caia na tun (ex.: destino sem rota /32 antes da
+         * convergência) é descartado — evita loop e mantém a origem na
+         * subrede mesh, para o iptables -s <IP físico> não os apanhar. */
     }
     printf("[TUN] Thread terminada\n");
     return NULL;
@@ -341,10 +341,11 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
                node->my_mac[0], node->my_mac[1], node->my_mac[2],
                node->my_mac[3], node->my_mac[4], node->my_mac[5]);
 
-    /* ARP instalada para os IPs FÍSICOS dos destinos (on-link em wlan0).
-     * As apps endereçam 172.20.10.x (tese 3.2.5); o kernel relaya via ARP,
-     * SEM precisar de rotas/comandos de linux — só ioctl SIOCSARP. */
-    node->routing  = routing_create(node_id, node->phy_prefix, node->phy_iface);
+    /* Routing na subrede MESH (10.0.0.x): por destino instala uma rota /32
+     * (dev wlan0, src = IP mesh local) + ARP estática (10.0.0.dst -> MAC do
+     * next-hop) via ioctl SIOCSARP. As apps endereçam 10.0.0.x; o kernel
+     * reenvia o IP cru hop-a-hop, com origem na subrede mesh. */
+    node->routing  = routing_create(node_id, MESH_VIRT_PREFIX, node->phy_iface);
     node->tx_queue = tx_queue_create();
 
     sync_init(node_id, num_nodes, (uint16_t)(node->frame_duration_us / 1000));
