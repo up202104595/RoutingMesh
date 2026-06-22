@@ -2,19 +2,16 @@
  * ═══════════════════════════════════════════════════════════════
  * node.c — Framework RA-TDMAs+  (MÉTODO ANA MORAIS — recriação literal)
  *
- * O framework é SÓ plano de controlo. O reencaminhamento de dados é
- * 100% do kernel Linux (ip_forward + tabela ARP estática), feito à
- * Camada 2 sobre wlan0 e NÃO gated pelo slot TDMA — exactamente como
- * na dissertação (Secções 3.2, 3.2.6 e 4.4). Os nós intermédios
- * reencaminham imediatamente, com a limitação de slot que a tese
- * assume.
+ * Fluxo de dados (Figura 3.13 da tese):
+ *   ORIGEM:  app -> (iptables mangle) -> tun -> framework lê -> UDP no
+ *            slot para o IP de wlan0 do destino final (porta 7000+dst)
+ *   RELAYS:  o KERNEL reencaminha via ARP/ip_forward, imediatos, dentro
+ *            do slot da origem (não gated pelo slot) — 3.2.6
+ *   DESTINO: framework recebe a UDP -> escreve o IP raw na tun -> app
  *
- * Plano de controlo (UDP, porta BASE_PORT + id, em slots TDMA):
+ * Pacotes no ar (UDP, porta 7000+id):
  *   STATE: [tdma_header(MATRIX)][matriz serializada][MAC 6 bytes]
- *
- * Não há pacotes DATA no framework: as aplicações comunicam
- * directamente pelos IPs físicos (ex.: ping/iperf para 172.20.10.X)
- * e o kernel reencaminha via ARP.
+ *   DATA : [tdma_header(MSG_DATA)][pacote IP raw da app]
  * ═══════════════════════════════════════════════════════════════
  */
 
@@ -24,15 +21,18 @@
 #include "mac_table.h"
 #include "routing_list.h"
 #include "net_ana.h"
+#include "tx_queue.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <arpa/inet.h>
 
 #define BASE_PORT        7000
@@ -62,6 +62,43 @@ static inline uint16_t round_period_ms(uint8_t num_nodes) {
     return (uint16_t)(num_nodes * (SLOT_DURATION_US / 1000));
 }
 
+/* nó destino = último octeto do IP destino do pacote (id = X em a.b.c.X) */
+static uint8_t ip_dst_node(const uint8_t *ip_pkt, size_t len) {
+    if (len < sizeof(struct iphdr)) return 0;
+    const struct iphdr *iph = (const struct iphdr *)ip_pkt;
+    if (iph->version != 4) return 0;
+    return (uint8_t)(ntohl(iph->daddr) & 0xFF);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * THREAD TUN — lê os pacotes de aplicação desviados para a tun e
+ * enfileira-os para serem enviados no slot (Figura 3.13, origem)
+ * ═══════════════════════════════════════════════════════════════ */
+static void* tun_reader_loop(void *arg) {
+    node_t *node = (node_t *)arg;
+    uint8_t buf[2048];
+
+    if (node->tun_fd >= 0) {
+        int fl = fcntl(node->tun_fd, F_GETFL, 0);
+        fcntl(node->tun_fd, F_SETFL, fl & ~O_NONBLOCK);
+    }
+    printf("[TUN] Thread iniciada (fd=%d)\n", node->tun_fd);
+
+    while (node->running && g_running) {
+        if (node->tun_fd < 0) break;
+        ssize_t n = read(node->tun_fd, buf, sizeof(buf));
+        if (n <= 0) continue;
+        uint8_t dst = ip_dst_node(buf, (size_t)n);
+        if (dst != 0 && dst != node->node_id) {
+            tx_queue_push(node->tx_queue, buf, (size_t)n, dst);
+            printf("[TUN] Pacote %zd bytes  dst=%u  queue=%d\n",
+                   n, dst, tx_queue_size(node->tx_queue));
+        }
+    }
+    printf("[TUN] Thread terminada\n");
+    return NULL;
+}
+
 /* ═══════════════════════════════════════════════════════════════
  * THREAD RX — recebe STATE (topologia + MAC) dos vizinhos
  * ═══════════════════════════════════════════════════════════════ */
@@ -80,17 +117,31 @@ static void* receiver_loop(void *arg) {
         if (n <= (ssize_t)sizeof(tdma_header_t)) continue;
 
         tdma_header_t *hdr = (tdma_header_t *)buffer;
-        if (hdr->type != MATRIX) continue;
 
-        /* trailer: últimos 6 bytes = MAC do emissor (tese 3.2.3) */
-        if (n >= (ssize_t)(sizeof(tdma_header_t) + 6)) {
-            const uint8_t *mac = buffer + (n - 6);
-            mac_table_set(hdr->slot_id, mac);
+        if (hdr->type == MATRIX) {
+            /* trailer: últimos 6 bytes = MAC do emissor (tese 3.2.3) */
+            if (n >= (ssize_t)(sizeof(tdma_header_t) + 6)) {
+                const uint8_t *mac = buffer + (n - 6);
+                mac_table_set(hdr->slot_id, mac);
+            }
+            sync_record_delay(hdr->slot_id, hdr->timestamp,
+                              hdr->slot_begin_ms, hdr->slot_end_ms, rp_ms);
+            MATRIX_parsePkt(buffer, n - 6, hdr->slot_id);   /* exclui trailer MAC */
+            printf("[RX] STATE de Node %u (%zd bytes)\n", hdr->slot_id, n);
+
+        } else if (hdr->type == MSG_DATA) {
+            /* DATA = pacote IP raw da app logo após o cabeçalho TDMA.
+             * Só os nós destino recebem aqui (os relays são feitos pelo
+             * kernel via ARP, sem chegar à socket do framework). Escreve
+             * o IP raw na tun -> o kernel entrega à app local (IP intacto). */
+            uint8_t *ip_pkt = buffer + sizeof(tdma_header_t);
+            ssize_t  ip_len = n - (ssize_t)sizeof(tdma_header_t);
+            if (ip_len >= (ssize_t)sizeof(struct iphdr) && node->tun_fd >= 0) {
+                ssize_t w = write(node->tun_fd, ip_pkt, (size_t)ip_len);
+                printf("[RX] DATA ENTREGUE de Node %u  %zd bytes IP  (write=%zd)\n",
+                       hdr->slot_id, ip_len, w);
+            }
         }
-        sync_record_delay(hdr->slot_id, hdr->timestamp,
-                          hdr->slot_begin_ms, hdr->slot_end_ms, rp_ms);
-        MATRIX_parsePkt(buffer, n - 6, hdr->slot_id);   /* exclui trailer MAC */
-        printf("[RX] STATE de Node %u (%zd bytes)\n", hdr->slot_id, n);
     }
     printf("[RX] Thread terminada\n");
     return NULL;
@@ -158,6 +209,39 @@ static void* tx_loop(void *arg) {
             printf("[TX] Slot %d: STATE (%d bytes seq=%u)  [%u-%u ms]\n",
                    current_slot, total_len, tx_counter - 1, sl.begin_ms, sl.end_ms);
             MATRIX_print();
+        }
+
+        /* ── 3. Drena DATA: envia os pacotes da app, no slot, por UDP
+         * para o IP de wlan0 do destino final (porta 7000+dst). O kernel
+         * usa a ARP estática (dst -> MAC do next-hop) e relaya hop a hop. */
+        tx_pkt_t *p;
+        while ((p = tx_queue_pop(node->tx_queue)) != NULL) {
+            if (get_time_us() >= slot_end) {           /* respeita o fim do slot */
+                tx_queue_push(node->tx_queue, p->data, p->len, p->dst_id);
+                free(p);
+                break;
+            }
+            if (node->peer_ips[p->dst_id][0] == '\0') { free(p); continue; }
+
+            tdma_header_t *dh = (tdma_header_t *)pkt_buffer;
+            memset(dh, 0, sizeof(*dh));
+            dh->type    = MSG_DATA;
+            dh->slot_id = node->node_id;
+            dh->seq_num = tx_counter++;
+            dh->timestamp = (double)get_time_us() / 1000000.0;
+            memcpy(pkt_buffer + sizeof(tdma_header_t), p->data, p->len);
+            int dlen = sizeof(tdma_header_t) + (int)p->len;
+
+            struct sockaddr_in dd = {0};
+            dd.sin_family = AF_INET;
+            dd.sin_port   = htons(BASE_PORT + p->dst_id);          /* 7000+dst */
+            dd.sin_addr.s_addr = inet_addr(node->peer_ips[p->dst_id]); /* wlan0 IP */
+            ssize_t s = sendto(node->sockfd, pkt_buffer, dlen, 0,
+                               (struct sockaddr *)&dd, sizeof(dd));
+            printf("[TX] DATA dst=%u (%s:%d)  ip_len=%zu  sent=%zd\n",
+                   p->dst_id, node->peer_ips[p->dst_id], BASE_PORT + p->dst_id,
+                   p->len, s);
+            free(p);
         }
 
         sync_adjust_slot(round_period_ms(node->num_nodes));
@@ -233,7 +317,8 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
     /* ARP instalada para os IPs FÍSICOS dos destinos (on-link em wlan0).
      * As apps endereçam 172.20.10.x (tese 3.2.5); o kernel relaya via ARP,
      * SEM precisar de rotas/comandos de linux — só ioctl SIOCSARP. */
-    node->routing = routing_create(node_id, node->phy_prefix, node->phy_iface);
+    node->routing  = routing_create(node_id, node->phy_prefix, node->phy_iface);
+    node->tx_queue = tx_queue_create();
 
     sync_init(node_id, num_nodes, (uint16_t)(node->frame_duration_us / 1000));
     return node;
@@ -243,11 +328,15 @@ void node_run(node_t *node) {
     signal(SIGINT, on_sigint);
     printf("[Node %u] Iniciando threads...\n\n", node->node_id);
 
-    pthread_create(&node->receiver_thread, NULL, receiver_loop, node);
-    pthread_create(&node->tx_thread,       NULL, tx_loop,       node);
+    pthread_create(&node->receiver_thread, NULL, receiver_loop,   node);
+    pthread_create(&node->tx_thread,       NULL, tx_loop,         node);
+    if (node->tun_fd >= 0)
+        pthread_create(&node->tun_thread,  NULL, tun_reader_loop, node);
 
     pthread_join(node->receiver_thread, NULL);
     pthread_join(node->tx_thread,       NULL);
+    if (node->tun_fd >= 0)
+        pthread_join(node->tun_thread,  NULL);
 
     printf("\n[Node %u] Threads terminadas\n", node->node_id);
 }
@@ -257,7 +346,8 @@ void node_destroy(node_t *node) {
     uint8_t id = node->node_id;
     node->running = 0;
     net_ana_teardown(node->phy_iface, node->tun_fd, node->node_id);
-    if (node->routing) routing_destroy(node->routing);
+    if (node->routing)  routing_destroy(node->routing);
+    if (node->tx_queue) tx_queue_destroy(node->tx_queue);
     close(node->sockfd);
     free(node);
     printf("[Node %u] Destruído\n", id);

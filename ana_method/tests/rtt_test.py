@@ -5,8 +5,8 @@ Sends PING packets over the TUN network and measures round-trip time.
 
 Usage:
   Node 3 (base):  python3 rtt_test.py --mode server
-  Node 3 (base):  python3 rtt_test.py --mode client --target 172.20.10.1 --count 100 --label "P2P_N3toN1"
-  Node 3 (base):  python3 rtt_test.py --mode client --target 172.20.10.1 --count 100 --label "RELAY_N3toN1_viaN2" --topology relay
+  Node 3 (base):  python3 rtt_test.py --mode client --target 10.0.0.1 --count 100 --label "P2P_N3toN1"
+  Node 3 (base):  python3 rtt_test.py --mode client --target 10.0.0.1 --count 100 --label "RELAY_N3toN1_viaN2" --topology relay
 
 Results saved to: rtt_results_<label>.json
 """
@@ -119,7 +119,7 @@ def client_mode(target, count, interval, label, topology):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode",     choices=["client","server"], required=True)
-    parser.add_argument("--target",   default="172.20.10.1")
+    parser.add_argument("--target",   default="10.0.0.1")
     parser.add_argument("--count",    type=int,   default=100)
     parser.add_argument("--interval", type=float, default=0.1,
                         help="Seconds between pings (default 0.1 = 10Hz)")

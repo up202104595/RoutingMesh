@@ -30,6 +30,7 @@ SRCS = $(SRC_DIR)/main.c         \
        $(SRC_DIR)/matrix.c       \
        $(SRC_DIR)/net_ana.c      \
        $(SRC_DIR)/sync.c         \
+       $(SRC_DIR)/tx_queue.c     \
        $(SRC_DIR)/mac_table.c    \
        $(SRC_DIR)/routing_list.c
 

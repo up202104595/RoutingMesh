@@ -1,14 +1,17 @@
 /*
- * node.h — Nó do framework RA-TDMAs+ (MÉTODO ANA MORAIS, opção literal)
+ * node.h — Nó do framework RA-TDMAs+ (MÉTODO ANA MORAIS, recriação literal)
  *
- * O framework é APENAS plano de controlo:
- *   • partilha a topologia (state packets UDP, em slots TDMA)
- *   • calcula a MST binária (Prim)
- *   • mantém a tabela ARP (id -> MAC do next-hop) via ioctl
+ * Fluxo de dados (Figura 3.13 da tese):
+ *   • a app envia para o IP de wlan0 do destino; o iptables mangle
+ *     desvia o pacote para a tun, onde o framework o lê
+ *   • o framework envia-o por UDP, no slot, para o IP de wlan0 do
+ *     destino final (porta 7000+dst)
+ *   • os relays são feitos pelo KERNEL via ARP/ip_forward, imediatos
+ *     (não gated pelo slot) — 3.2.6
+ *   • no destino, o framework escreve o IP raw na tun -> entrega à app
  *
- * O DATA PLANE é o kernel Linux (ip_forward + ARP estática). O relay
- * é feito pelo kernel à Camada 2 sobre wlan0, NÃO pelo framework e
- * NÃO gated pelo slot — tal como na dissertação (3.2 / 3.2.6 / 4.4).
+ * O framework partilha topologia, calcula a MST binária e mantém a
+ * tabela ARP (id -> MAC do next-hop) via ioctl.
  */
 
 #ifndef NODE_H
@@ -20,6 +23,8 @@
 #include "net_ana.h"
 
 #define MAX_NODES 20
+
+typedef struct tx_queue tx_queue_t;
 
 typedef struct node {
     uint8_t   node_id;
@@ -36,9 +41,11 @@ typedef struct node {
     char      peer_ips[MAX_NODES + 1][32];    /* IPs físicos dos vizinhos */
 
     routing_ctx_t *routing;
+    tx_queue_t    *tx_queue;   /* fila thread TUN -> slot TDMA */
 
     pthread_t receiver_thread;
     pthread_t tx_thread;
+    pthread_t tun_thread;
 
     volatile int running;
 } node_t;

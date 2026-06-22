@@ -98,17 +98,38 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
     printf("[NET-ANA] ip_forward=1, accept_redirects=1, send_redirects=0\n");
 
     /* ── tun (IP mesh que as aplicações endereçam) ── */
-    return tun_create(mesh_prefix, node_id);
+    int tun_fd = tun_create(mesh_prefix, node_id);
+
+    /* ── iptables mangle + ip rule (tese 3.2.5 / Code Block 3.4) ──
+     * Desvia o tráfego de aplicação que sai por wlan0 para a tun (onde
+     * o framework o lê), EXCETO os pacotes UDP do próprio framework
+     * (sport 7000+id), para não criar loop. Assim os pacotes de dados
+     * (vídeo, ping, etc.) passam pela tun, como na Figura 3.13. */
+    int tdma_port = 7000 + node_id;
+    snprintf(cmd, sizeof(cmd),
+        "iptables -t mangle -A OUTPUT -o %s -j MARK --set-mark 1 2>/dev/null; "
+        "iptables -t mangle -A OUTPUT -o %s -p udp --sport %d -j MARK --set-mark 0 2>/dev/null; "
+        "ip rule add fwmark 1 table 100 2>/dev/null; "
+        "ip route add default dev tun%u table 100 2>/dev/null",
+        phy_iface, phy_iface, tdma_port, node_id);
+    system(cmd);
+    printf("[NET-ANA] iptables mangle: %s -> tun%u (exceto UDP sport %d)\n",
+           phy_iface, node_id, tdma_port);
+
+    return tun_fd;
 }
 
 void net_ana_teardown(const char *phy_iface, int tun_fd, uint8_t node_id) {
     if (tun_fd >= 0) close(tun_fd);
-    char cmd[256];
+    char cmd[384];
     snprintf(cmd, sizeof(cmd),
+        "iptables -t mangle -F OUTPUT 2>/dev/null; "
+        "ip rule del fwmark 1 table 100 2>/dev/null; "
+        "ip route flush table 100 2>/dev/null; "
         "ip neigh flush dev %s 2>/dev/null; "
         "ip link delete tun%u 2>/dev/null", phy_iface, node_id);
     system(cmd);
-    printf("[NET-ANA] teardown: ARP flush em %s, tun%u removida\n",
+    printf("[NET-ANA] teardown: mangle/ip rule limpos, ARP flush em %s, tun%u removida\n",
            phy_iface, node_id);
 }
 

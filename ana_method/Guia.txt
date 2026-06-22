@@ -8,48 +8,66 @@
  IDs:         N1=1  N2=2  N3=3
  Endereços:   físico/wlan0 172.20.10.<id>   |   tun (interna) 10.0.0.<id>
 
- IMPORTANTE (método Ana, tese 3.2.5): as APLICAÇÕES endereçam o IP de
- wlan0 (172.20.10.<id>) — NÃO a tun. Assim o destino fica on-link em
- wlan0 e o relay precisa SÓ da entrada ARP (ioctl SIOCSARP), sem
- qualquer comando de linux/rota. A tun (10.0.0.x) é a interface interna
- do framework (papel do 192.168.3.x da Ana), não o alvo das apps.
+ FLUXO DE DADOS (método Ana, tese 3.2.5 / Figura 3.13):
+ As APLICAÇÕES endereçam a TUN (10.0.0.<id>). O pacote passa pela tun,
+ o framework lê-o e envia-o por UDP, no slot, para o IP de wlan0 do
+ destino (porta 7000+dst). Os RELAYS são feitos pelo KERNEL via
+ ARP/ip_forward (entradas ARP por ioctl SIOCSARP), imediatos, dentro do
+ slot da origem (não gated pelo slot — 3.2.6). No destino o framework
+ escreve o IP raw na tun -> entrega à app, com o IP de origem intacto.
+   Resumo:  app -> TUN -> UDP(slot) -> [kernel ARP relay] -> TUN -> app
 
  NOTA: se compilares com outro prefixo (make MESH_NET_PREFIX=192.168.2),
  troca 172.20.10 -> 192.168.2 e 10.0.0 -> 192.168.3 nos comandos abaixo.
 
 ------------------------------------------------------------------------------
- PASSO 0 — BUILD (em cada um dos 3 nós, dentro de ana_method/)
+ PASSO 0 — PARAR O MÉTODO MIGUEL E LIMPAR  (em cada nó, ANTES de tudo)
+------------------------------------------------------------------------------
+ # parar os serviços do método Miguel (conflito directo com o meshnode_ana)
+   sudo systemctl stop meshnode.service
+   sudo systemctl stop meshnode-metrics.service
+   sudo systemctl stop adhoc.service        # o meshnode_ana faz o ad-hoc sozinho
+   sudo systemctl stop alphabot.service      # no N1, se o vídeo/robot do Miguel correr
+ # (opcional: impedir que voltem no reboot)
+ #  sudo systemctl disable meshnode.service meshnode-metrics.service
+
+ # limpar o estado de rede que o método Miguel deixou (senão interfere)
+   sudo iptables -t mangle -F OUTPUT 2>/dev/null
+   sudo ip rule del fwmark 1 table 100 2>/dev/null
+   sudo ip route flush table 100 2>/dev/null
+   sudo ip neigh flush dev wlan0 2>/dev/null    # limpa ARP estática antiga
+   sudo ip link delete tun1 2>/dev/null         # (ou tun2/tun3 conforme o nó)
+
+------------------------------------------------------------------------------
+ PASSO 1 — BUILD (em cada um dos 3 nós, dentro de ana_method/)
 ------------------------------------------------------------------------------
    cd ana_method
-   make
-   #   (ou, para o testbed real:  make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0)
+   make MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0
+   #   (teste local sem testbed:  make )
 
 ------------------------------------------------------------------------------
- PASSO 1 — ARRANCAR A MESH ANA  (uma janela por nó, com sudo)
+ PASSO 2 — ARRANCAR A MESH ANA  (uma janela por nó, com sudo)
 ------------------------------------------------------------------------------
- No N1 (robot):
-   sudo ./scripts/ana_setup.sh 1 wlan0
-   sudo ./meshnode_ana 1 3
+ O meshnode_ana configura tudo sozinho no arranque: pára o NetworkManager,
+ mete wlan0 em ad-hoc (essid manet-mesh, canal 6), atribui 172.20.10.<id>,
+ cria a tun 10.0.0.<id>, activa ip_forward + sysctl e o iptables mangle.
+ NÃO é preciso correr o ana_setup.sh nem o adhoc.service.
 
- No N2 (relay):
-   sudo ./scripts/ana_setup.sh 2 wlan0
-   sudo ./meshnode_ana 2 3
-
- No N3 (base):
-   sudo ./scripts/ana_setup.sh 3 wlan0
-   sudo ./meshnode_ana 3 3
+   No N1 (robot):   sudo ./meshnode_ana 1 3
+   No N2 (relay):   sudo ./meshnode_ana 2 3
+   No N3 (base):    sudo ./meshnode_ana 3 3
 
  -> espera ~30s até os 3 se descobrirem (cada nó deve listar "Nodes: 1 2 3").
 
 ------------------------------------------------------------------------------
- PASSO 2 — VÍDEO + ECO RTT  (a mesma app de teste do método Miguel)
+ PASSO 3 — VÍDEO + ECO RTT  (a mesma app de teste do método Miguel)
 ------------------------------------------------------------------------------
  No N1 (robot) — stream de vídeo para o N3 e servidor de RTT:
-   # vídeo (igual ao alphabot_node.py: MPEG-TS/UDP para 172.20.10.3:5000)
+   # vídeo (igual ao alphabot_node.py: MPEG-TS/UDP para 10.0.0.3:5000)
    rpicam-vid -t 0 --codec yuv420 --width 640 --height 480 --framerate 15 -o - | \
      ffmpeg -fflags nobuffer -f rawvideo -pix_fmt yuv420p -s 640x480 -r 15 -i - \
        -c:v libx264 -preset ultrafast -tune zerolatency -b:v 500k -g 1 \
-       -f mpegts "udp://172.20.10.3:5000?pkt_size=1316" &
+       -f mpegts "udp://10.0.0.3:5000?pkt_size=1316" &
    # servidor de eco para o teste de RTT:
    python3 tests/rtt_test.py --mode server &
 
@@ -57,10 +75,10 @@
    ffplay -fflags nobuffer -flags low_delay -i udp://0.0.0.0:5000 &
 
 ------------------------------------------------------------------------------
- PASSO 3 — CORRER A SUITE COMPLETA  (TUDO no N3, com sudo)
+ PASSO 4 — CORRER A SUITE COMPLETA  (TUDO no N3, com sudo)
 ------------------------------------------------------------------------------
    cd ana_method
-   sudo bash tests/run_all.sh --runs 3 --node1 172.20.10.1 --node1-phy 172.20.10.1 --iface wlan0
+   sudo bash tests/run_all.sh --runs 3 --node1 10.0.0.1 --node1-phy 172.20.10.1 --iface wlan0
 
  O que faz, automaticamente:
    FASE 0  captura state.pcap (STATE packets) para a análise de slot
@@ -76,7 +94,7 @@
    sudo bash tests/run_all.sh --no-relay        # só link direto
 
 ------------------------------------------------------------------------------
- PASSO 4 — ANÁLISE DE COLOCAÇÃO POR SLOT  (de-rotada)
+ PASSO 5 — ANÁLISE DE COLOCAÇÃO POR SLOT  (de-rotada)
 ------------------------------------------------------------------------------
  a) Abre o state.pcap no Wireshark e exporta para CSV:
       File -> Export Packet Dissections -> As CSV   (guarda como state.csv)
@@ -92,10 +110,10 @@
     -> cada nó deve ficar em [(n-1)*50, n*50] ms, ordem N1->N2->N3.
 
 ------------------------------------------------------------------------------
- PASSO 5 — TESTES ISOLADOS  (se quiseres correr um de cada vez, no N3)
+ PASSO 6 — TESTES ISOLADOS  (se quiseres correr um de cada vez, no N3)
 ------------------------------------------------------------------------------
    # RTT direto (100 pings):
-   python3 tests/rtt_test.py --mode client --target 172.20.10.1 --count 100 \
+   python3 tests/rtt_test.py --mode client --target 10.0.0.1 --count 100 \
        --interval 0.1 --topology direct --label direct_rtt_r1
 
    # Throughput direto (15s de vídeo já a fluir):
@@ -108,7 +126,7 @@
    sudo python3 tests/convergence_test.py --label conv_r1 --node1-phy 172.20.10.1
 
 ------------------------------------------------------------------------------
- PASSO 6 — NO FIM
+ PASSO 7 — NO FIM
 ------------------------------------------------------------------------------
    sudo ./scripts/ana_teardown.sh      # em cada nó
    # (e Ctrl-C nas janelas do meshnode_ana / vídeo / rtt server)

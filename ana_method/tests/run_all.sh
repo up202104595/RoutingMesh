@@ -10,7 +10,7 @@
 #
 #  Corre INTEIRAMENTE no N3 (base station). Pré-requisitos:
 #    - mesh ana ativa nos 3 nós:  sudo ./meshnode_ana <id> 3
-#    - vídeo a fluir N1 -> 172.20.10.3:5000
+#    - vídeo a fluir N1 -> 10.0.0.3:5000
 #    - no N1:  python3 tests/rtt_test.py --mode server &
 #
 #  Uso:
@@ -23,7 +23,7 @@ set -uo pipefail
 
 RUNS=3
 DO_RELAY=true
-NODE1_IP="172.20.10.1"
+NODE1_IP="10.0.0.1"
 NODE1_PHY="172.20.10.1"
 IFACE="wlan0"
 CAP_SECS=60
