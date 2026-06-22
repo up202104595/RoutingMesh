@@ -35,7 +35,7 @@ def restore_link(phy):
     os.system(f"iptables -D OUTPUT -d {phy} -j DROP 2>/dev/null")
 
 
-def run(label, phy, do_block=True):
+def run(label, phy, do_block=True, n3_phy="172.20.10.3"):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -74,6 +74,18 @@ def run(label, phy, do_block=True):
     t_block = time.perf_counter()
     if do_block:
         block_link(phy)
+    else:
+        # Modo manual: o bloqueio TEM de ser aplicado no N1 (a Ana relaya com o
+        # IP fisico do N1 intacto, por isso bloquear no N3 deitava fora o video
+        # relayado). Instrucao explicita; a deteccao do gap/recuperacao e automatica.
+        print("\n" + "=" * 60)
+        print("  >>> AGORA aplica o bloqueio NO N1 (robot): <<<")
+        print(f"      sudo iptables -I INPUT -s {n3_phy} -j DROP")
+        print("  (o N1 deixa de ouvir o N3 -> re-roteia via N2)")
+        print("  O teste deteta sozinho o gap e a recuperacao.")
+        print("  No fim restaura no N1:")
+        print(f"      sudo iptables -D INPUT -s {n3_phy} -j DROP")
+        print("=" * 60 + "\n")
 
     last_pkt_t = time.perf_counter()
     gap_detected = False
@@ -131,6 +143,9 @@ if __name__ == "__main__":
     ap.add_argument("--label", default="conv_r1")
     ap.add_argument("--node1-phy", default="172.20.10.1",
                     help="endereço físico do N1 a bloquear (default 172.20.10.1)")
-    ap.add_argument("--no-block", action="store_true")
+    ap.add_argument("--no-block", action="store_true",
+                    help="modo manual: monitoriza no N3, bloqueio aplicado a mao no N1")
+    ap.add_argument("--n3-phy", default="172.20.10.3",
+                    help="endereco fisico do N3 a bloquear NO N1 (default 172.20.10.3)")
     args = ap.parse_args()
-    run(args.label, args.node1_phy, do_block=not args.no_block)
+    run(args.label, args.node1_phy, do_block=not args.no_block, n3_phy=args.n3_phy)
