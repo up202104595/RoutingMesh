@@ -15,6 +15,9 @@
  * ═══════════════════════════════════════════════════════════════
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE   /* in_pktinfo / IP_PKTINFO */
+#endif
 #include "node.h"
 #include "matrix.h"
 #include "sync.h"
@@ -110,12 +113,16 @@ static void* tun_reader_loop(void *arg) {
         if (node->tun_fd < 0) break;
         ssize_t n = read(node->tun_fd, buf, sizeof(buf));
         if (n <= 0) continue;
-        /* No método Ana os dados são encaminhados PELO KERNEL na subrede
-         * mesh (rota /32 dev wlan0 + ARP estática instaladas pelo
-         * routing_list). O framework NÃO reenvia dados por UDP: qualquer
-         * pacote que ainda caia na tun (ex.: destino sem rota /32 antes da
-         * convergência) é descartado — evita loop e mantém a origem na
-         * subrede mesh, para o iptables -s <IP físico> não os apanhar. */
+        /* DIRECTO via FRAMEWORK: a app endereça 10.0.0.dst -> o pacote cai
+         * na tun -> enfileiramos para o tx_loop o enviar NO SLOT (DATA UDP
+         * para 172.20.10.dst:7003). Assim os dados RESPEITAM o TDMA. O
+         * relay desse UDP é depois feito pelo KERNEL (ip_forward + ARP). */
+        uint8_t dst = ip_dst_node(buf, (size_t)n);
+        if (dst != 0 && dst != node->node_id) {
+            tx_queue_push(node->tx_queue, buf, (size_t)n, dst);
+            printf("[TUN] App pkt %zd bytes dst=%u -> fila (envia no slot)\n",
+                   n, dst);
+        }
     }
     printf("[TUN] Thread terminada\n");
     return NULL;
@@ -258,11 +265,29 @@ static void* tx_loop(void *arg) {
             dd.sin_family = AF_INET;
             dd.sin_port   = htons(BASE_PORT + p->dst_id);          /* 7000+dst */
             dd.sin_addr.s_addr = inet_addr(node->peer_ips[p->dst_id]); /* wlan0 IP */
-            ssize_t s = sendto(node->sockfd, pkt_buffer, dlen, 0,
-                               (struct sockaddr *)&dd, sizeof(dd));
-            printf("[TX] DATA dst=%u (%s:%d)  ip_len=%zu  sent=%zd\n",
+
+            /* Origem = IP MESH (10.0.0.<self>), via IP_PKTINFO. Assim a DATA
+             * sai com src na subrede mesh: o iptables -s <IP físico> corta os
+             * STATE/beacons (src de wlan0) mas DEIXA passar os dados. */
+            char mesh_ip[24];
+            snprintf(mesh_ip, sizeof(mesh_ip), "%s.%u",
+                     node->mesh_prefix, node->node_id);
+            struct in_pktinfo pi; memset(&pi, 0, sizeof(pi));
+            pi.ipi_spec_dst.s_addr = inet_addr(mesh_ip);
+            char cbuf[CMSG_SPACE(sizeof(pi))]; memset(cbuf, 0, sizeof(cbuf));
+            struct iovec iov = { .iov_base = pkt_buffer, .iov_len = (size_t)dlen };
+            struct msghdr msg = {0};
+            msg.msg_name = &dd; msg.msg_namelen = sizeof(dd);
+            msg.msg_iov = &iov; msg.msg_iovlen = 1;
+            msg.msg_control = cbuf; msg.msg_controllen = sizeof(cbuf);
+            struct cmsghdr *cm = CMSG_FIRSTHDR(&msg);
+            cm->cmsg_level = IPPROTO_IP; cm->cmsg_type = IP_PKTINFO;
+            cm->cmsg_len = CMSG_LEN(sizeof(pi));
+            memcpy(CMSG_DATA(cm), &pi, sizeof(pi));
+            ssize_t s = sendmsg(node->sockfd, &msg, 0);
+            printf("[TX] DATA dst=%u (%s:%d) src=%s ip_len=%zu sent=%zd\n",
                    p->dst_id, node->peer_ips[p->dst_id], BASE_PORT + p->dst_id,
-                   p->len, s);
+                   mesh_ip, p->len, s);
             free(p);
         }
 
@@ -340,7 +365,9 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
      * (dev wlan0, src = IP mesh local) + ARP estática (10.0.0.dst -> MAC do
      * next-hop) via ioctl SIOCSARP. As apps endereçam 10.0.0.x; o kernel
      * reenvia o IP cru hop-a-hop, com origem na subrede mesh. */
-    node->routing  = routing_create(node_id, MESH_VIRT_PREFIX, node->phy_iface);
+    /* ARP nos IPs FÍSICOS (172.20.10.x): a DATA é enviada pelo framework no
+     * slot para 172.20.10.dst:7003 e o kernel relaya essa UDP via ARP. */
+    node->routing  = routing_create(node_id, node->phy_prefix, node->phy_iface);
     node->tx_queue = tx_queue_create();
 
     sync_init(node_id, num_nodes, (uint16_t)(node->frame_duration_us / 1000));

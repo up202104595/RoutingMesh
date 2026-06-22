@@ -104,13 +104,11 @@ void routing_update(routing_ctx_t *ctx,
     for (int i = 0; i < ctx->prev_num_active; i++) {
         uint8_t old_id = ctx->prev_active[i];
         if (idx_of(active_nodes, num_active, old_id) < 0) {
-            char ip[40], rcmd[120];
+            char ip[40];
             snprintf(ip, sizeof(ip), "%s.%u", ctx->mesh_prefix, old_id);
             net_ana_arp_del(ctx->phy_iface, ip);
-            snprintf(rcmd, sizeof(rcmd), "ip route del %s/32 2>/dev/null", ip);
-            system(rcmd);
             mac_table_del(old_id);
-            printf("[ROUTING-ANA] Node %u saiu — arp/route del %s\n", old_id, ip);
+            printf("[ROUTING-ANA] Node %u saiu — arp del %s\n", old_id, ip);
         }
     }
 
@@ -173,22 +171,19 @@ void routing_update(routing_ctx_t *ctx,
                    nh, dest);
             continue;
         }
-        char ip[40], rcmd[160];
+        char ip[40];
+        /* ARP no IP FÍSICO do destino (172.20.10.dst): é para aqui que o
+         * framework envia a DATA (UDP, no slot); o kernel relaya essa UDP
+         * via ARP. SEM rota /32 — os dados da app vão para a tun (10.0.0.x
+         * dev tunN) e passam pelo framework (slot), não pelo kernel directo. */
         snprintf(ip, sizeof(ip), "%s.%u", ctx->mesh_prefix, dest);
         net_ana_arp_set(ctx->phy_iface, ip, mac); /* ioctl SIOCSARP */
-        /* rota /32 para o kernel reenviar o IP mesh por wlan0 (em vez de o
-         * mandar para a tun), com src = IP mesh local -> a DATA sai com
-         * origem 10.0.0.<self>, imune ao iptables -s <IP físico>. */
-        snprintf(rcmd, sizeof(rcmd),
-                 "ip route replace %s/32 dev %s src %s.%u 2>/dev/null",
-                 ip, ctx->phy_iface, ctx->mesh_prefix, ctx->my_node_id);
-        system(rcmd);
         arp_changes++;
         if (dest == nh)
-            printf("[ROUTING-ANA]   arp+route %s -> %s dev %s  [directo]\n",
+            printf("[ROUTING-ANA]   arp %s -> %s dev %s  [directo]\n",
                    ip, mac, ctx->phy_iface);
         else
-            printf("[ROUTING-ANA]   arp+route %s -> %s dev %s  [via %u]\n",
+            printf("[ROUTING-ANA]   arp %s -> %s dev %s  [via %u]\n",
                    ip, mac, ctx->phy_iface, nh);
     }
 
