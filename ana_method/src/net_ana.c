@@ -88,13 +88,20 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
             "iwconfig %s mode ad-hoc 2>/dev/null; "
             "iwconfig %s essid manet-mesh 2>/dev/null; "
             "iwconfig %s channel %d 2>/dev/null; "
+            /* retries=7 (Ana 4.1: 7 retransmissoes deixavam o TDMA correr
+             * mais suave; recupera beacons/dados perdidos na camada MAC,
+             * reduzindo o flapping causado pelas colisoes do relay).
+             * iw (mac80211) com fallback para iwconfig (WEXT). */
+            "iw dev %s set retry short 7 long 7 2>/dev/null || "
+            "iwconfig %s retry 7 2>/dev/null; "
             "ip link set %s up 2>/dev/null; "
             "ip addr flush dev %s 2>/dev/null; "
             "ip addr add %s.%u/28 dev %s 2>/dev/null",
             phy_iface, phy_iface, phy_iface, phy_iface, MESH_CHANNEL,
+            phy_iface, phy_iface,
             phy_iface, phy_iface, phy_prefix, node_id, phy_iface);
         system(cmd);
-        printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=%d IP=%s.%u/28 dev %s\n",
+        printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=%d retry=7 IP=%s.%u/28 dev %s\n",
                MESH_CHANNEL, phy_prefix, node_id, phy_iface);
     }
 

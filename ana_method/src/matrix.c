@@ -100,14 +100,24 @@ static void removeDeadLinks_locked(void) {
         }
     }
 
-    /* ── 2. Remoção de NÓ ──
+    /* ── 2. Remoção de NÓ (com histerese) ──
      * Um nó só é removido quando NINGUÉM o reporta vivo (o creationTime
      * envelhece). Nós acessíveis via relay refrescam o creationTime na
-     * fusão e por isso PERSISTEM (essencial para o multi-hop). */
+     * fusão e por isso PERSISTEM (essencial para o multi-hop).
+     *
+     * HISTERESE: a remoção usa 2*MAX_AGE, NÃO MAX_AGE. Durante o relay, o
+     * forwarding de kernel (não slot-gated) causa colisões que fazem falhar
+     * beacons; com o limiar a MAX_AGE o N3 removia o N1/N2 numa janela curta
+     * de colisões e a topologia entrava em flapping (perde/recupera), com o
+     * vídeo a saltar. Um limiar mais largo na REMOÇÃO do nó tolera essas
+     * janelas curtas. NÃO afecta a convergência: o reroute é disparado pelo
+     * aging do LINK DIRECTO (g_directHeard, ponto 1, que fica a MAX_AGE);
+     * manter o nó vivo mais tempo só serve para ele continuar alcançável via
+     * relay, que é precisamente o que queremos. */
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++){
         if(g_myMatrix.idOfActiveNodes[i] == getMyIP()) continue;
         double age = time - g_myMatrix.creationTime[i];
-        if(age >= MAX_AGE){
+        if(age >= 2.0 * MAX_AGE){
             printf("\n[MATRIX] TIMEOUT: No %d expirou (Age: %.1fs). Removendo...\n",
                    g_myMatrix.idOfActiveNodes[i], age);
             int8_t mp = searchId(&g_myMatrix, getMyIP());
