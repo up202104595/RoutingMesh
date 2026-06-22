@@ -335,7 +335,20 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
 
     memcpy(&g_myMatrix, final, sizeof(tdma_matrix_t));
     free(final);
-    
+
+    /* ── Aging do LINK DIRECTO ANTES do Prim ──
+     * O merge acima reimporta a linha do destino a partir do relay (copyLine),
+     * o que pode RESSUSCITAR matrix[dest][me]=1 (o sentido reverso) com um
+     * valor stale do vizinho. Como o Prim usa (fwd || rev), bastava esse rev
+     * stale para a aresta directa me<->dest sobreviver na MST mesmo depois de
+     * eu ter deixado de ouvir dest directamente — e então o next-hop nunca
+     * mudava e a ARP ficava no MAC directo do dest (sintoma do relay falhado).
+     * removeDeadLinks_locked() reaplica a verdade autoritativa do g_directHeard
+     * (zera matrix[me][dest] E matrix[dest][me] quando não há contacto directo)
+     * imediatamente antes de recalcular a MST, garantindo que a aresta directa
+     * cai e o Prim re-roteia via relay. O nó mantém-se (creationTime fresco). */
+    removeDeadLinks_locked();
+
     primAlgorithm_weighted();
     
     bool topology_changed = false;
