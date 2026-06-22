@@ -152,21 +152,16 @@ static void* receiver_loop(void *arg) {
             printf("[RX] STATE de Node %u (%zd bytes)\n", hdr->slot_id, n);
 
         } else if (hdr->type == MSG_DATA) {
-            /* DATA = [tdma_header][pacote IP raw da app].
-             * Entrega/relay 100% PELO KERNEL via raw socket (tese 3.2.5):
-             * re-injectamos o IP raw com SOCK_RAW/IPPROTO_RAW ligado ao
-             * IP de destino. O kernel processa o pacote — se o destino for
-             * local entrega à app (com reassembly); se não, faz ip_forward
-             * via a ARP estática (dst -> MAC do next-hop) para o próximo
-             * salto. O IP de origem fica intacto (relay transparente). */
+            /* DATA = [tdma_header][pacote IP raw]. Só o nó DESTINO recebe
+             * aqui — nos relays é o KERNEL que reencaminha o pacote UDP do
+             * framework (ip_forward + ARP), antes de chegar a esta socket.
+             * No destino, entrega à app via raw socket (tese 3.2.5). */
             uint8_t *ip_pkt = buffer + sizeof(tdma_header_t);
             ssize_t  ip_len = n - (ssize_t)sizeof(tdma_header_t);
             if (ip_len >= (ssize_t)sizeof(struct iphdr)) {
                 ssize_t w = raw_inject(ip_pkt, (size_t)ip_len);
-                uint8_t fd = ip_dst_node(ip_pkt, (size_t)ip_len);
-                printf("[RX] DATA de Node %u dst=%u %zd bytes -> kernel (raw, %s)  sent=%zd\n",
-                       hdr->slot_id, fd, ip_len,
-                       fd == node->node_id ? "entrega local" : "relay ip_forward/ARP", w);
+                printf("[RX] DATA ENTREGUE %zd bytes -> app (raw sent=%zd)\n",
+                       ip_len, w);
             }
         }
     }
