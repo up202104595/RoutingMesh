@@ -68,25 +68,35 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
                   const char *mesh_prefix, uint8_t node_id) {
     char cmd[768];
 
-    /* o NetworkManager reverte o modo ad-hoc — parar primeiro (como o
-     * adhoc-start.sh do testbed Miguel) */
-    system("systemctl stop NetworkManager 2>/dev/null");
+    /* MESH_SKIP_ADHOC=1 → não toca na wlan0 (modo/IP). Útil quando o
+     * ad-hoc é montado à mão (ex.: PC onde o iwconfig não pega — usar iw),
+     * garantindo que todos os nós ficam na MESMA célula. O framework só
+     * faz sysctl + tun + iptables; o IP da wlan0 tens de o pôr tu. */
+    if (getenv("MESH_SKIP_ADHOC")) {
+        printf("[NET-ANA] MESH_SKIP_ADHOC=1 — wlan0 NÃO reconfigurada "
+               "(monta o ad-hoc e o IP %s.%u/28 à mão em %s)\n",
+               phy_prefix, node_id, phy_iface);
+    } else {
+        /* o NetworkManager reverte o modo ad-hoc — parar primeiro (como o
+         * adhoc-start.sh do testbed Miguel) */
+        system("systemctl stop NetworkManager 2>/dev/null");
 
-    /* interface ad-hoc (igual ao testbed: essid/canal fixos, MESMO canal
-     * em todos os nós senão não comunicam) */
-    snprintf(cmd, sizeof(cmd),
-        "ip link set %s down 2>/dev/null; "
-        "iwconfig %s mode ad-hoc 2>/dev/null; "
-        "iwconfig %s essid manet-mesh 2>/dev/null; "
-        "iwconfig %s channel %d 2>/dev/null; "
-        "ip link set %s up 2>/dev/null; "
-        "ip addr flush dev %s 2>/dev/null; "
-        "ip addr add %s.%u/28 dev %s 2>/dev/null",
-        phy_iface, phy_iface, phy_iface, phy_iface, MESH_CHANNEL,
-        phy_iface, phy_iface, phy_prefix, node_id, phy_iface);
-    system(cmd);
-    printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=%d IP=%s.%u/28 dev %s\n",
-           MESH_CHANNEL, phy_prefix, node_id, phy_iface);
+        /* interface ad-hoc (igual ao testbed: essid/canal fixos, MESMO canal
+         * em todos os nós senão não comunicam) */
+        snprintf(cmd, sizeof(cmd),
+            "ip link set %s down 2>/dev/null; "
+            "iwconfig %s mode ad-hoc 2>/dev/null; "
+            "iwconfig %s essid manet-mesh 2>/dev/null; "
+            "iwconfig %s channel %d 2>/dev/null; "
+            "ip link set %s up 2>/dev/null; "
+            "ip addr flush dev %s 2>/dev/null; "
+            "ip addr add %s.%u/28 dev %s 2>/dev/null",
+            phy_iface, phy_iface, phy_iface, phy_iface, MESH_CHANNEL,
+            phy_iface, phy_iface, phy_prefix, node_id, phy_iface);
+        system(cmd);
+        printf("[NET-ANA] Ad-hoc: essid=manet-mesh channel=%d IP=%s.%u/28 dev %s\n",
+               MESH_CHANNEL, phy_prefix, node_id, phy_iface);
+    }
 
     /* ── sysctl (tese 3.2.2): o nó funciona como router ── */
     system("sysctl -wq net.ipv4.ip_forward=1 2>/dev/null"
