@@ -270,10 +270,17 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         int8_t myPos = searchId(&g_myMatrix, newMat->idOfActiveNodes[i]);
         int8_t finalPos = searchId(final, newMat->idOfActiveNodes[i]);
 
-        if (!is_direct && myPos != -1) {
-            double age_local = time - g_myMatrix.creationTime[myPos];
-            if (age_local >= MAX_AGE) continue;
-        }
+        /* NOTA: NÃO recusar o refresh por o nó estar "velho" localmente.
+         * O outer check (newMat->age[i] >= MAX_AGE) já garante que só
+         * aceitamos o nó se o VIZINHO que o reporta (other_IP) o ouviu
+         * fresco. Recusar aqui com base no age LOCAL matava precisamente o
+         * multi-hop: quando o link directo me<->dest cai (MAX_AGE), o age
+         * local do dest passa MAX_AGE e o N1 deixava de aceitar a prova de
+         * vida do dest vinda do relay, removendo o nó em vez de o manter
+         * alcançável via relay. O dest deve persistir enquanto um vizinho o
+         * reportar vivo; a queda do LINK DIRECTO é tratada à parte
+         * (g_directHeard) em removeDeadLinks. */
+        (void)is_direct;
 
         double newCreationTime = time - newMat->age[i];
         double myCreationTime = (myPos != -1) ? g_myMatrix.creationTime[myPos] : 0;
