@@ -120,14 +120,21 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
     /* ── tun (IP mesh que as aplicações endereçam) ── */
     int tun_fd = tun_create(mesh_prefix, node_id);
 
-    /* ── DATA encaminhada 100% PELO KERNEL na subrede mesh (tese 3.2.5) ──
-     * As apps endereçam 10.0.0.x. NÃO há redirect mangle para a tun: o
-     * routing_list instala, por destino, uma rota /32 (dev wlan0, src =
-     * IP mesh local) + ARP estática (10.0.0.dst -> MAC do next-hop). O
-     * kernel reenvia o IP cru hop-a-hop via ARP, com o IP de origem na
-     * subrede mesh — por isso um iptables -s <IP físico> corta só os
-     * STATE/beacons (que saem do IP de wlan0), deixando os dados passar.
-     * A tun serve para o IP mesh local (entrega no destino). */
+    /* ── iptables mangle + ip rule (tese 3.2.5 / Code Block 3.4) ──
+     * Desvia o tráfego de aplicação que sai por wlan0 para a tun (onde
+     * o framework o lê), EXCETO os pacotes UDP do próprio framework
+     * (sport 7000+id), para não criar loop. Assim os pacotes de dados
+     * (vídeo, ping, etc.) passam pela tun, como na Figura 3.13. */
+    int tdma_port = 7000 + node_id;
+    snprintf(cmd, sizeof(cmd),
+        "iptables -t mangle -A OUTPUT -o %s -j MARK --set-mark 1 2>/dev/null; "
+        "iptables -t mangle -A OUTPUT -o %s -p udp --sport %d -j MARK --set-mark 0 2>/dev/null; "
+        "ip rule add fwmark 1 table 100 2>/dev/null; "
+        "ip route add default dev tun%u table 100 2>/dev/null",
+        phy_iface, phy_iface, tdma_port, node_id);
+    system(cmd);
+    printf("[NET-ANA] iptables mangle: %s -> tun%u (exceto UDP sport %d)\n",
+           phy_iface, node_id, tdma_port);
 
     return tun_fd;
 }
@@ -139,9 +146,8 @@ void net_ana_teardown(const char *phy_iface, int tun_fd, uint8_t node_id) {
         "iptables -t mangle -F OUTPUT 2>/dev/null; "
         "ip rule del fwmark 1 table 100 2>/dev/null; "
         "ip route flush table 100 2>/dev/null; "
-        "ip route flush 10.0.0.0/24 dev %s 2>/dev/null; "
         "ip neigh flush dev %s 2>/dev/null; "
-        "ip link delete tun%u 2>/dev/null", phy_iface, phy_iface, node_id);
+        "ip link delete tun%u 2>/dev/null", phy_iface, node_id);
     system(cmd);
     printf("[NET-ANA] teardown: mangle/ip rule limpos, ARP flush em %s, tun%u removida\n",
            phy_iface, node_id);
