@@ -264,30 +264,19 @@ static void* tx_loop(void *arg) {
             struct sockaddr_in dd = {0};
             dd.sin_family = AF_INET;
             dd.sin_port   = htons(BASE_PORT + p->dst_id);          /* 7000+dst */
-            dd.sin_addr.s_addr = inet_addr(node->peer_ips[p->dst_id]); /* wlan0 IP */
+            dd.sin_addr.s_addr = inet_addr(node->peer_ips[p->dst_id]); /* wlan0 IP do dst final */
 
-            /* Origem = IP MESH (10.0.0.<self>), via IP_PKTINFO. Assim a DATA
-             * sai com src na subrede mesh: o iptables -s <IP físico> corta os
-             * STATE/beacons (src de wlan0) mas DEIXA passar os dados. */
-            char mesh_ip[24];
-            snprintf(mesh_ip, sizeof(mesh_ip), "%s.%u",
-                     node->mesh_prefix, node->node_id);
-            struct in_pktinfo pi; memset(&pi, 0, sizeof(pi));
-            pi.ipi_spec_dst.s_addr = inet_addr(mesh_ip);
-            char cbuf[CMSG_SPACE(sizeof(pi))]; memset(cbuf, 0, sizeof(cbuf));
-            struct iovec iov = { .iov_base = pkt_buffer, .iov_len = (size_t)dlen };
-            struct msghdr msg = {0};
-            msg.msg_name = &dd; msg.msg_namelen = sizeof(dd);
-            msg.msg_iov = &iov; msg.msg_iovlen = 1;
-            msg.msg_control = cbuf; msg.msg_controllen = sizeof(cbuf);
-            struct cmsghdr *cm = CMSG_FIRSTHDR(&msg);
-            cm->cmsg_level = IPPROTO_IP; cm->cmsg_type = IP_PKTINFO;
-            cm->cmsg_len = CMSG_LEN(sizeof(pi));
-            memcpy(CMSG_DATA(cm), &pi, sizeof(pi));
-            ssize_t s = sendmsg(node->sockfd, &msg, 0);
-            printf("[TX] DATA dst=%u (%s:%d) src=%s ip_len=%zu sent=%zd\n",
+            /* DATA enviada NO SLOT, com o IP de origem FÍSICO (wlan0) e
+             * INTACTO — exactamente como a Ana (Secção 3.2: "packets must be
+             * transmitted with their original source and destination IP
+             * addresses intact"). O kernel relaya hop-a-hop via a ARP estática
+             * (172.20.10.dst -> MAC do next-hop). Os mesmos iptables -s <IP> -j
+             * DROP cortam beacons E dados desse nó, como na tese. */
+            ssize_t s = sendto(node->sockfd, pkt_buffer, dlen, 0,
+                               (struct sockaddr *)&dd, sizeof(dd));
+            printf("[TX] DATA dst=%u (%s:%d) ip_len=%zu sent=%zd\n",
                    p->dst_id, node->peer_ips[p->dst_id], BASE_PORT + p->dst_id,
-                   mesh_ip, p->len, s);
+                   p->len, s);
             free(p);
         }
 
