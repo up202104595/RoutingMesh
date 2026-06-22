@@ -120,14 +120,40 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
     /* ── tun (IP mesh que as aplicações endereçam) ── */
     int tun_fd = tun_create(mesh_prefix, node_id);
 
-    /* ── DATA encaminhada 100% PELO KERNEL na subrede mesh (tese 3.2.5) ──
-     * As apps endereçam 10.0.0.x. NÃO há redirect mangle para a tun: o
-     * routing_list instala, por destino, uma rota /32 (dev wlan0, src =
-     * IP mesh local) + ARP estática (10.0.0.dst -> MAC do next-hop). O
-     * kernel reenvia o IP cru hop-a-hop via ARP, com o IP de origem na
-     * subrede mesh — por isso um iptables -s <IP físico> corta só os
-     * STATE/beacons (que saem do IP de wlan0), deixando os dados passar.
-     * A tun serve para o IP mesh local (entrega no destino). */
+    /* ── iptables mangle (tese 3.2.5, Code Block 3.4) ──
+     * As apps podem endereçar o IP de wlan0 do destino (172.20.10.dst).
+     * Sem ajuda, o kernel mandava esse pacote directo para wlan0 (cru,
+     * fora do framework). O mangle marca TODO o tráfego OUTPUT->wlan0 e
+     * uma policy route (fwmark 1 -> table 100, default dev tunN) desvia-o
+     * para a TUN, onde o framework o lê e o reenvia por UDP no seu slot.
+     *
+     * O tráfego do PRÓPRIO framework (UDP, sport/dport 7000..7099) tem de
+     * ser isento — senão a DATA/STATE que ele envia para 172.20.10.dst era
+     * ela própria desviada de volta para a tun (loop). Isenta-se com RETURN
+     * antes da regra de MARK.
+     *
+     * Apps que já endereçam a mesh (10.0.0.x) continuam a ir directas à tun;
+     * este bloco só acrescenta o caminho "endereçar o IP de wlan0" da tese. */
+    snprintf(cmd, sizeof(cmd),
+        "iptables -t mangle -F OUTPUT 2>/dev/null; "
+        "iptables -t mangle -A OUTPUT -o %s -p udp --sport 7000:7099 -j RETURN 2>/dev/null; "
+        "iptables -t mangle -A OUTPUT -o %s -p udp --dport 7000:7099 -j RETURN 2>/dev/null; "
+        "iptables -t mangle -A OUTPUT -o %s -j MARK --set-mark 1 2>/dev/null; "
+        "ip rule del fwmark 1 table 100 2>/dev/null; "
+        "ip rule add fwmark 1 table 100 2>/dev/null; "
+        "ip route replace default dev tun%u table 100 2>/dev/null",
+        phy_iface, phy_iface, phy_iface, node_id);
+    system(cmd);
+    printf("[NET-ANA] mangle: OUTPUT->%s (excepto UDP 7000-7099) marcado -> "
+           "table 100 default dev tun%u (apps podem endereçar o IP de wlan0)\n",
+           phy_iface, node_id);
+
+    /* ── DATA: app -> TUN -> framework -> UDP(slot) -> [kernel ARP relay] ──
+     * O routing_list instala ARP estática (172.20.10.dst -> MAC do next-hop,
+     * ioctl SIOCSARP). O kernel reenvia hop-a-hop via essa ARP, com o IP de
+     * origem na subrede mesh (IP_PKTINFO) — por isso um iptables -s <IP
+     * físico> corta só os STATE/beacons (src de wlan0), deixando os dados
+     * passar. A tun serve para o IP mesh local (entrega no destino). */
 
     return tun_fd;
 }
