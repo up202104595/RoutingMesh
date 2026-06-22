@@ -105,7 +105,17 @@ int net_ana_setup(const char *phy_iface, const char *phy_prefix,
     system("sysctl -wq net.ipv4.conf.default.accept_redirects=1 2>/dev/null");
     system("sysctl -wq net.ipv4.conf.all.send_redirects=0 2>/dev/null");
     system("sysctl -wq net.ipv4.conf.default.send_redirects=0 2>/dev/null");
-    printf("[NET-ANA] ip_forward=1, accept_redirects=1, send_redirects=0\n");
+    /* rp_filter (reverse-path) descarta os pacotes reencaminhados nos
+     * relays — desligar para o relay de kernel funcionar */
+    snprintf(cmd, sizeof(cmd),
+        "sysctl -wq net.ipv4.conf.all.rp_filter=0 2>/dev/null; "
+        "sysctl -wq net.ipv4.conf.default.rp_filter=0 2>/dev/null; "
+        "sysctl -wq net.ipv4.conf.%s.rp_filter=0 2>/dev/null", phy_iface);
+    system(cmd);
+    /* a política FORWARD por defeito pode ser DROP (Ubuntu/Docker) e
+     * bloqueia o relay — garantir ACCEPT */
+    system("iptables -P FORWARD ACCEPT 2>/dev/null");
+    printf("[NET-ANA] ip_forward=1, rp_filter=0, FORWARD=ACCEPT, redirects ok\n");
 
     /* ── tun (IP mesh que as aplicações endereçam) ── */
     int tun_fd = tun_create(mesh_prefix, node_id);
