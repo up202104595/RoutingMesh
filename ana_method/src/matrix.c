@@ -11,6 +11,12 @@ tdma_matrix_t g_myMatrix;
 uint8_t **g_spanningTree;
 FILE *topologyLog = NULL;
 
+/* MÉTODO ANA: última vez (epoch) que ouvi cada nó DIRECTAMENTE, por node id.
+ * Separa o envelhecimento do LINK DIRECTO da liveness do NÓ — essencial
+ * para o multi-hop: um nó alcançável só via relay deve persistir, mas a
+ * sua aresta directa deve cair quando deixo de o ouvir directamente. */
+static double g_directHeard[MAX_NODES + 1] = {0};
+
 /* ── mutex recursivo: protege g_myMatrix e g_spanningTree ──
  * Recursivo porque removeDeadLinks é chamado internamente por
  * serializeMatrix, que já detém o lock. */
@@ -75,24 +81,37 @@ void removeIdMatrix(tdma_matrix_t *matrix, uint8_t pos){
 /* ── versão interna sem lock (chamada com g_matrix_mutex já detido) ── */
 static void removeDeadLinks_locked(void) {
     double time = getEpoch();
-    double age;
+    int8_t myPos = searchId(&g_myMatrix, getMyIP());
+
+    /* ── 1. Envelhecimento do LINK DIRECTO ──
+     * Se deixei de ouvir um nó DIRECTAMENTE há >= MAX_AGE, removo a aresta
+     * directa (nos dois sentidos) para o Prim re-rotear via relay — MAS
+     * mantenho o nó (pode continuar acessível por um vizinho). */
+    if(myPos >= 0) {
+        for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++){
+            uint8_t id = g_myMatrix.idOfActiveNodes[i];
+            if(id == getMyIP()) continue;
+            if(time - g_directHeard[id] >= MAX_AGE){
+                if(g_myMatrix.matrix[myPos][i] || g_myMatrix.matrix[i][myPos])
+                    printf("[MATRIX] Link directo com No %d caiu (sem contacto directo)\n", id);
+                g_myMatrix.matrix[myPos][i] = 0;
+                g_myMatrix.matrix[i][myPos] = 0;
+            }
+        }
+    }
+
+    /* ── 2. Remoção de NÓ ──
+     * Um nó só é removido quando NINGUÉM o reporta vivo (o creationTime
+     * envelhece). Nós acessíveis via relay refrescam o creationTime na
+     * fusão e por isso PERSISTEM (essencial para o multi-hop). */
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++){
         if(g_myMatrix.idOfActiveNodes[i] == getMyIP()) continue;
-        age = time - g_myMatrix.creationTime[i];
+        double age = time - g_myMatrix.creationTime[i];
         if(age >= MAX_AGE){
             printf("\n[MATRIX] TIMEOUT: No %d expirou (Age: %.1fs). Removendo...\n",
                    g_myMatrix.idOfActiveNodes[i], age);
-            /* penaliza link quality — sem lock extra (recursivo) */
-            int8_t my_idx  = searchId(&g_myMatrix, getMyIP());
-            int8_t node_idx = i; /* já é a posição */
-            if(my_idx != -1 && node_idx != -1) {
-                if(g_myMatrix.link_quality[my_idx][node_idx] > 20)
-                    g_myMatrix.link_quality[my_idx][node_idx] -= 20;
-                else
-                    g_myMatrix.link_quality[my_idx][node_idx] = 0;
-            }
-            int8_t myPos = searchId(&g_myMatrix, getMyIP());
-            if(myPos >= 0) g_myMatrix.matrix[myPos][i] = 0;
+            int8_t mp = searchId(&g_myMatrix, getMyIP());
+            if(mp >= 0) g_myMatrix.matrix[mp][i] = 0;
             removeIdMatrix(&g_myMatrix, i);
             removeIdList(&g_myMatrix, i);
             i--;
@@ -261,14 +280,11 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         if(myPos == -1 || myCreationTime < newCreationTime){
             memset(final->matrix[finalPos], 0, MAX_NODES);
             copyLine(final, newMat, i, finalPos);
-            /* Nós indirectos NÃO refrescam creationTime local — só directos.
-             * Garante que se Node 3 ficar inacessível directamente, expira
-             * no Node 1 após MAX_AGE mesmo que Node 2 o reporte como vivo. */
-            if(is_direct) {
-                final->creationTime[finalPos] = newCreationTime;
-            } else {
-                final->creationTime[finalPos] = (myPos != -1) ? g_myMatrix.creationTime[myPos] : newCreationTime;
-            }
+            /* MÉTODO ANA: refresca SEMPRE o creationTime (directo OU via
+             * relay), para que um nó alcançável só por relay persista
+             * enquanto um vizinho o reportar vivo. A queda do LINK DIRECTO
+             * é tratada à parte (g_directHeard) em removeDeadLinks. */
+            final->creationTime[finalPos] = newCreationTime;
             final->age[finalPos] = newMat->age[i];
         }
     }
@@ -285,6 +301,9 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
          * arestas parcialmente confirmadas. */
         final->matrix[myIpPos][otherIpPos] = 1;
         final->creationTime[myIpPos] = time;
+        /* MÉTODO ANA: ouvi other_IP DIRECTAMENTE agora → regista, para o
+         * link directo só cair quando deixar mesmo de o ouvir (g_directHeard). */
+        g_directHeard[other_IP] = time;
     }
 
     for(int i = 0; i < g_myMatrix.numberOfActiveNodes; i++) {
