@@ -1224,7 +1224,18 @@ different testbed at a different time. To place the comparison on a firmer
 footing, the Layer~2 method was re-implemented and run on the same three-node
 testbed used throughout this chapter, under the same conditions, so that the two
 approaches could be measured directly against each other rather than across
-separate experiments. The re-implementation follows the reference faithfully, in
+separate experiments. It must be stated plainly that the source code of the
+reference implementation was not available to us, so this Layer~2 system was
+reconstructed entirely from the published description in the dissertation of
+Morais~\cite{morais2024synchronization}. It is therefore a best-effort
+re-creation rather than the original software, and it may diverge from it in
+details that the report does not specify; any shortcoming observed here could in
+part reflect our reconstruction rather than the method itself. That same lack of
+access is precisely what made a re-implementation necessary: the stated goal was
+to compare the two approaches on equal terms, on a single testbed, and with no
+access to the original code the only way to do so was to rebuild the Layer~2
+method ourselves from its description. The re-implementation follows the
+reference faithfully, in
 the terms its report sets out: forwarding is performed at the data link layer by
 installing static ARP entries that map each destination's address to the
 next-hop MAC through \texttt{ioctl(SIOCSARP)}; the relay is a plain kernel
@@ -1319,9 +1330,14 @@ TCP data plane recovering the packets lost to these collisions and to its
 slot-gated source, though part of the difference may also reflect the particular
 run conditions. We report the instability plainly, as an observed limitation of
 the re-implementation on this testbed rather than a fundamental verdict on the
-Layer~2 method, which the reference shows to function; separating how much is
-intrinsic to the design and how much is an artefact of the shared-domain testbed
-and the software-induced failure is left as future work.
+Layer~2 method, which the reference shows to function. Because our Layer~2 system
+was reconstructed from the published description and not from the original
+source, part of the instability may equally stem from a detail of the original
+implementation that the report does not document and that our re-creation does
+not reproduce. Separating how much is intrinsic to the design, how much is an
+artefact of the shared-domain testbed and the software-induced failure, and how
+much is a limitation of our reconstruction from the report, is left as future
+work.
 
 
 %% =======================================================================
