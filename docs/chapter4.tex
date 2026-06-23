@@ -699,11 +699,11 @@ offered load approaches capacity; our application never operates in that
 regime. Two further factors widen the gap: the TDMA schedule eliminates the
 CSMA/CA collisions and retransmissions that account for much of the reference's
 loss, and, as established above, the kernel forward at N2 does not consume a
-separate TDMA slot. In the interest of intellectual honesty, a saturating
-\texttt{iperf3} test over our relay path would still be expected to exhibit a
-per-hop reduction, for the same capacity-sharing reason; the point is precisely
-that the teleoperation video does not, and is never intended to, operate at
-saturation. For the application that this system is built to carry, the
+separate TDMA slot. We did not run a saturating \texttt{iperf3} test on the relay
+path, because it does not correspond to how the system is used; in such a test
+the per-hop capacity sharing of the shared medium would naturally reappear, but
+that is a property of single-channel multi-hop wireless rather than of the
+forwarding design. For the application this system is built to carry, the
 operationally relevant regime is the source-limited one, and in that regime the
 relay is transparent.
 
