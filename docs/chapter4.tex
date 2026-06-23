@@ -1007,16 +1007,15 @@ claim about slot occupancy must be about.
 
 This differs from the reference work, which dedicated a fourth, passive monitor
 node to observing the medium; here the measurement is taken from N3, an
-\emph{active participant}. This is a deliberate choice with a small, well
-understood consequence: the radio is half-duplex, so N3 cannot capture during
-its own transmission, and its own slot is therefore seen from the transmit side
-while the other two are seen on reception, a small per-node timing asymmetry,
-and N3's own transmissions occupy part of the medium it is measuring. The choice
-is nonetheless the right one: it needs no additional hardware or observer node;
-N3 is in radio range of both N1 and N2 and so receives all three beacons, giving
-the complete slot structure; and it is precisely the base station's operational
-viewpoint, which is the perspective that matters for a teleoperation link. The
-asymmetry amounts to a few milliseconds of
+\emph{active participant}. That choice carries a minor, known cost: the radio is
+half-duplex, so N3 cannot capture during its own transmission, and its own slot
+is therefore seen from the transmit side while the other two are seen on
+reception, a small per-node timing asymmetry; N3's own transmissions also occupy
+part of the medium it is measuring. We accept this because it needs no additional
+hardware or observer node; because N3 is in radio range of both N1 and N2 and so
+receives all three beacons, giving the complete slot structure; and because it is
+precisely the base station's operational viewpoint, which is the perspective that
+matters for a teleoperation link. The asymmetry amounts to a few milliseconds of
 receive-path delay, far below the 50\,ms slot, so it nudges the absolute positions
 slightly but leaves the slot ordering and the inter-node spacing (the
 quantities the claim depends on) intact.
