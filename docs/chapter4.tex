@@ -1141,18 +1141,26 @@ them, because understanding their cause is what turns the figure into evidence
 rather than a worry. Two effects combine to produce the spillover, and neither
 amounts to a loss of slot discipline.
 
-The first is genuine airtime. The offered video load sits right at the capacity
-of the slot, the $\approx 8$ datagrams of one frame's worth of video
-(Equation~\ref{eq:pkts-per-slot}) sent back-to-back, so whenever the all-intra
-encoder emits a larger-than-average frame the burst's tail reaches the slot
-boundary. The per-slot byte budget and back-pressure mechanism
-(Section~\ref{sec:slot-control}) bounds this: at \texttt{slot\_end} the next
-queued packet is returned to the queue rather than sent. What it cannot do is
-abort a transmission already in progress, so a packet that has begun going out
-just before the boundary finishes a few milliseconds into the neighbour's slot.
-The overrun is therefore capped at a single in-flight packet; it is never the
-systematic smear across the whole frame that a genuinely unslotted transmitter
-would produce. The second effect is a measurement artefact of the de-rotation.
+The first, and the more fundamental, lies in the data plane. When the
+transmitter calls \texttt{send()} during N1's slot it does not put the bytes on
+the air: it hands them to the kernel's TCP/IP stack, which then schedules their
+transmission on its own terms, TCP flow and congestion control followed by
+CSMA/CA medium access. The framework therefore controls \emph{how much} it
+offers per slot but not the exact instant each byte leaves the antenna, so a
+batch of packets handed over near the slot end can be put on the air by the
+kernel a few milliseconds into the next slot. This is exactly where the per-slot
+byte budget and back-pressure mechanism (Section~\ref{sec:slot-control}) acts,
+and it is the \emph{only} lever available: at \texttt{slot\_end} the transmitter
+stops dequeuing and returns the next packet to its queue, bounding the volume of
+data offered to the kernel within the slot. It works as a coarse bound, the
+burst stays localised to N1's slot round after round rather than smearing across
+the frame, but it cannot enforce a hard wire-level boundary, because once the
+data is below the socket the transmit timing belongs to the kernel and is no
+longer ours to schedule. The visible incursions are the signature of that limit,
+not of the transmitter losing its slot, and tightening the boundary, by gating
+transmission below the TCP layer or pacing it within the slot, is a concrete
+improvement we identify as future work (Chapter~\ref{chap:conclusions}). The
+second effect is a measurement artefact of the de-rotation.
 The common frame rotation was estimated on the beacons, and the video's residual
 phase is not removed perfectly over the window, so the plotted burst wanders by
 a few milliseconds from round to round, which exaggerates the apparent incursion

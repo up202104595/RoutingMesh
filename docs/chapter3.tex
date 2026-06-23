@@ -548,8 +548,21 @@ while ((pkt = tx_queue_pop(node->tx_queue)) != NULL) {
 
 If the slot boundary is reached before the queue is empty, the current packet is pushed back
 into the queue and the loop exits. The packet will be sent in the node's next slot, one round
-later. This back-pressure mechanism ensures that the transmitter thread always releases the
-channel before its slot expires, regardless of queue depth or packet size.
+later. This back-pressure mechanism ensures that the transmitter thread stops \emph{offering}
+data to the channel before its slot expires, regardless of queue depth or packet size.
+
+It is worth being precise about what this mechanism does and does not control, because the
+data plane runs over TCP. The transmitter releases each packet with a \texttt{send()} call,
+which copies the data into the kernel's socket and transmit buffers and returns; the kernel
+then schedules the actual transmission on its own terms (TCP flow and congestion control,
+then CSMA/CA medium access). The byte budget therefore bounds the \emph{volume} of data
+handed to the kernel within a slot, which is the only quantity under the framework's control;
+it does not, and cannot, fix the exact instant at which the kernel puts each byte on the air.
+A batch offered near the slot end may thus be transmitted by the kernel slightly into the
+following slot. This is a deliberate consequence of operating the data plane over TCP, and the
+byte budget is the lever that keeps the offered load slot-bounded; enforcing slot boundaries at
+the wire level, below the socket, is discussed as future work in
+Chapter~\ref{chap:conclusions}.
 
 
 %% -----------------------------------------------------------------------
