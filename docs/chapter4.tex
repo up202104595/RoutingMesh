@@ -57,16 +57,17 @@ TDMA framework. The TDMA schedule uses a frame of $T_{\mathrm{frame}} =
 150$\,ms divided into three slots of $T_{\mathrm{slot}} = 50$\,ms, one per
 node, with a 5\,ms guard interval at the end of each slot. Slot~$i$ is
 assigned to node~$i$, giving the fixed ordering
-$[\text{N1}, \text{N2}, \text{N3}]$ shown in Figure~\ref{fig:frame}.
+$[\text{N1}, \text{N2}, \text{N3}]$. Figure~\ref{fig:setup} shows the
+experimental testbed.
 
 \vspace{0.4cm}
 \begin{figure}[H]
 \centering
-\fbox{\parbox{0.95\textwidth}{\centering\vspace{1.4cm}
-N1 slot $[0,50)$\,ms \qquad N2 slot $[50,100)$\,ms \qquad N3 slot $[100,150)$\,ms
-\vspace{1.4cm}}}
-\caption{TDMA frame: three 50\,ms slots in a 150\,ms period, one per node.}
-\label{fig:frame}
+\includegraphics[width=0.95\textwidth]{setup.png}
+\caption{Experimental testbed: the three nodes (N1 robot, N2 relay, N3 base
+station) and the TDMA frame of three 50\,ms slots in a 150\,ms period, one per
+node.}
+\label{fig:setup}
 \end{figure}
 \vspace{0.5cm}
 
