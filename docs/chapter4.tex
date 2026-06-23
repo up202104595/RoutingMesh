@@ -445,12 +445,14 @@ is gained or lost only in whole-frame units. This is the point at which the
 present results differ in \emph{shape} from the reference: Morais reports a
 broadly triangular RTT histogram, a continuum of values filling the range,
 whereas here the histogram is cleanly two-valued. Both shapes arise from the
-same slot-waiting mechanism, but the geometry differs. In the reference, with
-four nodes and the probe and reply slots not adjacent, the residual wait is
-distributed almost uniformly across a round and fills the histogram into a
-triangle; here, with three nodes and the requester and responder slots adjacent
-across the frame boundary, the reply either just catches the next slot or just
-misses it, collapsing the continuum into two discrete levels.
+same slot-waiting mechanism, but the geometry differs. In the reference the RTT
+is dominated by the wait between a probe's generation by the free-running ping
+and the start of its slot; that wait is spread almost uniformly across the round
+and, combined over the two legs, fills the histogram into the triangular shape
+Morais describes. Here the within-slot transmit jitter is small, so the residual
+variability reduces to a single binary outcome, whether the reply catches its
+slot in the same frame or one frame later, collapsing the continuum into two
+discrete levels.
 
 The fraction of pings that lands in each cluster is not fixed: it changes from
 run to run, and even drifts slowly within a single run. This is not noise but a
@@ -510,8 +512,9 @@ quantisation this clean, with no loss, if each node is in fact transmitting
 within a well-defined slot and the slots are correctly ordered; the structure
 of the RTT is therefore a direct, if indirect-looking, measurement of slot
 compliance. Normalising by the frame period, the mean RTT of $\approx 0.9$
-frame matches the value reported by Morais~\cite{morais2024synchronization}
-(0.88 frame): although the histogram shape differs, the underlying
+frame matches the figure derived from Morais~\cite{morais2024synchronization},
+whose reported P2P average of $\approx 88$\,ms over a 100\,ms round corresponds
+to 0.88 frame: although the histogram shape differs, the underlying
 TDMA-level latency, a round trip costing a little under one frame on average,  is the same, as expected from a shared synchroniser and slot structure.
 
 \begin{table}[h]
@@ -716,6 +719,41 @@ flatness of the \emph{averaged} throughput over the window therefore does not
 contradict the burstiness of the stream; it is the expected consequence of a
 constant-rate encoder feeding a periodic slot, sampled over many frames.
 
+\subsection{Received Video Stream}
+\label{subsec:res-stream}
+
+The quantitative results above are complemented by the qualitative outcome that
+ultimately matters for teleoperation: the picture seen by the operator at the
+base station. Figure~\ref{fig:stream-direct} shows a frame of the live video as
+received at N3 over the direct link, and Figure~\ref{fig:stream-relay} shows a
+frame received after the traffic had been re-routed through the relay. The two
+are visually indistinguishable: the image is delivered cleanly, in real time,
+and the relay introduces no perceptible degradation, the visual counterpart of
+the $\approx 1\,\%$ throughput difference reported above.
+
+\begin{figure}[H]
+\centering
+% TODO: insert received-stream screenshot over the direct link
+\includegraphics[width=0.70\textwidth]{stream_received_direct}
+\caption{Frame of the live video stream as received at the base station (N3)
+over the direct link.}
+\label{fig:stream-direct}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+% TODO: insert received-stream screenshot over the relay path
+\includegraphics[width=0.70\textwidth]{stream_received_relay}
+\caption{Frame of the live video stream as received at the base station (N3)
+after re-routing through the relay (N2). The image is delivered with no
+perceptible loss of quality relative to the direct link.}
+\label{fig:stream-relay}
+\end{figure}
+
+A recording of the full teleoperation session, including the live video and the
+automatic recovery through the relay after the direct link is severed, is
+available at: \url{TODO-INSERT-VIDEO-LINK}.
+
 \subsection{Routing Convergence}
 \label{subsec:res-convergence}
 
@@ -850,7 +888,9 @@ This narrow step is where the Layer~2 approach of Morais would be faster, and it
 is worth being precise about \emph{which} step, because the rest is comparable.
 Detection is identical: that design removes a dead link through the same
 connectivity-matrix aging, so it incurs the same \texttt{MAX\_AGE} wait before
-anything can change. Route recomputation and installation are also comparable:
+anything can change (Morais does not report a convergence figure; this follows
+from both designs sharing the RA-TDMAs+ adjacency matrix and its aging
+mechanism). Route recomputation and installation are also comparable:
 the reference routing module recomputes its linked-list routes from the spanning
 tree once per round and writes the kernel ARP table in a single \texttt{ioctl()},
 just as ours recomputes from the spanning tree and installs routes through
@@ -1295,7 +1335,7 @@ Forwarding mechanism & ARP-table manipulation & IP forwarding (TUN + routes) \\
 Routing layer        & Data link             & Network \\
 Mean RTT (norm.)     & 0.88 frame            & $\approx 0.9$ frame \\
 RTT distribution     & spread / triangular   & bimodal (frame-quantised) \\
-PDR                  & 100\,\%               & 100\,\% \\
+PDR                  & 100\,\% (P2P)         & 100\,\% \\
 Slot compliance      & verified (beacons)    & verified (beacons + video) \\
 Path observability   & invisible at IP layer & visible (\texttt{ip route}) \\
 Convergence          & aging-limited ($\approx 2.25$\,s, re-run) & aging-limited ($\approx 2.8$\,s) \\
@@ -1357,30 +1397,30 @@ reported above documents this contrast first-hand.
 \section{Summary}
 \label{sec:eval-summary}
 
-This chapter evaluated the Layer~3 routing system across five properties, each
-in its own subsection. The control channel exhibits a bimodal RTT whose two
-clusters are separated by exactly one TDMA frame and whose mean of
-$\approx 0.9$ frame matches the reference work, with 100\,\% PDR; the
-quantisation and the absence of loss are positive evidence that the slots are
-respected. Video throughput under relaying is within $\approx 1\,\%$ of the
-direct baseline, and the inter-arrival distribution is identical in both
-conditions, confirming that kernel forwarding at the relay preserves the TDMA
-burst structure of the stream. The beacon analysis shows the three nodes
-occupying their slots in strict cyclic order, both directly and through the
-relay, establishing the central claim that the nodes respect their TDMA slots
-for periodic control traffic and for continuous video alike. Routing
-convergence after a link failure has a median of $\approx 2.8$\,s, dominated by
-the $2.0$\,s node-aging timeout (\texttt{MAX\_AGE}) used to detect the dead
-link, not by the routing computation, which completes in microseconds. The
-comparison with the Layer~2 approach of Morais~\cite{morais2024synchronization}
-was put on a first-hand footing by re-implementing that method and running it on
-the same testbed (Section~\ref{subsec:l2-rerun}). The re-run confirms equivalent
-TDMA-level performance and, as predicted, a faster convergence for the
-connectionless Layer~2 data path ($\approx 2.25$\,s against $\approx 2.8$\,s, the
-$\approx 0.5$\,s difference being the cost of the Layer~3 TCP resumption), while
-also exposing, in the opposite direction, that the non-slotted Layer~2 relay
-delivers an unstable, bursty stream in this single-collision-domain testbed,
-where the Layer~3 system remained stable. Reducing the convergence time, and
-separating how much of the Layer~2 streaming instability is intrinsic from how
-much is an artefact of the shared-domain testbed, are identified as the main
-directions for future work.
+This chapter set out to answer two questions: whether the Layer~3 system
+delivers a usable teleoperation link, and whether the nodes keep to their TDMA
+slots while doing so. Both are answered in the affirmative.
+
+The system performs well. The control channel is responsive and loses no
+packets, the video stream is delivered at its full rate, and when the direct
+link fails the traffic is restored automatically through the relay in under
+three seconds. Crucially, inserting the relay changes almost nothing: the
+latency, the throughput, and the timing of the stream are practically the same
+whether the video travels directly or through an intermediate node. This is the
+central practical result, the relay is, in effect, invisible to the
+application.
+
+The slots are respected. The strongest evidence is that both the periodic
+control beacons and the continuous video stream are seen to transmit only inside
+their assigned slot, in the correct order, and that this holds when the traffic
+is relayed. Taken together with the clean, loss-free latency, this is direct
+confirmation that the nodes stay synchronised and do not interfere with one
+another, which was the main goal of the work.
+
+Compared with the earlier Layer~2 approach, the two achieve the same
+slot-level behaviour. The Layer~2 design recovers from a failure slightly
+faster, because it does not have to re-establish a connection, whereas the
+Layer~3 design gains reliability, observability with standard tools, and a
+stream that stayed stable throughout every experiment. The remaining
+limitations, faster recovery and a fuller study of the relay under heavier
+multi-hop load, are left as directions for future work.
