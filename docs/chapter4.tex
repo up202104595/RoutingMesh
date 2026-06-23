@@ -1344,10 +1344,11 @@ Relay streaming (re-run) & bursty / unstable on this testbed & stable across all
 \end{tabular}
 \end{table}
 
-The two approaches achieve equivalent TDMA-level behaviour: the normalised RTT
-(0.9 vs.\ 0.88 frame), the 100\,\% PDR, and the verified slot compliance are
-essentially the same, as expected since both share the synchroniser and the
-slot structure. The differences are architectural.
+At the TDMA level the two approaches behave essentially the same way: the
+RTT, PDR and slot-compliance rows of the table line up, which is expected since
+both run on the same synchroniser and the same slot structure. What is worth
+discussing, then, is not where they agree but where they differ, and those
+differences are architectural rather than numerical.
 
 \textbf{Latency distribution.} The reference reports a spread, triangular RTT
 distribution, whereas this work observes a clean bimodal distribution. Both
@@ -1357,29 +1358,17 @@ adjacent across the frame boundary, the reply either catches the next slot or
 misses it by exactly one frame, producing two discrete levels rather than a
 continuum.
 
-\textbf{Convergence.} In both designs the recovery time after a link failure is
-dominated by the RA-TDMAs+ node-aging timeout (\texttt{MAX\_AGE} $= 2.0$\,s),
-i.e.\ the time required to detect that the direct link is dead before any
-re-routing can begin (Section~\ref{subsec:res-convergence}). Because detection
-dominates, the two recover in broadly comparable time, and the steps that
-follow detection are mostly matched as well: both recompute the routes from the
-spanning tree and install them quickly: the reference through a single
-\texttt{ioctl()} into the ARP table, this work through Netlink. The one genuine
-difference is the data path. The Layer~2 design is connectionless, so once the
-ARP entry is updated the next frame is relayed immediately by the kernel; the
-Layer~3 design must instead bring its connection-oriented TCP data plane back
-into service (a relayed packet is handled up in user space before the kernel
-\texttt{ip\_forward}, and the path through N2 has to take over the stream and
-ramp up). This resumption accounts for the $\approx 0.8$\,s establishment tail of
-Section~\ref{subsec:res-convergence}, which the Layer~2 approach largely avoids.
-The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the floor, but
-it would dominate if that timeout were reduced, at which point a
-connectionless, kernel-resident forwarding path would become the more effective
-lever. Reducing \texttt{MAX\_AGE} remains the first-order way to accelerate
-recovery in either design, at the cost of robustness to transient beacon loss in
-the shared collision domain. The re-run figures reported above
-(Section~\ref{subsec:l2-rerun}) confirm this prediction directly on the same
-testbed.
+\textbf{Convergence.} Both designs detect a dead link the same way and through
+the same node-aging timeout, so their recovery times are of the same order and
+the steps that follow detection are largely matched (Sections~\ref{subsec:res-convergence}
+and~\ref{subsec:l2-rerun} give the breakdown). The one difference that matters is
+the data path: the connectionless Layer~2 relay resumes the stream almost as soon
+as the route changes, whereas the Layer~3 design first has to bring its
+TCP data plane back into service, which is what makes it the slower of the two by
+about half a second. That cost is secondary while detection sets the floor, but it
+would become the limiting factor if the aging timeout were shortened, the point at
+which a lighter, connectionless forwarding path would be the natural lever. The
+re-run on the same testbed bears this out directly.
 
 \textbf{Observability and stability.} The Layer~3 approach trades convergence
 speed for two practical advantages. The relay path is visible to standard IP

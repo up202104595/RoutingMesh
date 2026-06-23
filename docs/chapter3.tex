@@ -647,6 +647,36 @@ The destination receives the forwarded IP datagram on \texttt{wlan0} and the ker
 it to the application through \texttt{tun0}. The application thus receives the video stream
 transparently, regardless of whether it arrived directly or through the relay.
 
+\subsection{Generalisation to More Hops}
+\label{subsec:more-hops}
+
+% TODO PLACEHOLDER (expand later, or move to Conclusions/Future Work):
+% - Argue that the relay step described above is hop-agnostic: each intermediate
+%   node performs the same kernel ip_forward (Table 200) on the unmodified IP
+%   datagram, so the same mechanism carries N1 -> N2 -> ... -> Nk without change.
+% - State that the system was designed for this: routing derives next hops from
+%   the MST over the full connectivity matrix, so longer paths are just more
+%   entries, not a special case.
+% - Discuss the limitations that grow with hop count (per-hop slot wait adds one
+%   frame of latency per hop; shared collision domain reduces capacity ~C/n;
+%   convergence still bounded by MAX_AGE), and note that these are inherent to
+%   single-channel TDMA multi-hop rather than to this design.
+% - FIGURE PLACEHOLDER: packet trajectory across k hops (N1 -> N2 -> ... -> Nk),
+%   showing the per-hop tun_write -> ip_forward -> wlan0 step repeating.
+% \begin{figure}[H]
+% \centering
+% \includegraphics[width=0.95\textwidth]{packet_trajectory_nhops}
+% \caption{Packet trajectory across a multi-hop path: each relay repeats the same
+% Layer~3 forwarding step, so the design generalises to an arbitrary number of hops.}
+% \label{fig:packet-trajectory-nhops}
+% \end{figure}
+
+\textbf{[Placeholder]} The forwarding step is identical at every relay, so the
+design generalises naturally to paths longer than the three-node testbed used in
+the evaluation. A fuller discussion of multi-hop scalability, its limitations,
+and the per-hop packet trajectory is to be added here (or in the Conclusions
+chapter).
+
 
 
 %% -----------------------------------------------------------------------
