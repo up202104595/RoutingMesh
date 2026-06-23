@@ -665,8 +665,9 @@ distribution unchanged also leaves the delivered throughput unchanged.
 
 At first sight this $\approx 1\,\%$ result appears to contradict the reference
 work of Morais~\cite{morais2024synchronization}, which reported a severe
-throughput reduction with relaying, to roughly one half of the
-single-hop value with one relay, and to about one fifth with two relays. The
+throughput reduction with relaying, to roughly one half of the single-hop
+value with one relay and, with a second relay, to about one fifth of that
+one-relay value again, an order of magnitude below the single-hop rate. The
 apparent contradiction dissolves once the two measurements are recognised as
 probing different regimes, and the contrast is itself informative.
 
@@ -1343,11 +1344,13 @@ testbed.
 \textbf{Observability and stability.} The Layer~3 approach trades convergence
 speed for two practical advantages. The relay path is visible to standard IP
 tools, which simplifies debugging and operation, whereas the Layer~2 path is
-invisible at the IP layer. And, in contrast to the runtime instability
-reported for the Layer~2 implementation, the Layer~3 system completed every
-experiment without failure, benefiting from mature kernel forwarding rather
-than ARP manipulation; the re-run reported above reproduces this contrast
-first-hand.
+invisible at the IP layer. And, in contrast to the bursty, unstable relayed
+stream that our re-implementation of the Layer~2 method produced on this
+single-collision-domain testbed (Section~\ref{subsec:l2-rerun}), the Layer~3
+system completed every experiment without such disruption. We attribute this to
+its TCP data plane and slot-gated source rather than to any failure of the
+Layer~2 method itself, which the reference shows to function; the re-run
+reported above documents this contrast first-hand.
 
 
 %% =======================================================================
