@@ -1230,8 +1230,15 @@ The system evaluated here implements routing at Layer~3 (IP), using kernel
 forwarding and standard routing tables over a TUN overlay. The prior work of
 Morais~\cite{morais2024synchronization} implements routing at Layer~2, by
 manipulating ARP tables so that the relay forwards frames transparently below
-IP. Both run on the same RA-TDMAs+ synchroniser and the same class of
-hardware. To compare the two on equal terms, on a single testbed and under the
+IP. It is worth being concrete about what this means for the relay hop, because
+the two designs differ exactly there. In the Layer~2 method the relayed packet
+still transits the intermediate node, N2 is not bypassed, but N2 forwards it by
+simply rewriting the frame's destination MAC to the next hop and retransmitting
+it at the link layer, leaving the IP header untouched and never lifting the
+packet into user space. Our relay does strictly more: it carries each forwarded
+packet up to the user-space TCP receive thread at N2 and then back down through
+\texttt{tun\_write} and the kernel's IP-forwarding engine. Both run on the same
+RA-TDMAs+ synchroniser and the same class of hardware. To compare the two on equal terms, on a single testbed and under the
 same conditions, rather than across separate experiments, the Layer~2 method
 was re-implemented and run on the same three-node testbed used throughout this
 chapter. Section~\ref{subsec:l2-rerun} first describes that re-implementation
