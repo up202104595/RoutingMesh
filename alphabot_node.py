@@ -89,12 +89,10 @@ BASE_IP            = "10.0.0.3"
 TELEMETRY_INTERVAL = 0.2
 
 # ── Parâmetros de vídeo ───────────────────────────────────────
-# Carga reduzida para aliviar o plano de dados TCP por slot: menos bytes =
-# menos backlog/retransmissoes = menos fuga fora do slot e menos colisoes.
-VIDEO_WIDTH   = 480
-VIDEO_HEIGHT  = 360
-VIDEO_FPS     = 12
-VIDEO_BITRATE = 300000   # 300 kbps (era 500 kbps / 640x480 / 15 fps)
+VIDEO_WIDTH   = 640
+VIDEO_HEIGHT  = 480
+VIDEO_FPS     = 15
+VIDEO_BITRATE = 500000   # 500 kbps
 
 # ── Estado global ─────────────────────────────────────────────
 g_speed_l  = 0.0
