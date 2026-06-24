@@ -374,6 +374,24 @@ void* tun_reader_loop(void *arg) {
             if (n > 0) {
                 uint8_t dst_id = tun_get_dst_node(buf, (size_t)n);
                 if (dst_id != 0 && dst_id != node->node_id) {
+                    /* GATE DE CONVERGÊNCIA: só admite tráfego de dados depois de
+                     * a sincronização ter convergido (ou passado o tecto rígido).
+                     * Antes disso descarta — não enfileira — para não acumular
+                     * fila durante a convergência. Os beacons MATRIX não passam
+                     * por aqui, por isso continuam sempre a sincronizar. */
+                    if (!sync_data_plane_ready()) {
+                        static int gate_warned = 0;
+                        if (!gate_warned) {
+                            printf("[GATE] Sync a convergir — trafego de dados em espera...\n");
+                            gate_warned = 1;
+                        }
+                        continue;
+                    }
+                    static int gate_opened = 0;
+                    if (!gate_opened) {
+                        printf("[GATE] Sync convergiu — trafego de dados ADMITIDO\n");
+                        gate_opened = 1;
+                    }
                     tx_queue_push(node->tx_queue, buf, (size_t)n, dst_id);
                     printf("[TUN] Pacote: %zd bytes  dst=%d  queue=%d\n",
                            n, dst_id, tx_queue_size(node->tx_queue));
