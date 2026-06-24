@@ -35,10 +35,6 @@
 #define SLOT_DURATION_US 50000
 #define GUARD_US         5000
 
-/* Ligacao TCP assimetrica: o no menor inicia; o maior espera (accept). Fallback:
- * o que espera liga na mesma se ficar este nº de ciclos (~s) sem ligacao. */
-#define TCP_CONN_FALLBACK_CYCLES 5
-
 #define WIFI_BPS         24000000ULL
 #define T_TRANS_US(len)  ((len) * 8ULL * 1000000ULL / WIFI_BPS)
 #define SLOT_USEFUL_US   (SLOT_DURATION_US - GUARD_US)
@@ -210,9 +206,6 @@ void* tcp_keepalive_loop(void *arg) {
     printf("[TCP] Keepalive thread iniciada\n");
     sleep(2);
 
-    /* contador de ciclos sem ligacao por peer (para o fallback anti-deadlock) */
-    int wait_cycles[MAX_NODES + 1] = {0};
-
     while (node->running && g_running) {
         for (int i = 1; i <= node->num_nodes; i++) {
             if (i == node->node_id) continue;
@@ -222,30 +215,16 @@ void* tcp_keepalive_loop(void *arg) {
             pthread_mutex_unlock(&node->tcp_mutex);
 
             if (cur_fd < 0) {
-                /* LIGACAO ASSIMETRICA (mata o churn da ligacao dupla):
-                 * normalmente so o no de id MENOR inicia — ligamos a peers de id
-                 * MAIOR (i > node_id) e esperamos que os de id menor se liguem a
-                 * nos (via accept). Assim ha UMA so ligacao por par, sem o
-                 * ping-pong de desligar/reconectar.
-                 * FALLBACK anti-deadlock: se ficarmos demasiado tempo (>=
-                 * TCP_CONN_FALLBACK_CYCLES s) sem ligacao do peer menor, ligamos
-                 * nos na mesma — evita ficar preso se o outro lado nao detetou a
-                 * morte da ligacao. */
-                wait_cycles[i]++;
-                int initiate = (i > node->node_id) ||
-                               (wait_cycles[i] >= TCP_CONN_FALLBACK_CYCLES);
-                if (initiate) {
-                    int fd = tcp_connect_peer(node->peer_ips[i], i);
-                    if (fd >= 0) {
-                        pthread_mutex_lock(&node->tcp_mutex);
-                        node->tcp_sockfd[i] = fd;
-                        pthread_mutex_unlock(&node->tcp_mutex);
-                        printf("[TCP] Peer %d ligado\n", i);
-                        wait_cycles[i] = 0;
-                    }
+                int fd = tcp_connect_peer(node->peer_ips[i], i);
+                if (fd >= 0) {
+                    pthread_mutex_lock(&node->tcp_mutex);
+                    node->tcp_sockfd[i] = fd;
+                    pthread_mutex_unlock(&node->tcp_mutex);
+                    printf("[TCP] Peer %d ligado\n", i);
+                } else {
+                    printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
                 }
             } else {
-                wait_cycles[i] = 0;
                 char probe;
                 ssize_t r = recv(cur_fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
                 /* r==0: FIN (peer fechou graciosamente)
@@ -401,6 +380,24 @@ void* tun_reader_loop(void *arg) {
             if (n > 0) {
                 uint8_t dst_id = tun_get_dst_node(buf, (size_t)n);
                 if (dst_id != 0 && dst_id != node->node_id) {
+                    /* GATE DE CONVERGÊNCIA: só admite tráfego de dados depois de
+                     * a sincronização ter convergido (ou passado o tecto rígido).
+                     * Antes disso descarta — não enfileira — para não acumular
+                     * fila durante a convergência. Os beacons MATRIX não passam
+                     * por aqui, por isso continuam sempre a sincronizar. */
+                    if (!sync_data_plane_ready()) {
+                        static int gate_warned = 0;
+                        if (!gate_warned) {
+                            printf("[GATE] Sync a convergir — trafego de dados em espera...\n");
+                            gate_warned = 1;
+                        }
+                        continue;
+                    }
+                    static int gate_opened = 0;
+                    if (!gate_opened) {
+                        printf("[GATE] Sync convergiu — trafego de dados ADMITIDO\n");
+                        gate_opened = 1;
+                    }
                     tx_queue_push(node->tx_queue, buf, (size_t)n, dst_id);
                     printf("[TUN] Pacote: %zd bytes  dst=%d  queue=%d\n",
                            n, dst_id, tx_queue_size(node->tx_queue));

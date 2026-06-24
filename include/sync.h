@@ -23,20 +23,24 @@
 #define GUARD_INTERVAL_MS    2     /* margem de guarda no fim do slot (ms) */
 
 /*
- * SOLUCAO A — ANCORA A POSICAO NOMINAL
+ * BANDA MORTA + GATE DE CONVERGÊNCIA
  *
- * O algoritmo do Diogo e forward-only e tem um equilibrio degenerado: quando os
- * slots colapsam uns sobre os outros, cada no mede delay ~0 (acha-se alinhado,
- * porque mede posicao RELATIVA aos vizinhos, e eles estao todos no mesmo sitio)
- * e deixa de corrigir -> ficam colados -> colisoes. A ancora adiciona uma forca
- * que puxa o slot de volta a sua posicao nominal atribuida (N1->0, N2->50,
- * N3->100 num frame de 150ms), quebrando esse equilibrio. A correcao relativa
- * continua a alinhar com os vizinhos (imune a deriva de relogio); a ancora so
- * impede o colapso, garantindo os ~50ms de espacamento.
+ * Banda morta: o algoritmo do Diogo é forward-only (só avança o slot). Há um
+ * resíduo sistemático de ~3 ms (tempo entre o slot ideal do vizinho e o
+ * instante em que processamos o beacon) que, sozinho, empurra o slot para a
+ * frente todas as rondas — rotação perpétua. Como cada nó avança um valor
+ * ligeiramente diferente (truncatura + componente aleatória), os slots
+ * afastam-se até passarem o guard e colidirem. A banda morta pára de corrigir
+ * quando o desalinhamento já está dentro do guard: o slot estabiliza.
  *
- * Ganho: fracao da distancia ao nominal corrigida por ronda. Afinavel em campo.
+ * Gate: o tráfego de DADOS (vídeo) só é admitido depois de a sincronização ter
+ * convergido (SYNC_STABLE_ROUNDS rondas seguidas dentro da banda morta), ou ao
+ * fim de um tecto rígido (SYNC_CONVERGE_CAP_MS) para nunca esperar de mais.
+ * Os beacons MATRIX continuam sempre a ser enviados (são precisos para o sync).
  */
-#define SYNC_ANCHOR_GAIN     0.25
+#define SYNC_DEADBAND_MS       4      /* não corrigir desalinhamentos <= isto (guard=5 ms) */
+#define SYNC_STABLE_ROUNDS     8      /* rondas seguidas dentro da banda morta = convergido */
+#define SYNC_CONVERGE_CAP_MS   90000  /* tecto: admite dados ao fim de 90 s mesmo sem convergir */
 
 /*
  * Limites do slot (em ms dentro do frame/round)
@@ -68,5 +72,13 @@ uint64_t sync_slot_end_us(uint64_t now_us, uint16_t round_period_ms);
 
 /* ── Verifica se agora está dentro do slot ── */
 int sync_in_slot(uint64_t now_us, uint16_t round_period_ms);
+
+/* ── Convergência da sincronização ──
+ * sync_is_stable(): true após SYNC_STABLE_ROUNDS rondas seguidas dentro da
+ *                   banda morta (o slot deixou de precisar de correção).
+ * sync_data_plane_ready(): true quando se pode admitir tráfego de dados —
+ *                   convergido OU passado o tecto rígido (SYNC_CONVERGE_CAP_MS). */
+int sync_is_stable(void);
+int sync_data_plane_ready(void);
 
 #endif /* SYNC_H */
