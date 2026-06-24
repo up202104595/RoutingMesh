@@ -1397,8 +1397,9 @@ routing approaches}
 \midrule
 Forwarding mechanism & ARP-table manipulation & IP forwarding (TUN + routes) \\
 Routing layer        & Data link             & Network \\
+Link-quality routing & binary connectivity (all links equal) & PDR-weighted MST \\
+Slot data control    & none                  & per-slot byte budget + back-pressure \\
 Mean RTT (norm.)     & 0.88 frame            & $\approx 0.9$ frame \\
-RTT distribution     & spread / triangular   & bimodal (frame-quantised) \\
 PDR                  & 100\,\% (P2P)         & 100\,\% \\
 Slot compliance      & verified (beacons)    & verified (beacons + video) \\
 Path observability   & invisible at IP layer & visible (\texttt{ip route}) \\
