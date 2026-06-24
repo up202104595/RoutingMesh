@@ -215,24 +215,15 @@ void* tcp_keepalive_loop(void *arg) {
             pthread_mutex_unlock(&node->tcp_mutex);
 
             if (cur_fd < 0) {
-                /* LIGACAO ASSIMETRICA: para evitar que ambos os nos se liguem
-                 * um ao outro ao mesmo tempo (o accept de um fecha com RST o
-                 * socket que o outro acabou de criar -> ping-pong de
-                 * desligar/reconectar mesmo sem dados), so o no de id MENOR
-                 * inicia. Ligamos apenas a peers de id maior; os de id menor
-                 * ligam-se a nos (via accept). Uma so ligacao por par. */
-                if (i > node->node_id) {
-                    int fd = tcp_connect_peer(node->peer_ips[i], i);
-                    if (fd >= 0) {
-                        pthread_mutex_lock(&node->tcp_mutex);
-                        node->tcp_sockfd[i] = fd;
-                        pthread_mutex_unlock(&node->tcp_mutex);
-                        printf("[TCP] Peer %d ligado\n", i);
-                    } else {
-                        printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
-                    }
+                int fd = tcp_connect_peer(node->peer_ips[i], i);
+                if (fd >= 0) {
+                    pthread_mutex_lock(&node->tcp_mutex);
+                    node->tcp_sockfd[i] = fd;
+                    pthread_mutex_unlock(&node->tcp_mutex);
+                    printf("[TCP] Peer %d ligado\n", i);
+                } else {
+                    printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
                 }
-                /* i < node_id: esperamos que o peer (menor) se ligue a nos */
             } else {
                 char probe;
                 ssize_t r = recv(cur_fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
