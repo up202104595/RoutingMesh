@@ -23,6 +23,22 @@
 #define GUARD_INTERVAL_MS    2     /* margem de guarda no fim do slot (ms) */
 
 /*
+ * SOLUCAO A — ANCORA A POSICAO NOMINAL
+ *
+ * O algoritmo do Diogo e forward-only e tem um equilibrio degenerado: quando os
+ * slots colapsam uns sobre os outros, cada no mede delay ~0 (acha-se alinhado,
+ * porque mede posicao RELATIVA aos vizinhos, e eles estao todos no mesmo sitio)
+ * e deixa de corrigir -> ficam colados -> colisoes. A ancora adiciona uma forca
+ * que puxa o slot de volta a sua posicao nominal atribuida (N1->0, N2->50,
+ * N3->100 num frame de 150ms), quebrando esse equilibrio. A correcao relativa
+ * continua a alinhar com os vizinhos (imune a deriva de relogio); a ancora so
+ * impede o colapso, garantindo os ~50ms de espacamento.
+ *
+ * Ganho: fracao da distancia ao nominal corrigida por ronda. Afinavel em campo.
+ */
+#define SYNC_ANCHOR_GAIN     0.25
+
+/*
  * Limites do slot (em ms dentro do frame/round)
  */
 typedef struct {

@@ -289,23 +289,43 @@ void sync_adjust_slot(uint16_t round_period_ms) {
     float rnd = (float)(rand() % 101) * 0.01f;
     delta = (int32_t)((float)delta * (0.8f + 0.2f * rnd));
 
-    if (delta == 0) return;
+    /* NOTA: NAO retornar quando delta==0. A correcao relativa pode ser nula
+     * (slots "alinhados" no estado colapsado), mas a ancora abaixo tem de
+     * atuar na mesma para tirar o slot de cima dos vizinhos. */
 
-    /* aplica shiftSlot — como no Diogo */
     pthread_mutex_lock(&g_mutex_slot);
-    shiftSlot(&g_slot, delta);
 
-    /* valida limites — como no Diogo */
-    if (g_slot.begin_ms > g_round_period_ms ||
-        g_slot.end_ms   > g_round_period_ms) {
-        printf("[SYNC] ERRO: slot fora dos limites — reset\n");
-        g_slot.begin_ms = (width_ms * (g_slot_id - 1)) % g_round_period_ms;
-        g_slot.end_ms   = (g_slot.begin_ms + width_ms) % g_round_period_ms;
+    /* SOLUCAO A: ancora a posicao nominal.
+     * dev = desvio (com sinal) do slot atual face a sua posicao atribuida,
+     * normalizado para [-period/2, period/2]. A ancora puxa de volta uma
+     * fracao SYNC_ANCHOR_GAIN desse desvio, limitada ao mesmo teto do Diogo. */
+    int32_t period        = (int32_t)g_round_period_ms;
+    int32_t nominal_begin = (int32_t)(width_ms * (g_slot_id - 1));
+    int32_t dev           = (int32_t)g_slot.begin_ms - nominal_begin;
+    while (dev >  period / 2) dev -= period;
+    while (dev < -period / 2) dev += period;
+
+    int32_t anchor = -(int32_t)(SYNC_ANCHOR_GAIN * (float)dev);
+    if (anchor >  lim) anchor =  lim;
+    if (anchor < -lim) anchor = -lim;
+
+    int32_t total = delta + anchor;   /* delta>=0 (relativo) + ancora (com sinal) */
+
+    if (total != 0) {
+        shiftSlot(&g_slot, total);
+
+        /* valida limites — como no Diogo */
+        if (g_slot.begin_ms > g_round_period_ms ||
+            g_slot.end_ms   > g_round_period_ms) {
+            printf("[SYNC] ERRO: slot fora dos limites — reset\n");
+            g_slot.begin_ms = (width_ms * (g_slot_id - 1)) % g_round_period_ms;
+            g_slot.end_ms   = (g_slot.begin_ms + width_ms) % g_round_period_ms;
+        }
     }
     pthread_mutex_unlock(&g_mutex_slot);
 
-    printf("[SYNC] Slot ajustado: delta=%d ms → [%u, %u] ms\n",
-           delta, g_slot.begin_ms, g_slot.end_ms);
+    printf("[SYNC] Slot ajustado: delta=%d anchor=%d dev=%d → [%u, %u] ms\n",
+           delta, anchor, dev, g_slot.begin_ms, g_slot.end_ms);
 }
 
 /* ─────────────────────────────────────────────────────────────
