@@ -1142,89 +1142,22 @@ The system evaluated here implements routing at Layer~3 (IP), using kernel
 forwarding and standard routing tables over a TUN overlay. The prior work of
 Morais~\cite{morais2024synchronization} implements routing at Layer~2, by
 manipulating ARP tables so that the relay forwards frames transparently below
-IP. Both run on the same RA-TDMAs+ synchroniser and the same class of
-hardware. Table~\ref{tab:comparison} summarises the comparison; latency
+IP. Both run on the same RA-TDMAs+ synchroniser and the same class of hardware.
+The source code of the reference Layer~2 implementation was not available to us,
+so the only way to compare the two approaches on equal terms, on a single
+testbed, was to re-implement the Layer~2 method from its published description
+and run it alongside the Layer~3 system. The remainder of this section first
+describes that re-implementation (Section~\ref{subsec:l2-reimpl}), then reports
+the results it produced (Section~\ref{subsec:l2-results}), and finally compares
+the two methods side by side (Section~\ref{subsec:l2-discussion}). Latency
 figures are normalised to the frame period to account for the different frame
 durations (100\,ms with four nodes in the reference, 150\,ms with three nodes
 here).
 
-\begin{table}[h]
-\centering
-\caption{Comparison between the Layer~2 (reference) and Layer~3 (this work)
-routing approaches}
-\label{tab:comparison}
-\begin{tabular}{lll}
-\toprule
-\textbf{Aspect} & \textbf{Layer~2 (Morais)} & \textbf{Layer~3 (this work)} \\
-\midrule
-Forwarding mechanism & ARP-table manipulation & IP forwarding (TUN + routes) \\
-Routing layer        & Data link             & Network \\
-Mean RTT (norm.)     & 0.88 frame            & $\approx 0.9$ frame \\
-RTT distribution     & spread / triangular   & bimodal (frame-quantised) \\
-PDR                  & 100\,\%               & 100\,\% \\
-Slot compliance      & verified (beacons)    & verified (beacons + video) \\
-Path observability   & invisible at IP layer & visible (\texttt{ip route}) \\
-Convergence          & aging-limited ($\approx 2.25$\,s, re-run) & aging-limited ($\approx 2.8$\,s) \\
-Relay streaming (re-run) & bursty / unstable on this testbed & stable across all experiments \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Re-implementation of the Layer~2 Method}
+\label{subsec:l2-reimpl}
 
-The two approaches achieve equivalent TDMA-level behaviour: the normalised RTT
-(0.9 vs.\ 0.88 frame), the 100\,\% PDR, and the verified slot compliance are
-essentially the same, as expected since both share the synchroniser and the
-slot structure. The differences are architectural.
-
-\textbf{Latency distribution.} The reference reports a spread, triangular RTT
-distribution, whereas this work observes a clean bimodal distribution. Both
-are manifestations of the same slot-waiting mechanism; the bimodal shape
-arises here because, with three nodes and the requester/responder slots
-adjacent across the frame boundary, the reply either catches the next slot or
-misses it by exactly one frame, producing two discrete levels rather than a
-continuum.
-
-\textbf{Convergence.} In both designs the recovery time after a link failure is
-dominated by the RA-TDMAs+ node-aging timeout (\texttt{MAX\_AGE} $= 2.0$\,s),
-i.e.\ the time required to detect that the direct link is dead before any
-re-routing can begin (Section~\ref{subsec:res-convergence}). Because detection
-dominates, the two recover in broadly comparable time, and the steps that
-follow detection are mostly matched as well: both recompute the routes from the
-spanning tree and install them quickly: the reference through a single
-\texttt{ioctl()} into the ARP table, this work through Netlink. The one genuine
-difference is the data path. The Layer~2 design is connectionless, so once the
-ARP entry is updated the next frame is relayed immediately by the kernel; the
-Layer~3 design must instead bring its connection-oriented TCP data plane back
-into service (a relayed packet is handled up in user space before the kernel
-\texttt{ip\_forward}, and the path through N2 has to take over the stream and
-ramp up). This resumption accounts for the $\approx 0.8$\,s establishment tail of
-Section~\ref{subsec:res-convergence}, which the Layer~2 approach largely avoids.
-The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the floor, but
-it would dominate if that timeout were reduced, at which point a
-connectionless, kernel-resident forwarding path would become the more effective
-lever. Reducing \texttt{MAX\_AGE} remains the first-order way to accelerate
-recovery in either design, at the cost of robustness to transient beacon loss in
-the shared collision domain. The measured re-run figures, reported in
-Section~\ref{subsec:l2-rerun}, confirm this prediction directly on the same
-testbed.
-
-\textbf{Observability and stability.} The Layer~3 approach trades convergence
-speed for two practical advantages. The relay path is visible to standard IP
-tools, which simplifies debugging and operation, whereas the Layer~2 path is
-invisible at the IP layer. And, in contrast to the runtime instability
-reported for the Layer~2 implementation, the Layer~3 system completed every
-experiment without failure, benefiting from mature kernel forwarding rather
-than ARP manipulation; the re-run of Section~\ref{subsec:l2-rerun} reproduces
-this contrast first-hand.
-
-\subsection{Side-by-Side Re-implementation of the Layer~2 Method}
-\label{subsec:l2-rerun}
-
-The comparison above relies on the figures reported by Morais, obtained on a
-different testbed at a different time. To place the comparison on a firmer
-footing, the Layer~2 method was re-implemented and run on the same three-node
-testbed used throughout this chapter, under the same conditions, so that the two
-approaches could be measured directly against each other rather than across
-separate experiments. It must be stated plainly that the source code of the
+It must be stated plainly that the source code of the
 reference implementation was not available to us, so this Layer~2 system was
 reconstructed entirely from the published description in the dissertation of
 Morais~\cite{morais2024synchronization}. It is therefore a best-effort
@@ -1249,6 +1182,9 @@ attributable to that layer alone and not to the platform, the schedule, or the
 measurement tooling. The encoder was kept at the same 500\,kbps configuration
 used for the Layer~3 results, and the node-aging timeout at the same
 \texttt{MAX\_AGE} $= 2.0$\,s, to keep the comparison equal for equal.
+
+\subsection{Results of the Re-implementation}
+\label{subsec:l2-results}
 
 \textbf{Convergence.} The convergence time, measured exactly as in
 Section~\ref{subsec:res-convergence} (the gap in the delivered video between the
@@ -1340,6 +1276,78 @@ much is a limitation of our reconstruction from the report, is left as future
 work.
 
 
+\subsection{Discussion}
+\label{subsec:l2-discussion}
+
+\begin{table}[h]
+\centering
+\caption{Comparison between the Layer~2 (reference) and Layer~3 (this work)
+routing approaches}
+\label{tab:comparison}
+\begin{tabular}{lll}
+\toprule
+\textbf{Aspect} & \textbf{Layer~2 (Morais)} & \textbf{Layer~3 (this work)} \\
+\midrule
+Forwarding mechanism & ARP-table manipulation & IP forwarding (TUN + routes) \\
+Routing layer        & Data link             & Network \\
+Mean RTT (norm.)     & 0.88 frame            & $\approx 0.9$ frame \\
+RTT distribution     & spread / triangular   & bimodal (frame-quantised) \\
+PDR                  & 100\,\%               & 100\,\% \\
+Slot compliance      & verified (beacons)    & verified (beacons + video) \\
+Path observability   & invisible at IP layer & visible (\texttt{ip route}) \\
+Convergence          & aging-limited ($\approx 2.25$\,s, re-run) & aging-limited ($\approx 2.8$\,s) \\
+Relay streaming (re-run) & bursty / unstable on this testbed & stable across all experiments \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The two approaches achieve equivalent TDMA-level behaviour: the normalised RTT
+(0.9 vs.\ 0.88 frame), the 100\,\% PDR, and the verified slot compliance are
+essentially the same, as expected since both share the synchroniser and the
+slot structure. The differences are architectural.
+
+\textbf{Latency distribution.} The reference reports a spread, triangular RTT
+distribution, whereas this work observes a clean bimodal distribution. Both
+are manifestations of the same slot-waiting mechanism; the bimodal shape
+arises here because, with three nodes and the requester/responder slots
+adjacent across the frame boundary, the reply either catches the next slot or
+misses it by exactly one frame, producing two discrete levels rather than a
+continuum.
+
+\textbf{Convergence.} In both designs the recovery time after a link failure is
+dominated by the RA-TDMAs+ node-aging timeout (\texttt{MAX\_AGE} $= 2.0$\,s),
+i.e.\ the time required to detect that the direct link is dead before any
+re-routing can begin (Section~\ref{subsec:res-convergence}). Because detection
+dominates, the two recover in broadly comparable time, and the steps that
+follow detection are mostly matched as well: both recompute the routes from the
+spanning tree and install them quickly: the reference through a single
+\texttt{ioctl()} into the ARP table, this work through Netlink. The one genuine
+difference is the data path. The Layer~2 design is connectionless, so once the
+ARP entry is updated the next frame is relayed immediately by the kernel; the
+Layer~3 design must instead bring its connection-oriented TCP data plane back
+into service (a relayed packet is handled up in user space before the kernel
+\texttt{ip\_forward}, and the path through N2 has to take over the stream and
+ramp up). This resumption accounts for the $\approx 0.8$\,s establishment tail of
+Section~\ref{subsec:res-convergence}, which the Layer~2 approach largely avoids.
+The penalty is secondary while \texttt{MAX\_AGE} $= 2.0$\,s sets the floor, but
+it would dominate if that timeout were reduced, at which point a
+connectionless, kernel-resident forwarding path would become the more effective
+lever. Reducing \texttt{MAX\_AGE} remains the first-order way to accelerate
+recovery in either design, at the cost of robustness to transient beacon loss in
+the shared collision domain. The measured re-run figures, reported in
+Section~\ref{subsec:l2-results}, confirm this prediction directly on the same
+testbed.
+
+\textbf{Observability and stability.} The Layer~3 approach trades convergence
+speed for two practical advantages. The relay path is visible to standard IP
+tools, which simplifies debugging and operation, whereas the Layer~2 path is
+invisible at the IP layer. And, in contrast to the runtime instability
+reported for the Layer~2 implementation, the Layer~3 system completed every
+experiment without failure, benefiting from mature kernel forwarding rather
+than ARP manipulation; the re-run of Section~\ref{subsec:l2-results} reproduces
+this contrast first-hand.
+
+
 %% =======================================================================
 \section{Summary}
 \label{sec:eval-summary}
@@ -1361,7 +1369,7 @@ the $2.0$\,s node-aging timeout (\texttt{MAX\_AGE}) used to detect the dead
 link, not by the routing computation, which completes in microseconds. The
 comparison with the Layer~2 approach of Morais~\cite{morais2024synchronization}
 was put on a first-hand footing by re-implementing that method and running it on
-the same testbed (Section~\ref{subsec:l2-rerun}). The re-run confirms equivalent
+the same testbed (Section~\ref{subsec:l2-reimpl}). The re-run confirms equivalent
 TDMA-level performance and, as predicted, a faster convergence for the
 connectionless Layer~2 data path ($\approx 2.25$\,s against $\approx 2.8$\,s, the
 $\approx 0.5$\,s difference being the cost of the Layer~3 TCP resumption), while
