@@ -20,6 +20,13 @@ static pthread_mutex_t g_matrix_mutex;
 void removeDeadLinks(void);
 void removeIdList(tdma_matrix_t *matrix, uint8_t pos);
 void removeIdMatrix(tdma_matrix_t *matrix, uint8_t pos);
+
+/* ── Supressão do data-link (TCP) ──
+ * Um vizinho cujo plano de dados TCP morreu é excluído do encaminhamento
+ * DIRECTO mesmo enquanto os seus beacons UDP continuam a chegar (que de
+ * outro modo o manteriam vivo e com qualidade alta). Indexado por node id
+ * (último octeto do IP). Gerido por MATRIX_suppressDataLink(). */
+static volatile bool g_data_suppressed[MAX_NODES + 1] = { false };
 int8_t searchId(tdma_matrix_t *matrix, uint8_t id);
 int compare(const void* a, const void* b);
 
@@ -430,6 +437,12 @@ void MATRIX_print(void) {
 
 void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout) {
     pthread_mutex_lock(&g_matrix_mutex);
+    /* Enquanto o data-link estiver suprimido, os beacons NÃO recuperam a
+     * qualidade (+3) — só assim o nó deixa de ser preferido para directo. */
+    if(!timeout && node_id <= MAX_NODES && g_data_suppressed[node_id]) {
+        pthread_mutex_unlock(&g_matrix_mutex);
+        return;
+    }
     int8_t my_idx  = searchId(&g_myMatrix, getMyIP());
     int8_t node_idx = searchId(&g_myMatrix, node_id);
     if(my_idx == -1 || node_idx == -1) {
@@ -463,6 +476,18 @@ void primAlgorithm_weighted(void) {
     bool in_mst[MAX_NODES] = {false};
     int  parent[MAX_NODES];
     int  key[MAX_NODES];
+    int8_t me_idx = searchId(&g_myMatrix, getMyIP());
+    /* Reforça a supressão do data-link: zera a aresta directa (e a qualidade)
+     * para qualquer peer suprimido, anulando o que os beacons tenham escrito. */
+    if(me_idx != -1) {
+        for(int v = 0; v < num; v++) {
+            uint8_t vid = g_myMatrix.idOfActiveNodes[v];
+            if(vid <= MAX_NODES && g_data_suppressed[vid]) {
+                g_myMatrix.matrix[me_idx][v]        = 0;
+                g_myMatrix.link_quality[me_idx][v]  = 0;
+            }
+        }
+    }
     for(int i = 0; i < num; i++) { key[i] = 999; parent[i] = -1; }
     key[0] = 0;
     for(int count = 0; count < num; count++) {
@@ -472,6 +497,14 @@ void primAlgorithm_weighted(void) {
         if(u == -1) break;
         in_mst[u] = true;
         for(int v = 0; v < num; v++) {
+            /* Nunca aceitar uma aresta DIRECTA de nós para um peer suprimido,
+             * mesmo que o vizinho ainda reporte a ligação (rev). Força o relay. */
+            if(me_idx != -1 &&
+               ((u == me_idx && g_myMatrix.idOfActiveNodes[v] <= MAX_NODES &&
+                 g_data_suppressed[g_myMatrix.idOfActiveNodes[v]]) ||
+                (v == me_idx && g_myMatrix.idOfActiveNodes[u] <= MAX_NODES &&
+                 g_data_suppressed[g_myMatrix.idOfActiveNodes[u]])))
+                continue;
             /* BUG 3 FIX (corrigido): AND original falhava quando o vizinho
              * ainda não tinha actualizado matrix[vizinho][eu] (staleness de
              * até 1 frame). OR inclui a aresta se pelo menos uma direcção
@@ -506,9 +539,40 @@ uint8_t** MATRIX_getSpanningTree(void) {
 
 void MATRIX_setLinkQuality(uint8_t node_id, uint8_t quality) {
     pthread_mutex_lock(&g_matrix_mutex);
+    /* data-link suprimido: a qualidade fica em 0 independentemente do que o
+     * RSSI/beacon tentar escrever — caso contrário o bug ressurgia (beacons
+     * a manter a qualidade alta com o TCP morto). */
+    if (node_id <= MAX_NODES && g_data_suppressed[node_id]) quality = 0;
     int8_t my_idx   = searchId(&g_myMatrix, getMyIP());
     int8_t node_idx = searchId(&g_myMatrix, node_id);
     if (my_idx != -1 && node_idx != -1)
         g_myMatrix.link_quality[my_idx][node_idx] = quality;
     pthread_mutex_unlock(&g_matrix_mutex);
+}
+
+/* ── Supressão/readmissão do data-link de um peer ──
+ * suppressed=true  : o TCP morreu — zera a aresta directa e a qualidade,
+ *                    e recomputa a MST (forçando o relay imediatamente).
+ * suppressed=false : readmite o peer (saída da probation) — a aresta directa
+ *                    volta a poder ser escolhida e a qualidade a recuperar. */
+void MATRIX_suppressDataLink(uint8_t node_id, bool suppressed) {
+    if (node_id == 0 || node_id > MAX_NODES) return;
+    pthread_mutex_lock(&g_matrix_mutex);
+    g_data_suppressed[node_id] = suppressed;
+    if (suppressed) {
+        int8_t my_idx   = searchId(&g_myMatrix, getMyIP());
+        int8_t node_idx = searchId(&g_myMatrix, node_id);
+        if (my_idx != -1 && node_idx != -1) {
+            g_myMatrix.link_quality[my_idx][node_idx] = 0;
+            g_myMatrix.matrix[my_idx][node_idx]       = 0;
+        }
+    }
+    pthread_mutex_unlock(&g_matrix_mutex);
+    /* recomputa a MST com o gate activo (bloqueia internamente) */
+    primAlgorithm_weighted();
+}
+
+bool MATRIX_isDataSuppressed(uint8_t node_id) {
+    if (node_id > MAX_NODES) return false;
+    return g_data_suppressed[node_id];
 }
