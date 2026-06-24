@@ -77,6 +77,29 @@ produced by distance and must instead be induced in software
 (Section~\ref{subsec:linkfail}). The same limitation was reported by
 Morais~\cite{morais2024synchronization}.
 
+Beyond the bench, the system was also exercised in a real corridor deployment to
+demonstrate live video streaming while the robot is in motion.
+Figure~\ref{fig:setup-mobility} shows this layout: the base station (N3) sits at
+the starting point, the relay (N2) is placed partway down the corridor, and the
+robot (N1) drives away from N3 along the corridor, so that as N1 moves out of the
+base station's direct reach its traffic is carried through N2. This deployment is
+used for the qualitative streaming-in-motion demonstration; the quantitative
+results reported in this chapter were taken on the bench setup above, where link
+failures are induced in software (Section~\ref{subsec:linkfail}) for
+repeatability.
+
+\vspace{0.4cm}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{setup2.png}
+\caption{Corridor deployment for the streaming-in-motion demonstration: the base
+station (N3) at the starting point (left), and the relay (N2) positioned partway
+down the corridor (right). The robot (N1) drives away from N3 along the corridor,
+so its video is forwarded through N2 once the direct link weakens.}
+\label{fig:setup-mobility}
+\end{figure}
+\vspace{0.5cm}
+
 \subsection{Hardware Platform}
 \label{subsec:hardware}
 
@@ -118,7 +141,17 @@ All measurements were taken at N3.
 The AlphaBot2-Pi platform was chosen because it matches the mobile robot used
 by Morais~\cite{morais2024synchronization}, enabling comparison under
 equivalent physical conditions; the on-board single-board computers were
-Raspberry Pi~5 units.
+Raspberry Pi~5 units. Figure~\ref{fig:alphabot} shows the robot.
+
+\vspace{0.4cm}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{alphabot.png}
+\caption{The AlphaBot2-Pi mobile robot used as Node~1 (N1), carrying a
+Raspberry Pi~5 and a Pi Camera Module~v2 on a pan/tilt mount.}
+\label{fig:alphabot}
+\end{figure}
+\vspace{0.5cm}
 
 \subsection{Network and Software Configuration}
 \label{subsec:netconfig}
