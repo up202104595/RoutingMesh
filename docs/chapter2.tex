@@ -755,7 +755,7 @@ original spanning tree; on the right, the recomputed tree after node~E changes p
 \label{fig:mst-example}
 \end{figure}
 
-Prim's algorithm~\cite{dijkstra1959note} constructs the MST incrementally, starting from an
+Prim's algorithm~\cite{prim1957shortest} constructs the MST incrementally, starting from an
 arbitrary root node. At each step it selects the minimum-weight edge that connects the
 partially built tree to an unvisited node and adds that node to the tree, repeating until all
 $N$ nodes have been included. The time complexity is $O(N^2)$ for an adjacency-matrix
