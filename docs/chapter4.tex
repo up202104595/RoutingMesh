@@ -76,34 +76,11 @@ so that any pair could communicate directly. This is a deliberate constraint:
 because the nodes share a single collision domain, link failures cannot be
 produced by distance and must instead be induced in software
 (Section~\ref{subsec:linkfail}). The same limitation was reported by
-Morais~\cite{morais2024synchronization}.
-
-Beyond the bench, the system was also exercised in a real corridor deployment
-to demonstrate live video streaming while the robot is in motion. The base
-station (N3) was located in the DaRTES laboratory (Distributed and Real-Time
-Embedded Systems, FEUP/DEEC), where this work was developed, and the corridor
-outside it was chosen deliberately: its concrete walls attenuate the wireless
-signal, so that as the robot drives away from the laboratory the direct
-N1\,$\to$\,N3 link is expected to weaken enough to force the traffic through the
-relay N2, positioned partway down the corridor. Figure~\ref{fig:setup-mobility}
-shows this layout: N3 at the starting point, N2 partway down the corridor, and
-the robot N1 driving away. This deployment is used for the qualitative
-streaming-in-motion demonstration; the quantitative results reported in this
-chapter were taken on the bench setup above, where link failures are induced in
-software (Section~\ref{subsec:linkfail}) for repeatability.
-
-\vspace{0.4cm}
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{setup2.png}
-\caption{Corridor deployment for the streaming-in-motion demonstration. The base
-station (N3) is in the DaRTES laboratory at the starting point (left); the relay
-(N2) is positioned partway down the corridor (right). The robot (N1) drives away
-from the laboratory, and the corridor's concrete walls attenuate the direct link
-so that the video is forwarded through N2.}
-\label{fig:setup-mobility}
-\end{figure}
-\vspace{0.5cm}
+Morais~\cite{morais2024synchronization}. A single exception to this bench
+arrangement is the end-to-end mobility demonstration of
+Section~\ref{subsec:res-demo}, where the robot actually drives along a corridor
+and the direct link is allowed to fail by distance; that scenario is described
+where its results are presented.
 
 \subsection{Hardware Platform}
 \label{subsec:hardware}
@@ -1261,6 +1238,71 @@ video is periodic with a one-frame period; this overlay places that burst inside
 N1's slot; and the beacon analysis fixes all three slots. The nodes therefore
 respect their TDMA slots, for both periodic control traffic and continuous video,
 and this property is preserved under relaying.
+
+\subsection{End-to-End Streaming-in-Motion Demonstration}
+\label{subsec:res-demo}
+
+The preceding sections measured each property in isolation on the controlled
+bench. To close the evaluation, the complete system was exercised as a whole in
+a realistic mobility scenario, with the direct link allowed to fail by
+\emph{distance} rather than by the software block of
+Section~\ref{subsec:linkfail}. The base station (N3) was placed in the DaRTES
+laboratory (Distributed and Real-Time Embedded Systems, FEUP/DEEC), where this
+work was developed; the relay (N2), a Raspberry~Pi, was positioned partway down
+the corridor outside the laboratory; and the robot (N1) drove out of the
+laboratory and along the corridor while streaming live video back to the
+operator at N3. The corridor was chosen deliberately: its concrete walls
+attenuate the wireless signal, so that as the robot moves away the direct
+N1\,$\to$\,N3 link weakens and the traffic must be carried through N2.
+Figure~\ref{fig:setup-mobility} shows the layout.
+
+\vspace{0.4cm}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{setup2.png}
+\caption{Corridor deployment for the streaming-in-motion demonstration. The base
+station (N3) is in the DaRTES laboratory at the starting point (left); the relay
+(N2) is positioned partway down the corridor (right). The robot (N1) drives away
+from the laboratory, and the corridor's concrete walls attenuate the direct link
+so that the video is forwarded through N2.}
+\label{fig:setup-mobility}
+\end{figure}
+\vspace{0.5cm}
+
+A recording of the full run is available at \url{TODO-INSERT-YOUTUBE-LINK}.
+
+The demonstration confirmed the central capability end to end: as the robot
+drove down the corridor and the direct link degraded, the system established the
+relay through N2 and the video stream continued to be displayed at the base
+station, recovering connectivity that a single-hop link would have lost. It also
+exposed, honestly, two limitations, now seen together in the field.
+
+First, the stream was not perfectly smooth: the recording shows occasional
+packet losses and brief image jumps. These are predominantly a consequence of
+the slot incursions analysed in Section~\ref{subsubsec:video-slot}: when the
+video burst fills N1's slot and its tail crosses into the start of the following
+slot, the overrunning packets contend on the shared medium and a few are lost,
+which an all-intra H.264 stream renders as a short jump on the next frame. They
+are localised glitches rather than a breakdown of the stream.
+
+Second, and more visible to the operator, was a short interval in which control
+of the robot was lost just \emph{before} the relay took over. The cause is the
+asymmetry between the two planes. The synchronisation beacons are small UDP
+packets that keep arriving even over a weak link, whereas the teleoperation
+commands and the video ride the heavier TCP data plane, which fails first as the
+link degrades. For a brief moment the beacons still reported the direct
+N1\,$\to$\,N3 link as alive, so the topology had not yet rerouted, while the TCP
+connection carrying the commands had already died; the operator momentarily lost
+control of the AlphaBot. Once the dead link was detected and the route
+recomputed, the relay through N2 activated, the data plane resumed, and control
+was recovered. As the robot then drove back toward the laboratory and the direct
+link strengthened, the system reverted to the direct peer-to-peer path. This
+loss-of-control window is the practical manifestation of the beacon-versus-data
+asymmetry: because the lightweight beacons outlive the data connection, the
+topology can briefly believe a link is healthy after its data plane has already
+failed. Making the data-plane failure trigger the reroute as promptly as the
+beacons would is identified as future work
+(Chapter~\ref{chap:conclusions}).
 
 
 %% =======================================================================
