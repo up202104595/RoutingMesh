@@ -920,7 +920,8 @@ Layer~2 source is connectionless: once the ARP entry points at the new next
 hop, the very next frame is relayed by the kernel at the link layer, with
 nothing to wind down. Ours is connection-oriented: before the stream can resume
 through N2, N1 must abandon the TCP connection to the now-unreachable N3, on
-which its transmitter can stall up to the one-second send timeout while the
+which its transmitter can stall up to the one-second send timeout
+(\texttt{SO\_SNDTIMEO}, Section~\ref{subsec:tcp-socket-config}) while the
 buffered frames time out. The connection it switches to, N1\,$\to$\,N2, is
 already open, so no handshake is paid, and the relay forwarding at N2 is a
 kernel \texttt{ip\_forward} that costs nothing to bring up. It is therefore this
@@ -1431,8 +1432,9 @@ as the Layer~2 MAC rewrite once the route is in place, and nothing has to be
 our data plane is connection-oriented, when the direct link fails N1 is left
 holding a TCP connection to N3 that can no longer deliver, and its transmitter
 can stall on that socket up to the one-second send timeout
-(Chapter~\ref{chap:implementation}) while the buffered frames time out, before
-the stream settles onto the already-open connection to N2. A connectionless
+(\texttt{SO\_SNDTIMEO}, Section~\ref{subsec:tcp-socket-config}) while the
+buffered frames time out, before the stream settles onto the already-open
+connection to N2. A connectionless
 Layer~2 source has nothing to wind down: a frame addressed to a dead next hop
 simply fails at the link layer, and the next frame is relayed as soon as the
 route changes. This source-side connection state, not the relay, is the half
