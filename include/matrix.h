@@ -92,9 +92,4 @@ void MATRIX_updateLinkQuality(uint8_t node_id, bool timeout);
 void MATRIX_setLinkQuality(uint8_t node_id, uint8_t quality);
 void removeDeadLinks(void);
 
-/* Supressão do data-link (TCP) de um peer: exclui/readmite a aresta directa
- * no encaminhamento, independentemente dos beacons UDP. */
-void MATRIX_suppressDataLink(uint8_t node_id, bool suppressed);
-bool MATRIX_isDataSuppressed(uint8_t node_id);
-
 #endif /* MATRIX_H */

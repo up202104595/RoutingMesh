@@ -74,20 +74,6 @@ event_queue_t *g_event_queue = NULL;
 /* último frame em que recebemos pacote de cada nó (para slot miss detection) */
 static volatile uint64_t g_last_rx_frame[MAX_NODES + 1] = {0};
 
-/* ── Máquina de estados de saúde do data-link (TCP) por peer ──
- * Desacopla a vida do plano de dados (TCP) da vida dos beacons (UDP).
- * Quando o TCP de um peer morre, suprimimos a sua aresta directa no
- * routing (forçando o relay) e só o readmitimos depois de a ligação
- * reconectada se manter saudável durante uma janela de hold-off.
- * Sem hold-off, os beacons (que continuam a passar) manteriam o nó
- * vivo e com qualidade alta, e o relay nunca activava. */
-typedef enum { TCP_UP = 0, TCP_DOWN, TCP_PROBATION } tcp_health_t;
-static tcp_health_t g_tcp_health[MAX_NODES + 1];      /* TCP_UP por omissão (zero) */
-static double       g_tcp_prob_since[MAX_NODES + 1];  /* início da probation (s)   */
-static int          g_tcp_fail[MAX_NODES + 1];        /* falhas consecutivas (backoff) */
-#define TCP_PROBATION_BASE_S  5.0   /* hold-off base antes de readmitir */
-#define TCP_PROBATION_MAX_S   30.0  /* tecto do backoff exponencial      */
-
 void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
@@ -209,32 +195,6 @@ void node_tcp_reconnect(node_t *node, uint8_t peer_id) {
     if (fd >= 0) node->tcp_sockfd[peer_id] = fd;
 }
 
-/* Empurra um evento de mudança de topologia (reroute imediato). */
-static void push_topology_event(uint8_t peer_id) {
-    if (!g_event_queue) return;
-    event_t *evt = (event_t *)malloc(sizeof(event_t));
-    if (!evt) return;
-    evt->type      = EVENT_TOPOLOGY_CHANGED;
-    evt->node_id   = peer_id;
-    evt->timestamp = (double)get_time_us() / 1e6;
-    evt->next      = NULL;
-    event_queue_push(g_event_queue, evt);
-}
-
-/* Marca o data-link TCP de um peer como morto: suprime a aresta directa,
- * força o reroute e deixa-o pronto para probation na reconexão.
- * Chamar SEM deter tcp_mutex nem g_matrix_mutex. */
-static void tcp_mark_down(uint8_t peer_id) {
-    if (peer_id == 0 || peer_id > MAX_NODES) return;
-    if (g_tcp_health[peer_id] == TCP_DOWN) return;            /* já em baixo — não duplicar */
-    if (g_tcp_health[peer_id] == TCP_PROBATION) g_tcp_fail[peer_id]++; /* caiu na probation → backoff */
-    g_tcp_health[peer_id]    = TCP_DOWN;
-    g_tcp_prob_since[peer_id] = 0.0;
-    printf("[TCP] Peer %d data-link MORTO — a suprimir e forçar relay\n", peer_id);
-    MATRIX_suppressDataLink(peer_id, true);  /* zera aresta + recomputa MST */
-    push_topology_event(peer_id);
-}
-
 void* tcp_keepalive_loop(void *arg) {
     node_t *node = (node_t *)arg;
     printf("[TCP] Keepalive thread iniciada\n");
@@ -254,15 +214,7 @@ void* tcp_keepalive_loop(void *arg) {
                     pthread_mutex_lock(&node->tcp_mutex);
                     node->tcp_sockfd[i] = fd;
                     pthread_mutex_unlock(&node->tcp_mutex);
-                    if (g_tcp_health[i] == TCP_UP) {
-                        /* primeira ligação (arranque) — directo, sem probation */
-                        printf("[TCP] Peer %d ligado\n", i);
-                    } else {
-                        /* reconexão após falha — entra em PROBATION (não readmite já) */
-                        g_tcp_health[i]     = TCP_PROBATION;
-                        g_tcp_prob_since[i] = (double)get_time_us() / 1e6;
-                        printf("[TCP] Peer %d reconectado — em PROBATION (relay mantido)\n", i);
-                    }
+                    printf("[TCP] Peer %d ligado\n", i);
                 } else {
                     printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
                 }
@@ -282,22 +234,6 @@ void* tcp_keepalive_loop(void *arg) {
                         node->tcp_sockfd[i] = -1;
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
-                    tcp_mark_down((uint8_t)i);  /* suprime + reroute (+backoff se em probation) */
-                } else if (g_tcp_health[i] == TCP_PROBATION) {
-                    /* socket reconectado e saudável: readmite só após o hold-off
-                     * (com backoff exponencial por falhas consecutivas) */
-                    double now_s = (double)get_time_us() / 1e6;
-                    int    shift = g_tcp_fail[i] < 4 ? g_tcp_fail[i] : 4;
-                    double need  = TCP_PROBATION_BASE_S * (double)(1 << shift);
-                    if (need > TCP_PROBATION_MAX_S) need = TCP_PROBATION_MAX_S;
-                    if (now_s - g_tcp_prob_since[i] >= need) {
-                        g_tcp_health[i] = TCP_UP;
-                        g_tcp_fail[i]   = 0;
-                        printf("[TCP] Peer %d ESTÁVEL %.1fs — readmitido (directo permitido)\n",
-                               i, need);
-                        MATRIX_suppressDataLink((uint8_t)i, false); /* readmite + recomputa MST */
-                        push_topology_event((uint8_t)i);
-                    }
                 }
             }
         }
@@ -350,7 +286,6 @@ void* tcp_rx_peer_loop(void *arg) {
                 node->tcp_sockfd[peer_id] = -1;
             }
             pthread_mutex_unlock(&node->tcp_mutex);
-            tcp_mark_down((uint8_t)peer_id);
             usleep(500000);
             continue;
         }
@@ -365,7 +300,6 @@ void* tcp_rx_peer_loop(void *arg) {
                 node->tcp_sockfd[peer_id] = -1;
             }
             pthread_mutex_unlock(&node->tcp_mutex);
-            tcp_mark_down((uint8_t)peer_id);
             usleep(500000);
             continue;
         }
@@ -380,7 +314,6 @@ void* tcp_rx_peer_loop(void *arg) {
                 node->tcp_sockfd[peer_id] = -1;
             }
             pthread_mutex_unlock(&node->tcp_mutex);
-            tcp_mark_down((uint8_t)peer_id);
             usleep(500000);
             continue;
         }
@@ -747,7 +680,6 @@ void* tx_loop(void *arg) {
                         node->tcp_sockfd[next_hop] = -1;
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
-                    tcp_mark_down((uint8_t)next_hop);  /* suprime + reroute imediato */
                     /* Descarta pacote — keepalive vai reconectar */
                     printf("[TX] Pacote descartado — sem ligacao TCP para peer %d\n", next_hop);
                 }
