@@ -176,9 +176,10 @@ def hardware_init():
     if HAS_I2C:
         try:
             pca = PCA9685(0x40, 1)
-            pca.set_servo(0, 100)      # pan centro calibrado
-            pca.set_servo_pulse(1, 420) # tilt centro (de frente)
-            print("[ALPHABOT] Servos centrados (pan=100° tilt=pulse:420)")
+            # NAO centrar os servos ao arrancar — deixar a camara na posicao
+            # fisica em que esta. (Centrar punha o tilt a apontar para cima.)
+            # O objeto fica inicializado para comandos manuais de servo.
+            print("[ALPHABOT] PCA9685 pronto — servos NAO movidos (posicao mantida)")
         except Exception as e:
             print(f"[ALPHABOT] ERRO PCA9685: {e}")
             pca = None
