@@ -92,7 +92,7 @@ TELEMETRY_INTERVAL = 0.2
 VIDEO_WIDTH   = 640
 VIDEO_HEIGHT  = 480
 VIDEO_FPS     = 15
-VIDEO_BITRATE = 300000   # 300 kbps (reduzido de 500 para aliviar a carga por slot)
+VIDEO_BITRATE = 500000   # 500 kbps (o slot tem folga de sobra; 300k piorava a qualidade)
 
 # ── Estado global ─────────────────────────────────────────────
 g_speed_l  = 0.0
