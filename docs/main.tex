@@ -1,0 +1,140 @@
+%% FEUP THESIS STYLE for LaTeX2e
+%% MEEC Final Dissertation
+%% Miguel Tavares Almeida - 2025
+%%
+\documentclass[11pt,a4paper]{report}
+%% For two-sided printing (for dead-tree output) comment previous line
+%% and uncomment the next line
+%\documentclass[11pt,a4paper,twoside,openright]{report}
+
+%% Source text uses in UTF-8 encoding
+\usepackage[utf8]{inputenc}
+
+%% MEEC options - ENGLISH VERSION
+\usepackage[english,meec]{feupteses}              %
+%\usepackage[english,meec,juri]{feupteses}        % juri version
+%\usepackage[english,meec,final]{feupteses}       % final PDF version
+%% Additional options for feupteses.sty:
+%% - english: titles, etc in English
+%% - onpaper: links are not shown (for paper versions)
+%% - backrefs: include back references from bibliography to citation place
+%% - iso: format references according to ISO 690 standard
+
+%% Tabelas
+\usepackage{array}      % Formatação avançada de tabelas
+\usepackage{colortbl}
+\usepackage{booktabs}   % \toprule \midrule \bottomrule
+
+%% Pacotes matemáticos
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+
+%% Código-fonte (listings) e posicionamento de figuras
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}      % posicionamento [H]
+\usepackage{placeins}   % \FloatBarrier
+
+%% Estilo dos blocos de código (usado nos Listings do Capítulo 3)
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny,
+  tabsize=4
+}
+
+%% TIP: use folder ``figures'' to keep all your figures
+%% Path to the figures directory
+\graphicspath{{./}{figures/}}
+
+%% Change to the appropriate bibliography file
+%% (feupteses usa biblatex internamente -> \addbibresource + \PrintBib)
+\addbibresource{references.bib}
+
+%%========================================
+%% Start of document
+%%========================================
+\begin{document}
+
+%%----------------------------------------
+%% Information about the work
+%%----------------------------------------
+\title{Routing in Dynamic Meshes of Autonomous Agents}
+\author{Miguel Tavares Almeida}
+%% Uncomment next line for date of submission
+%\thesisdate{December 28, 2025}
+%% Comment next line copyright text if not used
+\copyrightnotice{Miguel Tavares Almeida, 2025}
+%% Supervisor
+\supervisor{Supervisor}{Prof.\ Luís Almeida}
+%% Uncomment next line if necessary
+%\supervisor{Co-supervisor}{Prof.\ $<$Name of the Co-Supervisor$>$}
+%% Uncomment committee stuff in the final version if used
+%\committeetext{Approved in public session by the Jury:}
+%\committeemember{President}{Prof.\ $<$President name$>$}
+%\committeemember{External Examiner}{Prof.\ $<$Examiner name$>$}
+%\committeemember{Supervisor}{Prof.\ $<$Supervisor name$>$}
+%% uncomment next line to draw line for handwritten signature (if necessary)
+%\signature
+%% Specify cover logo (in folder ``figures'')
+\logo{uporto-feup.pdf}
+%% Uncomment next line for additional text below the author's name (front page)
+%\additionalfronttext{I2R Intermediate Report}
+
+%%----------------------------------------
+%% Preliminary materials
+%%----------------------------------------
+\begin{Prolog}
+  \include{abstract}  % the abstract
+  %\include{un-sdg}   % UN SDGs (optional - remove if not needed)
+  %\include{acknows}   % the acknowledgments
+
+  %\include{quote}     % initial quotation if desired
+  \cleardoublepage
+
+  %% Table of Contents
+  \pdfbookmark[0]{Table of Contents}{contents}
+  \tableofcontents
+  \cleardoublepage
+
+  %% List of Figures
+  \pdfbookmark[0]{List of Figures}{figures}
+  \listoffigures
+  \cleardoublepage
+
+  %% List of Tables
+  \pdfbookmark[0]{List of Tables}{tables}
+  \listoftables
+  \cleardoublepage
+
+  %% List of Acronyms
+  \include{abbrevs}  % the list of acronyms
+
+\end{Prolog}
+
+%%----------------------------------------
+%% Body
+%%----------------------------------------
+\StartBody
+%% TIP: use a separate file for each chapter
+\include{chapter1}  % Introduction
+\include{chapter2}  % Background and State of the Art
+\include{chapter3}  % System Design and Implementation
+\include{chapter4}  % Experimental Evaluation
+\include{chapter5}  % Conclusions and Future Work
+
+%%----------------------------------------
+%% Final materials
+%%----------------------------------------
+%% Include all references (even uncited ones)
+%% REMOVE THIS LINE after adding proper \cite{} commands in your chapters
+\nocite{*}
+%% Bibliography
+\PrintBib
+%% comment next 2 commands if numbered appendices are not used
+%\appendix
+%\include{appendix1}
+\end{document}
