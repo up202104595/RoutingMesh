@@ -3,46 +3,43 @@
 ═══════════════════════════════════════════════════════════════
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-0.0 REFERENCIA RAPIDA — COMANDOS A CORRER EM CADA NO
+0.0 REFERENCIA RAPIDA - COMANDOS A CORRER EM CADA NO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Metodo Miguel (ip_forward, video TCP). Correr por esta ordem.
 Detalhes e validacao do sync nas seccoes 0, 0.1 e 3.
 
-  ┌─ No 1  (Raspberry AlphaBot, 172.20.10.1 / 10.0.0.1) ─────────
-  │  cd ~/Documents/RoutingMeshNet/RoutingMesh
-  │  git pull
-  │  sudo systemctl stop meshnode alphabot 2>/dev/null; true
-  │  sudo bash deploy/install.sh 1
-  │  sudo systemctl daemon-reload
-  │  sudo systemctl start adhoc meshnode
-  │  # video arranca sozinho ~30s depois do meshnode (alphabot.service):
-  │  sudo systemctl start alphabot
-  │  # logs:  journalctl -u meshnode -f
-  │  #        journalctl -u alphabot -f
-  └──────────────────────────────────────────────────────────────
+No 1  (Raspberry AlphaBot, 172.20.10.1 / 10.0.0.1):
+  cd ~/Documents/RoutingMeshNet/RoutingMesh
+  git pull
+  sudo systemctl stop meshnode alphabot 2>/dev/null; true
+  sudo bash deploy/install.sh 1
+  sudo systemctl daemon-reload
+  sudo systemctl start adhoc meshnode
+  sudo systemctl start alphabot
+  # video arranca ~30s depois do meshnode (alphabot.service)
+  # logs: journalctl -u meshnode -f
+  # logs: journalctl -u alphabot -f
 
-  ┌─ No 2  (Raspberry Relay, 172.20.10.2 / 10.0.0.2) ───────────
-  │  cd ~/Documents/RoutingMeshNet/RoutingMesh
-  │  git pull
-  │  sudo systemctl stop meshnode 2>/dev/null; true
-  │  sudo bash deploy/install.sh 2
-  │  sudo systemctl daemon-reload
-  │  sudo systemctl start adhoc meshnode
-  │  # logs:  journalctl -u meshnode -f
-  └──────────────────────────────────────────────────────────────
+No 2  (Raspberry Relay, 172.20.10.2 / 10.0.0.2):
+  cd ~/Documents/RoutingMeshNet/RoutingMesh
+  git pull
+  sudo systemctl stop meshnode 2>/dev/null; true
+  sudo bash deploy/install.sh 2
+  sudo systemctl daemon-reload
+  sudo systemctl start adhoc meshnode
+  # logs: journalctl -u meshnode -f
 
-  ┌─ No 3  (PC Base Station, 172.20.10.3 / 10.0.0.3) ──────────
-  │  cd ~/Documents/RoutingMeshNet/RoutingMesh
-  │  git pull
-  │  sudo systemctl stop meshnode 2>/dev/null; true
-  │  sudo bash deploy/install.sh 3
-  │  sudo systemctl daemon-reload
-  │  sudo systemctl start adhoc meshnode
-  │  # receber o video (por ultimo, depois do sync assentar):
-  │  python3 base_station.py
-  │  # logs:  journalctl -u meshnode -f
-  └──────────────────────────────────────────────────────────────
+No 3  (PC Base Station, 172.20.10.3 / 10.0.0.3):
+  cd ~/Documents/RoutingMeshNet/RoutingMesh
+  git pull
+  sudo systemctl stop meshnode 2>/dev/null; true
+  sudo bash deploy/install.sh 3
+  sudo systemctl daemon-reload
+  sudo systemctl start adhoc meshnode
+  python3 base_station.py
+  # receber o video por ultimo, depois do sync assentar
+  # logs: journalctl -u meshnode -f
 
 NOTA: o install.sh recompila e copia o binario; o "stop" antes e
       obrigatorio (binario bloqueado com o servico activo). O No 3
