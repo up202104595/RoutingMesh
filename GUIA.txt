@@ -3,6 +3,52 @@
 ═══════════════════════════════════════════════════════════════
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+0.0 REFERENCIA RAPIDA — COMANDOS A CORRER EM CADA NO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Metodo Miguel (ip_forward, video TCP). Correr por esta ordem.
+Detalhes e validacao do sync nas seccoes 0, 0.1 e 3.
+
+  ┌─ No 1  (Raspberry AlphaBot, 172.20.10.1 / 10.0.0.1) ─────────
+  │  cd ~/Documents/RoutingMeshNet/RoutingMesh
+  │  git pull
+  │  sudo systemctl stop meshnode alphabot 2>/dev/null; true
+  │  sudo bash deploy/install.sh 1
+  │  sudo systemctl daemon-reload
+  │  sudo systemctl start adhoc meshnode
+  │  # video arranca sozinho ~30s depois do meshnode (alphabot.service):
+  │  sudo systemctl start alphabot
+  │  # logs:  journalctl -u meshnode -f
+  │  #        journalctl -u alphabot -f
+  └──────────────────────────────────────────────────────────────
+
+  ┌─ No 2  (Raspberry Relay, 172.20.10.2 / 10.0.0.2) ───────────
+  │  cd ~/Documents/RoutingMeshNet/RoutingMesh
+  │  git pull
+  │  sudo systemctl stop meshnode 2>/dev/null; true
+  │  sudo bash deploy/install.sh 2
+  │  sudo systemctl daemon-reload
+  │  sudo systemctl start adhoc meshnode
+  │  # logs:  journalctl -u meshnode -f
+  └──────────────────────────────────────────────────────────────
+
+  ┌─ No 3  (PC Base Station, 172.20.10.3 / 10.0.0.3) ──────────
+  │  cd ~/Documents/RoutingMeshNet/RoutingMesh
+  │  git pull
+  │  sudo systemctl stop meshnode 2>/dev/null; true
+  │  sudo bash deploy/install.sh 3
+  │  sudo systemctl daemon-reload
+  │  sudo systemctl start adhoc meshnode
+  │  # receber o video (por ultimo, depois do sync assentar):
+  │  python3 base_station.py
+  │  # logs:  journalctl -u meshnode -f
+  └──────────────────────────────────────────────────────────────
+
+NOTA: o install.sh recompila e copia o binario; o "stop" antes e
+      obrigatorio (binario bloqueado com o servico activo). O No 3
+      usa MESH_PHY_IFACE=wlp5s0 (ja tratado pelo install.sh).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 0. ATUALIZAR CODIGO (git pull + recompilar + reinstalar)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -102,13 +148,15 @@ PASSO E — Capturar beacons no No 3 (Wireshark, filtro:  udp portrange 7001-700
 
 PASSO F — SO DEPOIS de o sync ter assentado, ligar o video:
 
-  IMPORTANTE: esperar ~3 MINUTOS apos arrancar o meshnode antes de ligar
-  o video/capturar. O transitorio de convergencia dos slots tem de passar.
-  - Via systemd: o alphabot.service ja espera 3 min automaticamente
-    (ExecStartPre=/bin/sleep 180) antes de arrancar o stream.
-  - Manualmente: espera ~3 min depois do meshnode e so depois corre o video.
+  IMPORTANTE: esperar que o sync assente apos arrancar o meshnode antes de
+  ligar o video/capturar. O transitorio de convergencia dos slots tem de passar.
+  - Via systemd: o alphabot.service ja espera 30s automaticamente
+    (ExecStartPre=/bin/sleep 30) antes de arrancar o stream.
+  - Manualmente: espera ~30s depois do meshnode e so depois corre o video.
+  - NOTA: 30s e o valor de TESTE. Para medidas finais sobe para 180s (3 min),
+    como na captura de beacons, para garantir o sync totalmente estavel.
 
-  No 1:  sudo systemctl start alphabot       # arranca o stream (espera 3 min sozinho)
+  No 1:  sudo systemctl start alphabot       # arranca o stream (espera 30s sozinho)
   No 3:  python3 base_station.py             # ou ffplay (ver seccao 4)
 
 NOTA: se o sigma ficar grande (~30ms, slots a vaguear), o sync nao
@@ -193,9 +241,9 @@ PASSO 1 — Meshnode em todos os nos (sempre primeiro):
   Raspberry Relay    (no 2):  sudo ./meshnode_arp 2 3
   PC                 (no 3):  sudo ./meshnode_arp 3 3
 
-PASSO 2 — AlphaBot na Raspberry 1 (SO ~3 min DEPOIS do meshnode, p/ o sync assentar):
-  sleep 180 && sudo python3 alphabot_node.py
-  # (via systemd o alphabot.service ja espera 3 min sozinho)
+PASSO 2 — AlphaBot na Raspberry 1 (SO depois do meshnode, p/ o sync assentar):
+  sleep 30 && sudo python3 alphabot_node.py
+  # (via systemd o alphabot.service ja espera 30s sozinho; 180s p/ medidas finais)
 
 PASSO 3 — Base station no PC (por ultimo):
   python3 base_station.py
