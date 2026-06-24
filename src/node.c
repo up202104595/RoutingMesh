@@ -283,20 +283,33 @@ void* tcp_keepalive_loop(void *arg) {
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
                     tcp_mark_down((uint8_t)i);  /* suprime + reroute (+backoff se em probation) */
-                } else if (g_tcp_health[i] == TCP_PROBATION) {
-                    /* socket reconectado e saudável: readmite só após o hold-off
-                     * (com backoff exponencial por falhas consecutivas) */
-                    double now_s = (double)get_time_us() / 1e6;
-                    int    shift = g_tcp_fail[i] < 4 ? g_tcp_fail[i] : 4;
-                    double need  = TCP_PROBATION_BASE_S * (double)(1 << shift);
-                    if (need > TCP_PROBATION_MAX_S) need = TCP_PROBATION_MAX_S;
-                    if (now_s - g_tcp_prob_since[i] >= need) {
-                        g_tcp_health[i] = TCP_UP;
-                        g_tcp_fail[i]   = 0;
-                        printf("[TCP] Peer %d ESTÁVEL %.1fs — readmitido (directo permitido)\n",
-                               i, need);
-                        MATRIX_suppressDataLink((uint8_t)i, false); /* readmite + recomputa MST */
-                        push_topology_event((uint8_t)i);
+                } else {
+                    /* socket vivo e saudável */
+                    if (g_tcp_health[i] == TCP_DOWN) {
+                        /* A reconexão foi detetada pelo lado servidor (accept_loop):
+                         * esse instala o fd mas não mexe no estado de saúde. Sem isto
+                         * o estado fica preso em TCP_DOWN e o nó nunca é readmitido
+                         * (fica suprimido/zero para sempre). Entra em PROBATION aqui
+                         * para que o hold-off corra normalmente. */
+                        g_tcp_health[i]     = TCP_PROBATION;
+                        g_tcp_prob_since[i] = (double)get_time_us() / 1e6;
+                        printf("[TCP] Peer %d reconectado (via accept) — em PROBATION (relay mantido)\n", i);
+                    }
+                    if (g_tcp_health[i] == TCP_PROBATION) {
+                        /* socket reconectado e saudável: readmite só após o hold-off
+                         * (com backoff exponencial por falhas consecutivas) */
+                        double now_s = (double)get_time_us() / 1e6;
+                        int    shift = g_tcp_fail[i] < 4 ? g_tcp_fail[i] : 4;
+                        double need  = TCP_PROBATION_BASE_S * (double)(1 << shift);
+                        if (need > TCP_PROBATION_MAX_S) need = TCP_PROBATION_MAX_S;
+                        if (now_s - g_tcp_prob_since[i] >= need) {
+                            g_tcp_health[i] = TCP_UP;
+                            g_tcp_fail[i]   = 0;
+                            printf("[TCP] Peer %d ESTÁVEL %.1fs — readmitido (directo permitido)\n",
+                                   i, need);
+                            MATRIX_suppressDataLink((uint8_t)i, false); /* readmite + recomputa MST */
+                            push_topology_event((uint8_t)i);
+                        }
                     }
                 }
             }
