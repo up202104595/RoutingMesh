@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <netinet/tcp.h>
+#include <stddef.h>   /* offsetof */
 
 #define BASE_PORT        7000
 #define BASE_TCP_PORT    8000
@@ -38,6 +39,11 @@
 #define T_TRANS_US(len)  ((len) * 8ULL * 1000000ULL / WIFI_BPS)
 #define SLOT_USEFUL_US   (SLOT_DURATION_US - GUARD_US)
 #define MAX_BYTES_SLOT   ((SLOT_USEFUL_US / T_TRANS_US(1500)) * 1500ULL)
+
+/* Tamanho REAL do cabecalho MSG_DATA no fio (campos ate payload), SEM o array
+ * fixo payload[1500]. Usar sizeof(msg_data_hdr_t) enviava o buffer inteiro
+ * (~1.5KB) a cada pacote — inflava cada pacote para >1500 bytes. */
+#define MSG_DATA_HDR_WIRE  (offsetof(msg_data_hdr_t, payload))
 
 #ifndef MESH_NET_PREFIX
 #define MESH_NET_PREFIX  "172.20.10"
@@ -291,7 +297,7 @@ void* tcp_rx_peer_loop(void *arg) {
         }
 
         uint32_t pkt_len = ntohl(net_len);
-        if (pkt_len < sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) ||
+        if (pkt_len < sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE ||
             pkt_len > 4096) {
             printf("[TCP-RX] pkt_len invalido=%u — a fechar\n", pkt_len);
             pthread_mutex_lock(&node->tcp_mutex);
@@ -429,7 +435,7 @@ void* receiver_loop(void *arg) {
                    hdr->slot_id, n, hdr->slot_begin_ms, hdr->slot_end_ms);
 
         } else if (hdr->type == MSG_DATA) {
-            if ((size_t)n < sizeof(tdma_header_t) + sizeof(msg_data_hdr_t))
+            if ((size_t)n < sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE)
                 continue;
 
             msg_data_hdr_t *data = (msg_data_hdr_t *)(buffer + sizeof(tdma_header_t));
@@ -641,7 +647,7 @@ void* tx_loop(void *arg) {
             data->msg_id   = data_msg_id++;
             data->data_len = (uint16_t)pkt->len;
 
-            if (bytes_sent + sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) + pkt->len > MAX_BYTES_SLOT) {
+            if (bytes_sent + sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE + pkt->len > MAX_BYTES_SLOT) {
                 tx_queue_push(node->tx_queue, pkt->data, pkt->len, pkt->dst_id);
                 free(pkt);
                 break;
@@ -649,7 +655,8 @@ void* tx_loop(void *arg) {
 
             memcpy(data->payload, pkt->data, pkt->len);
             data->data_len = (uint16_t)pkt->len;
-            int total_len = sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) + data->data_len;
+            /* total_len = cabecalhos + SO os data_len bytes reais (sem o array fixo) */
+            int total_len = sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE + data->data_len;
             free(pkt);
 
             const char *next_hop_ip = node->peer_ips[next_hop];
