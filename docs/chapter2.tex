@@ -810,7 +810,8 @@ low time complexity.
 
 \paragraph{Algorithm selection.}
 Three graph algorithms are applicable to the connectivity matrix: Prim's algorithm for the
-MST, Dijkstra's algorithm for shortest paths, and the Bellman-Ford algorithm used by DSDV.
+MST, Dijkstra's algorithm~\cite{dijkstra1959note} for shortest paths, and the Bellman-Ford
+algorithm used by DSDV.
 Dijkstra's and Prim's both have $O(N^2)$ time complexity on an adjacency matrix, while
 Bellman-Ford runs in $O(N^3)$, which becomes disadvantageous as the network grows.
 Beyond complexity, the key observation is that \texttt{matrix.c} already computes a Minimum
