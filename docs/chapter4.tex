@@ -915,16 +915,19 @@ through \texttt{tun\_write} and \texttt{ip\_forward}. We accept that this is
 measurably more processing per forwarded packet; it is simply too small,
 sub-millisecond, to register against the 50\,ms slot, which is why the relay
 added no measurable latency in steady state (Section~\ref{subsec:res-rtt}). The
-difference that does matter is the data path at the moment of recovery. The
-Layer~2 forwarding is connectionless: once the ARP entry points at the new next
+difference that does matter is at the source at the moment of recovery. The
+Layer~2 source is connectionless: once the ARP entry points at the new next
 hop, the very next frame is relayed by the kernel at the link layer, with
-nothing to take over. Ours is connection-oriented: the flow must transfer
-onto the relay path, the broken direct connection being abandoned before the
-stream is taken up through N2, even though both legs run over connections that
-are already open. It is therefore this transfer (not the detection, nor the
-route computation, nor the route install, all of which are essentially matched)
-that the Layer~2 design avoids by construction, shrinking the $\approx 0.8$\,s
-tail toward a single round.
+nothing to wind down. Ours is connection-oriented: before the stream can resume
+through N2, N1 must abandon the TCP connection to the now-unreachable N3, on
+which its transmitter can stall up to the one-second send timeout while the
+buffered frames time out. The connection it switches to, N1\,$\to$\,N2, is
+already open, so no handshake is paid, and the relay forwarding at N2 is a
+kernel \texttt{ip\_forward} that costs nothing to bring up. It is therefore this
+source-side wind-down alone (not the detection, nor the route computation, nor
+the route install, nor the relay forwarding, all of which are matched or
+cheaper) that the Layer~2 design avoids by construction, shrinking the
+$\approx 0.8$\,s tail toward a single round.
 
 The tail is thus the price paid for operating at Layer~3 over a TCP data plane,
 the same choice that buys reliable in-order delivery, standard observability, and
@@ -1292,14 +1295,18 @@ the three Layer~2 runs fall within 4\,ms of one another, against a spread of
 nearly 200\,ms for Layer~3. This is precisely the outcome anticipated in
 Section~\ref{subsec:res-convergence}. Both methods pay the same $2.0$\,s
 detection cost, because both detect the dead link through the same node-aging
-timeout; what separates them is the data-path resumption that follows detection.
+timeout; what separates them is what happens at the source after detection.
 The Layer~2 path is connectionless, so once the ARP entry points at N2 the very
 next frame is relayed by the kernel and the stream resumes almost immediately,
-leaving only a short tail of about a quarter of a second. The Layer~3 path must
-instead bring its connection-oriented TCP data plane back into service, and that
-resumption is the $\approx 0.8$\,s tail isolated earlier. The measured gap of
-$\approx 0.5$\,s between the two totals is therefore the empirical price of the
-TCP data plane, and it confirms, on the same hardware, the architectural
+leaving only a short tail of about a quarter of a second. On the Layer~3 side
+the relay forwarding is just as cheap, a kernel \texttt{ip\_forward} of the same
+order, but the source first has to wind down the TCP connection to the
+now-unreachable N3, on which its transmitter can stall up to the one-second send
+timeout before the stream settles onto the already-open connection to N2; that
+source-side connection state is the $\approx 0.8$\,s tail isolated earlier. The
+measured gap of $\approx 0.5$\,s between the two totals is therefore the
+empirical price of the connection-oriented data plane at the source, and it
+confirms, on the same hardware, the architectural
 analysis that had previously been argued only from the reference's reported
 numbers.
 
@@ -1416,14 +1423,24 @@ continuum.
 \textbf{Convergence.} Both designs detect a dead link the same way and through
 the same node-aging timeout, so their recovery times are of the same order and
 the steps that follow detection are largely matched (Sections~\ref{subsec:res-convergence}
-and~\ref{subsec:l2-rerun} give the breakdown). The one difference that matters is
-the data path: the connectionless Layer~2 relay resumes the stream almost as soon
-as the route changes, whereas the Layer~3 design first has to bring its
-TCP data plane back into service, which is what makes it the slower of the two by
-about half a second. That cost is secondary while detection sets the floor, but it
-would become the limiting factor if the aging timeout were shortened, the point at
-which a lighter, connectionless forwarding path would be the natural lever. The
-re-run on the same testbed bears this out directly.
+and~\ref{subsec:l2-rerun} give the breakdown). The modest difference, about half
+a second in favour of the Layer~2 method, is \emph{not} in the relay forwarding:
+our relay hop N2\,$\to$\,N3 is a plain kernel \texttt{ip\_forward}, as immediate
+as the Layer~2 MAC rewrite once the route is in place, and nothing has to be
+``brought into service'' there. The difference is at the \emph{source}. Because
+our data plane is connection-oriented, when the direct link fails N1 is left
+holding a TCP connection to N3 that can no longer deliver, and its transmitter
+can stall on that socket up to the one-second send timeout
+(Chapter~\ref{chap:implementation}) while the buffered frames time out, before
+the stream settles onto the already-open connection to N2. A connectionless
+Layer~2 source has nothing to wind down: a frame addressed to a dead next hop
+simply fails at the link layer, and the next frame is relayed as soon as the
+route changes. This source-side connection state, not the relay, is the half
+second the Layer~2 method saves. The cost is secondary while detection sets the
+floor, but it would become the limiting factor if the aging timeout were
+shortened, the point at which a lighter, connectionless transport at the source
+would be the natural lever. The re-run on the same testbed bears this out
+directly.
 
 \textbf{Observability and stability.} The Layer~3 approach trades convergence
 speed for two practical advantages. The relay path is visible to standard IP
