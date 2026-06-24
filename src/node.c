@@ -251,6 +251,40 @@ void* tcp_keepalive_loop(void *arg) {
 
 typedef struct { node_t *node; int peer_id; } tcp_rx_arg_t;
 
+/*
+ * recv_full() — lê EXATAMENTE len bytes, completando leituras parciais.
+ *
+ * O problema antigo: recv(.., MSG_WAITALL) com SO_RCVTIMEO de 2 s podia
+ * devolver uma leitura PARCIAL quando o stream estola sob carga; o código
+ * tratava isso como "desligou" e descartava os bytes → o framing
+ * dessincronizava e a ligacao caía falsamente. Aqui, em vez disso:
+ *   - um timeout (EAGAIN/EWOULDBLOCK) NAO mata a ligacao: continua a espera,
+ *     mantendo os bytes já lidos (sem dessincronizar);
+ *   - só declara morto em FIN (recv==0) ou erro real;
+ *   - aborta se outra thread substituiu/fechou o nosso fd.
+ *
+ * Devolve: len em sucesso, 0 se o peer fechou (FIN), -1 em erro/abort.
+ */
+static int recv_full(node_t *node, int peer_id, int tcp_fd,
+                     void *buf, size_t len) {
+    size_t got = 0;
+    while (got < len) {
+        if (!node->running || !g_running) return -1;
+        pthread_mutex_lock(&node->tcp_mutex);
+        int still_ours = (node->tcp_sockfd[peer_id] == tcp_fd);
+        pthread_mutex_unlock(&node->tcp_mutex);
+        if (!still_ours) return -1;
+
+        ssize_t r = recv(tcp_fd, (uint8_t *)buf + got, len - got, MSG_WAITALL);
+        if (r > 0) { got += (size_t)r; continue; }
+        if (r == 0) return 0;                                  /* FIN */
+        if (errno == EAGAIN || errno == EWOULDBLOCK) continue; /* timeout: espera */
+        if (errno == EINTR) continue;
+        return -1;                                             /* erro real */
+    }
+    return (int)len;
+}
+
 void* tcp_rx_peer_loop(void *arg) {
     tcp_rx_arg_t *rx_arg = (tcp_rx_arg_t *)arg;
     node_t *node    = rx_arg->node;
@@ -270,14 +304,10 @@ void* tcp_rx_peer_loop(void *arg) {
          * no momento da criação do fd — não repetir aqui para não arriscar
          * aplicar num fd já substituído por outra thread */
 
-        /* Lê 4 bytes de tamanho primeiro */
+        /* Lê 4 bytes de tamanho primeiro (completa leituras parciais) */
         uint32_t net_len = 0;
-        ssize_t n = recv(tcp_fd, &net_len, 4, MSG_WAITALL);
-        if (n != 4) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                /* Timeout — verifica se fd mudou */
-                continue;
-            }
+        int n = recv_full(node, peer_id, tcp_fd, &net_len, 4);
+        if (n <= 0) {
             printf("[TCP-RX] Peer %d desligou\n", peer_id);
             /* Só fecha se o fd ainda for o mesmo — evita race condition */
             pthread_mutex_lock(&node->tcp_mutex);
@@ -304,10 +334,10 @@ void* tcp_rx_peer_loop(void *arg) {
             continue;
         }
 
-        /* Lê pacote completo */
-        ssize_t nr = recv(tcp_fd, buffer, pkt_len, MSG_WAITALL);
-        if (nr != (ssize_t)pkt_len) {
-            printf("[TCP-RX] Pacote incompleto esperado=%u recebido=%zd\n", pkt_len, nr);
+        /* Lê pacote completo (completa leituras parciais) */
+        int nr = recv_full(node, peer_id, tcp_fd, buffer, pkt_len);
+        if (nr <= 0) {
+            printf("[TCP-RX] Peer %d desligou (corpo incompleto)\n", peer_id);
             pthread_mutex_lock(&node->tcp_mutex);
             if (node->tcp_sockfd[peer_id] == tcp_fd) {
                 close(tcp_fd);
