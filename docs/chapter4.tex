@@ -882,8 +882,7 @@ hop N1\,$\to$\,N2 travels over TCP and is delivered up to the user-space receive
 thread at N2 before being handed back to the kernel
 (\texttt{tun\_write}\,$\to$\,\texttt{ip\_forward}) for the second hop to N3. Per
 packet this extra trip up the stack is sub-millisecond, far too small to see at
-the TDMA timescale, which is precisely why the relay added no measurable latency
-to the steady-state RTT (Section~\ref{subsec:res-rtt}). A delay relative to the
+the TDMA timescale. A delay relative to the
 connectionless Layer~2 method is therefore expected, but on this evidence a
 \emph{small} one: the per-packet overhead alone cannot account for a tail of
 hundreds of milliseconds. What remains of the sub-second tail is best attributed
@@ -900,14 +899,26 @@ Detection is identical: that design removes a dead link through the same
 connectivity-matrix aging, so it incurs the same \texttt{MAX\_AGE} wait before
 anything can change (Morais does not report a convergence figure; this follows
 from both designs sharing the RA-TDMAs+ adjacency matrix and its aging
-mechanism). Route recomputation and installation are also comparable:
-the reference routing module recomputes its linked-list routes from the spanning
-tree once per round and writes the kernel ARP table in a single \texttt{ioctl()},
-just as ours recomputes from the spanning tree and installs routes through
-Netlink. Both complete in well under a slot. The difference lies solely in the
-data path. The Layer~2 forwarding is connectionless: once the ARP entry points at
-the new next hop, the very next frame is relayed by the kernel at the link layer,
-with nothing to establish. Ours is connection-oriented: the flow must transfer
+mechanism). Route recomputation and installation are close but not free of
+asymmetry, and here the cost is ours: the reference recomputes its linked-list
+routes from the spanning tree and writes a single ARP entry per destination with
+one \texttt{ioctl()}, whereas we recompute from the same spanning tree but
+install \emph{two} routes per destination over Netlink, one in the main table
+and one in the relay table~200 (Section~\ref{sec:kernel-config}). Two Netlink
+messages across two tables are heavier than a single ARP rewrite, a cost we
+accept for the dual-table separation; both nonetheless complete in well under a
+slot, so neither is where the gap lies. The same asymmetry, and the same verdict,
+applies to the per-packet forwarding itself: the reference relay performs one
+link-layer MAC rewrite that never leaves the kernel, whereas ours carries each
+forwarded packet up to the user-space TCP receive thread at N2 and back down
+through \texttt{tun\_write} and \texttt{ip\_forward}. We accept that this is
+measurably more processing per forwarded packet; it is simply too small,
+sub-millisecond, to register against the 50\,ms slot, which is why the relay
+added no measurable latency in steady state (Section~\ref{subsec:res-rtt}). The
+difference that does matter is the data path at the moment of recovery. The
+Layer~2 forwarding is connectionless: once the ARP entry points at the new next
+hop, the very next frame is relayed by the kernel at the link layer, with
+nothing to take over. Ours is connection-oriented: the flow must transfer
 onto the relay path, the broken direct connection being abandoned before the
 stream is taken up through N2, even though both legs run over connections that
 are already open. It is therefore this transfer (not the detection, nor the
