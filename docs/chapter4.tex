@@ -1269,10 +1269,11 @@ method ourselves from its description. The re-implementation follows the
 reference faithfully, in the terms its report sets out: forwarding is performed
 at the data link layer by installing static ARP entries that map each
 destination's address to the next-hop MAC through \texttt{ioctl(SIOCSARP)}; the
-relay is a plain kernel \texttt{ip\_forward} of the unmodified frame, with the
-source and destination addresses left intact end to end; the video is carried
-over UDP; and the routing module builds the same binary spanning tree from the
-connectivity matrix. The decisive point for a fair comparison is that both
+relay then retransmits each frame toward that next-hop MAC at the link layer,
+leaving the IP header and the end-to-end source and destination addresses
+untouched, rather than lifting the packet into the kernel's IP-forwarding path
+as our own Layer~3 design does; the video is carried over UDP; and the routing
+module builds the same binary spanning tree from the connectivity matrix. The decisive point for a fair comparison is that both
 methods run on the identical RA-TDMAs+ synchroniser and the identical
 TDMA-agnostic framework, and differ only in the routing and forwarding layer, so
 any difference that appears is attributable to that layer alone and not to the
@@ -1332,9 +1333,9 @@ bitrate did not remove the effect, and that is the key observation, because it
 shows the cause is not a shortage of raw bandwidth.
 
 The mechanism is the interaction between the Layer~2 relay and the shared
-collision domain. The relay is a kernel \texttt{ip\_forward} that is not
-slot-aware: the instant N2 receives a video frame from N1 it re-transmits it,
-which happens inside N1's slot rather than within a slot of N2's own. With the
+collision domain. The relay forwards at the link layer and is not slot-aware:
+the instant N2 receives a video frame from N1 it re-transmits it, which happens
+inside N1's slot rather than within a slot of N2's own. With the
 three nodes in mutual range on one channel, these out-of-slot relay
 transmissions contend with, and collide with, the synchronisation beacons, and
 the resulting beacon loss stresses the RA-TDMAs+ synchroniser. This coupling is
