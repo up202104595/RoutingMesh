@@ -79,7 +79,7 @@ at the network level.
 The TCP sockets are configured with a set of options that are essential for correct and
 low-latency operation. Without each option the system would either introduce unacceptable
 delays, fail to detect broken connections, or block indefinitely and disrupt the TDMA slot
-schedule. Listing~\ref{lst:tcp-opts} shows the options applied to every peer connection.
+schedule. Code Block~\ref{lst:tcp-opts} shows the options applied to every peer connection.
 
 \begin{lstlisting}[language=C,
     caption={TCP socket options applied to each peer connection},
@@ -478,7 +478,7 @@ approximately 50\,\textmu s per route, compared to approximately 3\,ms for an eq
 \texttt{system("ip route ...")} call, a 60-fold reduction significant when updating routes
 for the entire mesh at topology-change time.
 
-Listing~\ref{lst:netlink-api} shows the four API calls used by the Routing module.
+Code Block~\ref{lst:netlink-api} shows the four API calls used by the Routing module.
 
 \begin{lstlisting}[language=C,
     caption={Netlink route management API used by the Routing module},

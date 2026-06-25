@@ -496,7 +496,7 @@ To maintain a direct view of the network topology, each node must share the tota
 active nodes, their respective identifiers, the connectivity matrix containing link information
 between nodes, and a per-row age vector that allows the most recent information to be retained.
 These fields are stored in the \texttt{tdma\_matrix\_t} structure shown in
-Listing~\ref{lst:matrix}, which is serialised into a compact beacon and broadcast via multicast
+Code Block~\ref{lst:matrix}, which is serialised into a compact beacon and broadcast via multicast
 at the beginning of each node's slot. Figure~\ref{fig:matrix-packet} shows the layout of this
 beacon packet.
 
@@ -545,7 +545,7 @@ link between two nodes, while 0 indicates no connection.
 
 After updating the matrix, the module runs Prim's algorithm on the connectivity graph to compute
 a Minimum Spanning Tree (MST) and writes the result to a shared-memory region protected by
-a mutex, as shown in Listing~\ref{lst:spanning}. This structure is consumed by the Synchroniser
+a mutex, as shown in Code Block~\ref{lst:spanning}. This structure is consumed by the Synchroniser
 to filter delay measurements and by higher-level components to derive forwarding decisions.
 
 \begin{lstlisting}[language=C,
@@ -989,7 +989,7 @@ field~\cite{morais2024synchronization}.}
 \end{figure}
 \bigskip
 
-The updated structure is shown in Listing~\ref{lst:matrix-ana}. When a node receives a beacon,
+The updated structure is shown in Code Block~\ref{lst:matrix-ana}. When a node receives a beacon,
 it records the sender's MAC address in a shared-memory table indexed by node identifier. The
 address is retained only while the corresponding link remains active.
 
