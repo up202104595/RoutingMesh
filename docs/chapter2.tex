@@ -53,7 +53,7 @@ pre-existing infrastructure. Each device is simultaneously a communication
 endpoint and a potential relay for traffic destined to other nodes. When two
 nodes are not within direct radio range, packets can still reach their
 destination by traversing one or more intermediate relay nodes, a mechanism
-known as multi-hop forwarding.
+known as multi-hop forwarding (Figure~\ref{fig:manet}).
 
 A Mobile Ad-hoc Network (MANET) extends this concept to scenarios where nodes
 move freely~\cite{conti2014mobile}. Node mobility causes the set of available
@@ -62,6 +62,17 @@ disappear moments later as a node moves out of radio range, and new links
 appear when nodes move into range of each other. Routing protocols must
 therefore adapt continuously, detecting link failures and computing alternative
 paths without any centralised coordinator.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{manet}
+\caption{A multi-hop mobile ad-hoc network. When the source (S) and destination
+(D) are beyond direct radio range, traffic reaches D through intermediate relay
+nodes, along the highlighted route S\,$\to$\,A\,$\to$\,B\,$\to$\,D. Node mobility
+makes the topology dynamic: as a node moves, existing links break (B\,$\to$\,F)
+and new ones appear, so the routes must be recomputed continuously.}
+\label{fig:manet}
+\end{figure}
 
 MANETs impose additional constraints beyond those of static ad-hoc
 networks~\cite{eltahlawy2023survey,xiang2018performance}.
