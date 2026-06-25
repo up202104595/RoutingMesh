@@ -36,14 +36,23 @@
 \usepackage{float}      % posicionamento [H]
 \usepackage{placeins}   % \FloatBarrier
 
-%% Estilo dos blocos de código (usado nos Listings do Capítulo 3)
+%% Estilo dos blocos de código (usado nos Listings do Capítulo 3 e Apêndice A)
+%% Fundo sombreado e réguas em cima/baixo, no estilo dos "Code Block" da referência
+\definecolor{codebg}{rgb}{0.93,0.93,0.93}
 \lstset{
   basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
   breaklines=true,
-  frame=single,
+  frame=tb,
+  framerule=0.8pt,
   numbers=left,
   numberstyle=\tiny,
-  tabsize=4
+  numbersep=10pt,
+  tabsize=4,
+  captionpos=b,
+  showstringspaces=false,
+  xleftmargin=2em,
+  framexleftmargin=2em
 }
 
 %% TIP: use folder ``figures'' to keep all your figures

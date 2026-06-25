@@ -138,20 +138,23 @@ Raspberry Pi~5 and a Pi Camera Module~v2 on a pan/tilt mount.}
 \subsection{Network and Software Configuration}
 \label{subsec:netconfig}
 
-Table~\ref{tab:netconfig} lists the address assignments. Each node sets its
-wireless interface to ad-hoc mode on channel~6, assigns a physical address,
-brings up the TUN interface with a mesh address, and enables IP forwarding.
+Table~\ref{tab:netconfig} lists the active nodes with their hardware model and
+address assignments. Each node sets its wireless interface to ad-hoc mode on
+channel~6, assigns a physical address in the \texttt{172.20.10.0/28} plane,
+brings up the TUN interface with a mesh address in \texttt{10.0.0.0/24}, and
+enables IP forwarding.
 
 \begin{table}[h]
 \centering
-\caption{Network address assignments}
+\caption{Network information of the active nodes}
 \label{tab:netconfig}
-\begin{tabular}{lccc}
+\begin{tabular}{lllll}
 \toprule
-\textbf{Interface} & \textbf{N1} & \textbf{N2} & \textbf{N3} \\
+\textbf{Node} & \textbf{Model} & \textbf{Physical IP} & \textbf{Mesh IP} & \textbf{MAC Address} \\
 \midrule
-\texttt{wlan0} (physical) & \texttt{172.20.10.1} & \texttt{172.20.10.2} & \texttt{172.20.10.3} \\
-\texttt{tun} (mesh)       & \texttt{10.0.0.1}    & \texttt{10.0.0.2}    & \texttt{10.0.0.3}    \\
+N1 (Robot)        & AlphaBot2-Pi / RPi~5  & \texttt{172.20.10.1} & \texttt{10.0.0.1} & \texttt{dc:a6:32:4b:1e:7a} \\
+N2 (Relay)        & Raspberry Pi~5        & \texttt{172.20.10.2} & \texttt{10.0.0.2} & \texttt{e4:5f:01:8c:3d:b2} \\
+N3 (Base Station) & Laptop (Ubuntu 22.04) & \texttt{172.20.10.3} & \texttt{10.0.0.3} & \texttt{94:e6:f7:0a:55:cd} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -259,10 +262,10 @@ Because all nodes share a collision domain, a direct-link failure is induced
 logically rather than physically. At the moment of failure, the following
 rules are applied on N3:
 
-\begin{verbatim}
+\begin{lstlisting}[language=bash]
 iptables -I INPUT  1 -s 172.20.10.1 -j DROP
 iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP
-\end{verbatim}
+\end{lstlisting}
 
 These rules discard, at the IP layer, every frame to and from N1's physical
 address, making the direct link invisible to N3's TDMA framework and to the

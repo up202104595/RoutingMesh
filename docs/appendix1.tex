@@ -10,30 +10,9 @@ collects, in one place, the steps that the deployment scripts of this work
 (\texttt{adhoc-start.sh} and the node software) perform automatically, so that
 the setup can be reproduced on a fresh system.
 
-%% -----------------------------------------------------------------------
-\section{Active Nodes}
-\label{sec:app-nodes}
-
-Table~\ref{tab:app-nodes} lists the active nodes of the testbed, with their
-role, hardware model, the physical address assigned to the wireless interface
-(\texttt{wlan0}, in the \texttt{172.20.10.0/28} ad hoc plane), the mesh address
-assigned to the TUN interface (in the \texttt{10.0.0.0/24} overlay), and the MAC
-address of the wireless interface.
-
-\begin{table}[h]
-\centering
-\caption{Network information of the active nodes}
-\label{tab:app-nodes}
-\begin{tabular}{lllll}
-\toprule
-\textbf{Node} & \textbf{Model} & \textbf{Physical IP} & \textbf{Mesh IP} & \textbf{MAC Address} \\
-\midrule
-N1 (Robot)        & AlphaBot2-Pi / RPi~5 & 172.20.10.1 & 10.0.0.1 & \texttt{xx:xx:xx:xx:xx:xx} \\
-N2 (Relay)        & Raspberry Pi~5       & 172.20.10.2 & 10.0.0.2 & \texttt{xx:xx:xx:xx:xx:xx} \\
-N3 (Base Station) & Laptop (Ubuntu 22.04)& 172.20.10.3 & 10.0.0.3 & \texttt{xx:xx:xx:xx:xx:xx} \\
-\bottomrule
-\end{tabular}
-\end{table}
+The active nodes of the testbed, with their role, hardware model, physical and
+mesh addresses, and MAC addresses, are listed in Table~\ref{tab:netconfig} of
+Chapter~\ref{chap:evaluation}.
 
 %% -----------------------------------------------------------------------
 \section{Configuration of Ad Hoc Interfaces}
