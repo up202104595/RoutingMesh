@@ -57,6 +57,10 @@
   framexleftmargin=2em
 }
 
+%% Call the code listings "Code Block" (caption prefix and list title)
+\renewcommand{\lstlistingname}{Code Block}             % e.g. "Code Block 2.1: ..."
+\renewcommand{\lstlistlistingname}{List of Code Blocks} % title of the index
+
 %% TIP: use folder ``figures'' to keep all your figures
 %% Path to the figures directory
 \graphicspath{{./}{figures/}}
@@ -121,9 +125,8 @@
   \listoftables
   \cleardoublepage
 
-  %% List of Listings (code blocks)
-  \pdfbookmark[0]{List of Listings}{listings}
-  \renewcommand{\lstlistlistingname}{List of Listings}
+  %% List of Code Blocks
+  \pdfbookmark[0]{List of Code Blocks}{listings}
   \lstlistoflistings
   \cleardoublepage
 
