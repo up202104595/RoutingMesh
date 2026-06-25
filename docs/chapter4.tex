@@ -262,7 +262,7 @@ Because all nodes share a collision domain, a direct-link failure is induced
 logically rather than physically. At the moment of failure, the following
 rules are applied on N3:
 
-\begin{lstlisting}[language=bash]
+\begin{lstlisting}[language=bash,caption={Inducing a logical direct-link failure at node N3 via iptables},label=lst:linkfail]
 iptables -I INPUT  1 -s 172.20.10.1 -j DROP
 iptables -I OUTPUT 1 -d 172.20.10.1 -j DROP
 \end{lstlisting}

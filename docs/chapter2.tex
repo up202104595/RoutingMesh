@@ -35,7 +35,7 @@ random backoff reduces the probability that two nodes attempt to transmit
 simultaneously, but it does not eliminate it: when two nodes independently
 select the same backoff value, their transmissions collide.
 
-A subtler problem arises from the limited range of wireless radios. Two nodes
+A more subtle problem arises from the limited range of wireless radios. Two nodes
 that are each within range of a common third node may be out of range of each
 other, so neither can detect the other's transmissions. When both transmit
 simultaneously, the frames collide at the common node without either sender
@@ -124,7 +124,7 @@ settings~\cite{oliveira2011loose}.
 
 \subsection{TDMA}
 
-Time Division Multiple Access (TDMA) is a channel-sharing protocol that
+TDMA is a channel-sharing protocol that
 partitions time into a repeating sequence of rounds, each subdivided into
 $N$ equal slots. Every node in the network is assigned one unique slot per
 round and is permitted to transmit data only within that slot. Because

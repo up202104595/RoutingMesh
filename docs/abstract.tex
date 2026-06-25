@@ -13,6 +13,17 @@ autonomously organize themselves into mobile ad-hoc networks, where each element
 functions simultaneously as information source, recipient, and data relay,
 enabling distant robots to communicate through multiple intermediate hops.
 
+The medium-access layer of the network used in this work is governed by
+RA-TDMAs+, a reconfigurable and adaptive Time Division Multiple Access protocol
+developed at the Faculty of Engineering of the University of Porto, within the
+research group led by Prof. Lu\'{i}s Almeida. RA-TDMAs+ provides collision-free
+channel access by assigning each node an exclusive time slot in a periodic
+frame, keeps the nodes aligned through relative synchronisation without relying
+on a global clock, and disseminates a connectivity matrix among the nodes by
+means of periodic beacons. What the protocol does not provide is a routing
+layer: a mechanism that turns this connectivity information into forwarding
+decisions so that traffic can traverse the network across multiple hops.
+
 The main challenge in these networks is their intrinsically dynamic nature: as
 robots move, communication links continuously establish and break, requiring the
 routing system to constantly adapt routes to maintain active communication flows.
@@ -25,10 +36,10 @@ This work presents an alternative architecture based on network layer routing,
 integrated with the Linux kernel routing subsystem. The approach offers greater
 robustness through proven kernel code, better observability through standard
 tools, and explicit failure detection with bounded recovery time. The system uses
-the connectivity information already distributed by the RA-TDMAs+ protocol to
-compute routes automatically, recomputing them whenever it detects a change in the
-network topology, and separates a UDP control plane for the topology beacons from
-a TCP data plane for the application traffic.
+the connectivity information already distributed by RA-TDMAs+ to compute routes
+automatically, recomputing them whenever it detects a change in the network
+topology, and separates a UDP control plane for the topology beacons from a TCP
+data plane for the application traffic.
 
 The system was implemented and validated on a physical three-node testbed, in
 which a mobile robot streams live video to a base station and an intermediate node
@@ -42,4 +53,4 @@ robotic applications, combining reliability, observability, and ease of
 integration with existing systems.
 
 \textbf{Keywords:} mobile ad-hoc networks, autonomous robotics, multi-hop
-communication, dynamic routing, distributed systems
+communication, RA-TDMAs+, dynamic routing, distributed systems
