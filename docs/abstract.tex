@@ -1,0 +1,45 @@
+%% abstract.tex: abstract (EN)
+%% -------------------------------------------------------------
+
+\vspace{1cm}
+
+\chapter*{Abstract}
+
+The increasing deployment of autonomous robot teams in complex missions, from
+search and rescue operations to remote industrial inspections, fundamentally
+depends on these systems' ability to communicate reliably in environments where
+network infrastructure is unavailable. In such situations, robots must
+autonomously organize themselves into mobile ad-hoc networks, where each element
+functions simultaneously as information source, recipient, and data relay,
+enabling distant robots to communicate through multiple intermediate hops.
+
+The main challenge in these networks is their intrinsically dynamic nature: as
+robots move, communication links continuously establish and break, requiring the
+routing system to constantly adapt routes to maintain active communication flows.
+Previous work established solid foundations in this area, demonstrating functional
+multi-hop routing on actual mobile robots. However, approaches at the data link
+layer present limitations in terms of debugging complexity and integration with
+standard networking tools.
+
+This work presents an alternative architecture based on network layer routing,
+integrated with the Linux kernel routing subsystem. The approach offers greater
+robustness through proven kernel code, better observability through standard
+tools, and explicit failure detection with bounded recovery time. The system uses
+the connectivity information already distributed by the RA-TDMAs+ protocol to
+compute routes automatically, recomputing them whenever it detects a change in the
+network topology, and separates a UDP control plane for the topology beacons from
+a TCP data plane for the application traffic.
+
+The system was implemented and validated on a physical three-node testbed, in
+which a mobile robot streams live video to a base station and an intermediate node
+relays the traffic when the direct link fails. The evaluation measured routing
+convergence after a link failure, round-trip latency, video throughput, and the
+regularity of the stream, and confirmed that the nodes keep to their TDMA slots,
+for both the periodic beacons and the continuous video, with the relay leaving
+latency, throughput and timing essentially unchanged. The results show that
+network layer routing is a robust and fully functional alternative for real
+robotic applications, combining reliability, observability, and ease of
+integration with existing systems.
+
+\textbf{Keywords:} mobile ad-hoc networks, autonomous robotics, multi-hop
+communication, dynamic routing, distributed systems
