@@ -407,9 +407,21 @@ Figure~\ref{fig:trafico} shows the two traffic paths and the routing tables that
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{trafico}
-\caption{Separation of application traffic (Table~100) and relay traffic (Table~200).}
+\caption{Separation of locally originated application traffic (via Table~100) and relayed transit traffic (via Table~200).}
 \label{fig:trafico}
 \end{figure}
+
+Three routing tables are involved, each with a distinct role, and it is worth
+stating them together before the detailed rules to avoid confusion. Table~100
+holds a single default route through \texttt{tun\textit{id}} and exists only to
+divert locally generated application traffic into the TUN interface, so that the
+framework can capture and transport it. The main table holds the per-destination
+application next-hop routes installed by the Routing module, which determine the
+next hop toward each mesh destination for traffic originated by the local node.
+Table~200 holds the per-destination host routes used when a relay node forwards
+transit traffic back out on \texttt{wlan0}. The first is established once at
+startup by the TUN module, while the main-table and table~200 entries are
+maintained by the Routing module and updated on every topology change.
 
 \subsection{IP Forwarding and Interface Setup}
 
@@ -645,32 +657,35 @@ transparently, regardless of whether it arrived directly or through the relay.
 \subsection{Generalisation to More Hops}
 \label{subsec:more-hops}
 
-% TODO PLACEHOLDER (expand later, or move to Conclusions/Future Work):
-% - Argue that the relay step described above is hop-agnostic: each intermediate
-%   node performs the same kernel ip_forward (Table 200) on the unmodified IP
-%   datagram, so the same mechanism carries N1 -> N2 -> ... -> Nk without change.
-% - State that the system was designed for this: routing derives next hops from
-%   the MST over the full connectivity matrix, so longer paths are just more
-%   entries, not a special case.
-% - Discuss the limitations that grow with hop count (per-hop slot wait adds one
-%   frame of latency per hop; shared collision domain reduces capacity ~C/n;
-%   convergence still bounded by MAX_AGE), and note that these are inherent to
-%   single-channel TDMA multi-hop rather than to this design.
-% - FIGURE PLACEHOLDER: packet trajectory across k hops (N1 -> N2 -> ... -> Nk),
-%   showing the per-hop tun_write -> ip_forward -> wlan0 step repeating.
-% \begin{figure}[H]
-% \centering
-% \includegraphics[width=0.95\textwidth]{packet_trajectory_nhops}
-% \caption{Packet trajectory across a multi-hop path: each relay repeats the same
-% Layer~3 forwarding step, so the design generalises to an arbitrary number of hops.}
-% \label{fig:packet-trajectory-nhops}
-% \end{figure}
+Although the packet flow above was traced over a single relay, the forwarding
+mechanism is independent of the number of hops. Every intermediate node performs
+exactly the same operation. It receives the framed packet on its data plane,
+writes the unmodified IP payload into \texttt{tun\textit{id}}, and lets the
+kernel forward it out of \texttt{wlan0} toward the next physical hop through the
+host route held in table~200. Nothing in this step depends on the position of the
+node along the path or on the total path length, so the same mechanism carries a
+datagram across \mbox{N1\,$\to$\,N2\,$\to$\,N3} and across an arbitrarily longer
+chain \mbox{N1\,$\to$\,N2\,$\to$\,\ldots\,$\to$\,Nk} without any change.
 
-\textbf{[Placeholder]} The forwarding step is identical at every relay, so the
-design generalises naturally to paths longer than the three-node testbed used in
-the evaluation. A fuller discussion of multi-hop scalability, its limitations,
-and the per-hop packet trajectory is to be added here (or in the Conclusions
-chapter).
+The routing layer was designed for this from the start. Next hops are derived
+from a Depth-First Search over the Minimum Spanning Tree of the full
+connectivity matrix, which already spans every active node, so a longer path is
+simply a tree with more vertices and produces additional routing-table entries
+rather than a special case to be handled separately. No part of the algorithm,
+the data structures, or the kernel configuration assumes a three-node topology.
+
+What does grow with the hop count is governed by the TDMA structure rather than
+by the routing design. Each additional relay adds one slot of store-and-forward
+latency, because a packet that arrives during one node's slot can only be
+retransmitted in that node's next slot, so the end-to-end delay increases by
+roughly one frame period per hop. The single shared channel is also divided
+among all active nodes, so the throughput available to any one flow falls as the
+network grows, an effect inherent to a single-channel multi-hop TDMA chain
+rather than to this implementation. Convergence after a link failure, by
+contrast, remains bounded by the same node-aging timeout regardless of path
+length, because each node detects a dead neighbour independently from its own
+beacon reception. A systematic study of these effects on a larger testbed is
+left as future work (Chapter~\ref{chap:conclusions}).
 
 
 
