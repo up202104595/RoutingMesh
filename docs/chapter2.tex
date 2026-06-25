@@ -53,7 +53,12 @@ pre-existing infrastructure. Each device is simultaneously a communication
 endpoint and a potential relay for traffic destined to other nodes. When two
 nodes are not within direct radio range, packets can still reach their
 destination by traversing one or more intermediate relay nodes, a mechanism
-known as multi-hop forwarding (Figure~\ref{fig:manet}).
+known as multi-hop forwarding. This is illustrated in Figure~\ref{fig:manet}:
+the source (S) and the destination (D) lie beyond each other's radio range, so
+their traffic cannot travel in a single hop and is instead carried hop by hop
+through the intermediate relays A and B, along the highlighted route. The dashed
+circle marks the radio range of the source, which reaches A and C but not D,
+which is precisely why a relay is needed.
 
 A Mobile Ad-hoc Network (MANET) extends this concept to scenarios where nodes
 move freely~\cite{conti2014mobile}. Node mobility causes the set of available
@@ -61,7 +66,9 @@ wireless links to change continuously: a link that exists at one moment may
 disappear moments later as a node moves out of radio range, and new links
 appear when nodes move into range of each other. Routing protocols must
 therefore adapt continuously, detecting link failures and computing alternative
-paths without any centralised coordinator.
+paths without any centralised coordinator. This dynamic behaviour is also
+visible in Figure~\ref{fig:manet}, where node F is moving away and its link to B
+is breaking, forcing any route that relied on it to be recomputed.
 
 \begin{figure}[h]
 \centering
