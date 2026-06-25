@@ -3,34 +3,58 @@
 \chapter{Conclusions and Future Work}
 \label{chap:conclusions}
 
-This dissertation set out to add dynamic, multi-hop routing to the RA-TDMAs+
-framework while preserving its TDMA slot discipline, and to do so in a way that
-is reliable and observable enough for a real teleoperation link. The system
-developed here meets that goal: it routes at Layer~3 over a TUN overlay, carries
-the video on a TCP data plane separated from the UDP control beacons, and adds
-per-link quality monitoring and a per-slot byte budget to the routing and
-transmission path. The experimental evaluation of Chapter~\ref{chap:evaluation}
-showed that the control channel is responsive and loss-free, that the video is
-delivered at full rate, that recovery through the relay after a link failure is
-automatic, and, centrally, that the nodes keep to their TDMA slots for both
-periodic beacons and continuous video, with the relay leaving latency,
-throughput and timing essentially unchanged.
+This dissertation set out to close a specific gap in the RA-TDMAs+ framework.
+The framework already provided collision-free, slot-based medium access and
+disseminated a connectivity matrix among the nodes, but it had no routing layer
+to turn that topology knowledge into multi-hop forwarding for arbitrary IP
+traffic (Section~\ref{sec:problem}). The objective set out in
+Chapter~\ref{chap:intro} was to supply that missing layer: a routing mechanism
+that enables peer-to-peer IP communication between any two nodes regardless of
+the current topology, while leaving intact the TDMA slot discipline on which the
+whole framework rests. Chapter~\ref{chap:implementation} described the design of
+such a mechanism and Chapter~\ref{chap:evaluation} validated it on real
+hardware. This section draws the overall conclusions; the directions the work
+opens up are then developed under Future Work.
 
-Taken together, these results show that the system is a robust and fully
-functional alternative to the Layer~2 predecessor of
-Morais~\cite{morais2024synchronization}. It follows a different architectural
-route, routing at Layer~3 with kernel forwarding over a TCP data plane, and it
-was proven on real hardware to match that approach at the TDMA level while
-gaining reliable in-order delivery, standard observability, and a relayed stream
-that stayed stable across every experiment. It is, in short, a different and more
-robust way of solving the same problem.
+\section{Conclusions}
+\label{sec:conclusions}
 
-The work also exposed, honestly, the limits of the chosen design, and these
-define the most useful directions for future work. Two stand out. The first is
-tighter control over \emph{when} data is actually sent. The second is a stronger
-convergence guarantee for the case in which the lightweight beacons outlive a
-broken TCP data plane. Both would be reinforced by a physical-layer link-quality
-signal such as RSSI, which the current hardware did not allow us to use.
+The specific objectives defined in Chapter~\ref{chap:intro} were met. A
+link-quality metric derived from TDMA beacon-reception statistics was defined and
+used both to weight the spanning tree and to trigger relay activation; a
+topology-aware routing algorithm derives next-hop decisions from a Minimum
+Spanning Tree computed over that graph and installs the resulting routes into the
+Linux kernel routing table over Netlink; the relay forwarding was integrated with
+the kernel's own IP-forwarding engine through a dual routing-table architecture,
+so that transit traffic is moved between interfaces by the kernel without ever
+entering user space; and the communication stack was separated into a UDP control
+plane for the topology beacons and a TCP data plane for application data, giving
+reliable in-order delivery of video without modifying the beacon mechanism
+inherited from the base framework. The complete system was then validated through
+practical experimentation, which confirmed that these parts work together as
+intended from end to end.
+
+The significance of the result is as much architectural as it is quantitative.
+By routing at Layer~3 with kernel forwarding over a TCP data plane, the system
+reaches the same TDMA-level behaviour as the earlier Layer~2 approach of
+Morais~\cite{morais2024synchronization} while operating entirely through standard
+operating-system interfaces. The forwarding path is visible to ordinary IP tools,
+the data plane delivers video reliably and in order, and the relay is, in effect,
+transparent to the application. The system therefore stands as a distinct and
+more observable alternative to the Layer~2 predecessor: it solves the same
+multi-hop problem by different means and shows that a kernel-integrated,
+connection-oriented data plane can coexist with strict TDMA slotting rather than
+forcing a choice between the two. For the scenario that motivated the work, a
+mobile robot streaming live video to a remote operator over a network the nodes
+build and maintain themselves, this is the outcome that matters: when a direct
+link is lost, connectivity that a single-hop system could not have kept is
+restored automatically and the stream continues.
+
+The same evaluation that confirmed the design also made clear where it can be
+taken further. The objectives were met within deliberate engineering trade-offs,
+and exercising the system, on the bench and then in motion, brought out which of
+those trade-offs are the most worthwhile to revisit. The remainder of this
+chapter develops these directions.
 
 
 %% -----------------------------------------------------------------------
