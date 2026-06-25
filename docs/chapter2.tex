@@ -835,8 +835,7 @@ consistent view of the full network topology through the MATRIX beacon exchanged
 beginning of each slot. This property has direct implications for the selection of a routing
 approach, as analysed by Morais~\cite{morais2024synchronization}.
 
-\paragraph{Reactive protocols.}
-Flooding a RREQ to discover routes is redundant when the topology is already known at every
+For reactive protocols, flooding a RREQ to discover routes is redundant when the topology is already known at every
 node from the MATRIX beacon. Moreover, in a TDMA network each hop of a RREQ flood
 must wait for the transmitting node's assigned slot before the request can be forwarded. A
 three-hop discovery therefore requires at least three complete frame periods to complete. At a
@@ -845,8 +844,7 @@ discovery, which is unacceptable for real-time video teleoperation. Additionally
 approach does not leverage the topology information that RA-TDMAs+ already disseminates,
 wasting the infrastructure that the medium-access layer has already established.
 
-\paragraph{Proactive protocols.}
-The periodic sharing of the connectivity matrix in RA-TDMAs+ is itself a proactive topology
+For proactive protocols, the periodic sharing of the connectivity matrix in RA-TDMAs+ is itself a proactive topology
 exchange, so proactive routing is the natural fit. However, standard proactive protocols
 introduce redundancy. OLSR's Hello messages duplicate the neighbour-discovery function
 already performed by the MATRIX beacon; the MPR selection mechanism reduces flooding
@@ -855,8 +853,7 @@ where nearly all nodes are within two hops of each other. DSDV requires nodes to
 routing table in addition to the MATRIX beacon, increasing the size of each slot transmission
 without adding information that is not already present in the connectivity matrix.
 
-\paragraph{Network size and computation time.}
-An additional constraint comes from the TDMA slot structure. With a fixed round period $T$
+A further consideration is network size and computation time. An additional constraint comes from the TDMA slot structure. With a fixed round period $T$
 and $N$ active nodes, each slot occupies $T/N$ seconds. As $N$ grows, both the slot duration
 and the transmission window available for data shrink. The routing computation must therefore
 complete within the processing window at the start of each slot, before the transmission phase
@@ -864,8 +861,7 @@ begins. Any algorithm that is too costly in time or processing would reduce the 
 transmission window, increasing packet loss. This imposes a preference for algorithms with
 low time complexity.
 
-\paragraph{Algorithm selection.}
-Three graph algorithms are applicable to the connectivity matrix: Prim's algorithm for the
+Turning to algorithm selection, three graph algorithms are applicable to the connectivity matrix: Prim's algorithm for the
 MST, Dijkstra's algorithm~\cite{dijkstra1959note} for shortest paths, and the Bellman-Ford
 algorithm used by DSDV.
 Dijkstra's and Prim's both have $O(N^2)$ time complexity on an adjacency matrix, while

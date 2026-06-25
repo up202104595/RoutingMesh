@@ -363,37 +363,31 @@ Section~\ref{sec:routing-applicability}. The Routing module executes as a dedica
 driven by topology-change events. Figure~\ref{fig:routing-module} shows its execution cycle,
 which repeats each time the mesh connectivity changes.
 
-\textbf{Wait for event.} The module blocks on the event queue until the Event Handler
-delivers a topology-change notification. Such a notification is issued whenever the
-Topology-Tracking module detects a node joining or leaving the mesh, causing the MATRIX
-connectivity matrix to change.
-
-\textbf{Read active nodes and Spanning Tree from shared memory.} On wake-up, the module
-reads the current set of active node identifiers and the Minimum Spanning Tree from the
-shared-memory regions maintained by the Topology-Tracking module. Both values are
-protected by \texttt{g\_matrix\_mutex} to prevent a torn read during a concurrent update.
-
-\textbf{Compute next hop.} A Depth-First Search~(DFS) is performed on the Spanning Tree,
-rooted at the local node. For each reachable destination the DFS records the first-hop
-neighbour through which the destination is reached. The set of destinations associated with
-each first-hop neighbour is sorted by node identifier using \texttt{qsort}, producing the
-secondary linked list for that primary entry.
-
-\textbf{Update routing table.} The sorted DFS output is compared against the current
-linked-list routing table in a single linear scan. Nodes present in the new output but absent
-from the existing list are inserted; nodes in the list but absent from the new output are
-removed. Unchanged entries are left untouched, keeping the number of list operations
-proportional to the size of the topology change rather than the total network size.
-
-\textbf{Update kernel routes.} For every modified entry in the routing table, the module
-installs or removes host routes in the Linux kernel. Two routes are installed per destination:
-one in the main routing table for application-originated traffic, and one in policy table~200
-for relay-forwarded traffic. This step is described in detail in
-Section~\ref{sec:kernel-config}.
-
-\textbf{Sleep.} After all kernel routes are updated, the module sleeps for a short settling
-interval before processing the next event, preventing route flapping during rapid topology
-transients.
+The cycle repeats each time the mesh connectivity changes and proceeds through a
+fixed sequence of steps. The module first waits for an event, blocking on the
+event queue until the Event Handler delivers a topology-change notification,
+which is issued whenever the Topology-Tracking module detects a node joining or
+leaving the mesh and the MATRIX connectivity matrix changes. On wake-up, it reads
+the current set of active node identifiers and the Minimum Spanning Tree from the
+shared-memory regions maintained by the Topology-Tracking module, both protected
+by \texttt{g\_matrix\_mutex} to prevent a torn read during a concurrent update.
+It then computes the next hop with a Depth-First Search (DFS) on the Spanning Tree
+rooted at the local node: for each reachable destination the DFS records the
+first-hop neighbour through which it is reached, and the set of destinations
+associated with each first-hop neighbour is sorted by node identifier using
+\texttt{qsort} to produce the secondary linked list for that primary entry. The
+routing table is then updated by comparing the sorted DFS output against the
+current linked-list routing table in a single linear scan, inserting nodes present
+in the new output but absent from the list, removing nodes present in the list but
+absent from the output, and leaving unchanged entries untouched, so that the number
+of list operations is proportional to the size of the topology change rather than
+the total network size. For every modified entry the module then updates the kernel
+routes, installing or removing two host routes per destination, one in the main
+routing table for application-originated traffic and one in policy table~200 for
+relay-forwarded traffic, as described in detail in
+Section~\ref{sec:kernel-config}. Finally, the module sleeps for a short settling
+interval before processing the next event, which prevents route flapping during
+rapid topology transients.
 
 When a packet must be forwarded, \texttt{routing\_manager\_lookup()} traverses the primary
 linked list and searches each secondary list for the destination identifier. The first matching
@@ -604,7 +598,6 @@ correct next-hop for each destination.
 This section traces a video packet from source application to destination, covering both
 the direct case (two nodes) and the relay case (three nodes).
 
-\paragraph{Direct delivery.}
 Figure~\ref{fig:endtoend2} shows the direct case where source and destination are
 neighbours. The source application writes an IP packet to \texttt{tun0}; the TUN reader
 captures it and pushes it to the transmission queue; during its TDMA slot the transmitter
@@ -619,8 +612,7 @@ delivers it to the destination application via \texttt{tun0}.
 \label{fig:endtoend2}
 \end{figure}
 
-\paragraph{Relay delivery.}
-Figure~\ref{fig:endtoend} shows the three-node relay case.
+Figure~\ref{fig:endtoend} shows the three-node relay case, traced node by node below.
 
 \begin{figure}[H]
 \centering
@@ -629,16 +621,14 @@ Figure~\ref{fig:endtoend} shows the three-node relay case.
 \label{fig:endtoend}
 \end{figure}
 
-\paragraph{Source node.}
-The video application writes IP packets addressed to the destination into \texttt{tun0}. The
+At the source node, the video application writes IP packets addressed to the destination into \texttt{tun0}. The
 TUN reader thread captures each packet, extracts the destination identifier from the IP
 header, and pushes the packet into the transmission queue. During the source node's TDMA
 slot, the transmitter thread pops the packet, calls \texttt{routing\_manager\_lookup()} to
 obtain the next-hop peer ID, and sends the framed packet over the TCP connection to that
 peer. If the slot boundary is reached, remaining packets are held for the following round.
 
-\paragraph{Relay node.}
-The \texttt{tcp\_rx\_peer\_loop} thread receives the framed packet, updates the PDR estimate
+At the relay node, the \texttt{tcp\_rx\_peer\_loop} thread receives the framed packet, updates the PDR estimate
 for the source link, and inspects the destination IP address. Because the destination is not
 the local node, the IP payload is written to \texttt{tun0} via \texttt{tun\_write()}. From
 there the kernel's own IP forwarding engine takes over: the policy rule for traffic
@@ -648,8 +638,7 @@ next hop. The relay therefore forwards the datagram at the network layer, withou
 re-queueing it for the framework's TCP data plane, so the forwarded packet travels on the
 air as a plain IP datagram rather than re-encapsulated framework traffic.
 
-\paragraph{Destination node.}
-The destination receives the forwarded IP datagram on \texttt{wlan0} and the kernel delivers
+At the destination node, the forwarded IP datagram is received on \texttt{wlan0} and the kernel delivers
 it to the application through \texttt{tun0}. The application thus receives the video stream
 transparently, regardless of whether it arrived directly or through the relay.
 
