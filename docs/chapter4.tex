@@ -1565,6 +1565,23 @@ Compared with the earlier Layer~2 approach, the two achieve the same
 slot-level behaviour. The Layer~2 design recovers from a failure slightly
 faster, because it does not have to re-establish a connection, whereas the
 Layer~3 design gains reliability, observability with standard tools, and a
-stream that stayed stable throughout every experiment. The remaining
-limitations, faster recovery and a fuller study of the relay under heavier
-multi-hop load, are left as directions for future work.
+stream that stayed stable throughout every experiment. The overall outcome is a
+robust, fully functional system, a different and more robust alternative to the
+Layer~2 predecessor, proven to work end to end on real hardware.
+
+The evaluation was equally honest about what remains open, and several of these
+points were not tested within the time available. Recovery could be made faster,
+and the relay deserves a fuller study under heavier, longer multi-hop load.
+Beyond raw speed, two improvements would harden the system further. The first is
+tighter control over when data is actually placed on the air, so that the bounded
+slot incursions of Section~\ref{subsubsec:video-slot} are eliminated rather than
+merely contained. The second is a convergence guarantee for the asymmetric
+failure seen in the mobility demonstration (Section~\ref{subsec:res-demo}), where
+the lightweight beacons outlived the broken TCP data plane and the topology
+briefly believed a dead link was healthy. Both would be reinforced by a
+physical-layer link-quality signal such as RSSI feeding the MST. Using RSSI was
+not possible here because the Raspberry Pi adapters do not expose it reliably in
+ad-hoc mode, and the measurement is itself somewhat unstable, but combined with
+the packet-delivery metric it would let the routing layer anticipate a failing
+link rather than wait for it to age out. These directions are developed in
+Chapter~\ref{chap:conclusions}.

@@ -16,8 +16,21 @@ automatic, and, centrally, that the nodes keep to their TDMA slots for both
 periodic beacons and continuous video, with the relay leaving latency,
 throughput and timing essentially unchanged.
 
+Taken together, these results show that the system is a robust and fully
+functional alternative to the Layer~2 predecessor of
+Morais~\cite{morais2024synchronization}. It follows a different architectural
+route, routing at Layer~3 with kernel forwarding over a TCP data plane, and it
+was proven on real hardware to match that approach at the TDMA level while
+gaining reliable in-order delivery, standard observability, and a relayed stream
+that stayed stable across every experiment. It is, in short, a different and more
+robust way of solving the same problem.
+
 The work also exposed, honestly, the limits of the chosen design, and these
-define the most useful directions for future work.
+define the most useful directions for future work. Two stand out. The first is
+tighter control over \emph{when} data is actually sent. The second is a stronger
+convergence guarantee for the case in which the lightweight beacons outlive a
+broken TCP data plane. Both would be reinforced by a physical-layer link-quality
+signal such as RSSI, which the current hardware did not allow us to use.
 
 
 %% -----------------------------------------------------------------------
@@ -85,7 +98,7 @@ this work and is left as a direct continuation of it.
 
 Recovery after a link failure is dominated by the node-aging timeout
 (\texttt{MAX\_AGE} $= 2.0$\,s) used to detect that the direct link is dead
-(Section~\ref{subsec:res-convergence}); the routing computation itself is
+(Section~\ref{subsec:res-convergence}). The routing computation itself is
 negligible. Reducing \texttt{MAX\_AGE} would proportionally speed up recovery,
 at the cost of robustness to transient beacon loss in the shared collision
 domain. Replacing the fixed timeout with an adaptive scheme that reacts to the
@@ -93,13 +106,63 @@ recent beacon-loss rate, and reducing the connection-resumption tail of the TCP
 data plane (Section~\ref{subsec:res-convergence}), would together lower the
 recovery time without sacrificing topology stability.
 
+A more fundamental gap concerns the case where a link degrades unevenly across
+the two planes. The lightweight UDP beacons can keep arriving over a weak link
+after the heavier TCP data plane has already broken
+(Section~\ref{subsec:res-demo}), so the topology can still believe the direct
+link is healthy while the operator has already lost the video and the command
+channel. In that window the system does not reroute, because the aging timeout
+is still counting and, from the control plane's point of view, no beacons have
+been missed. Closing this gap requires a \emph{data-plane liveness signal}.
+Detecting that the TCP connection to the current next hop has stalled or failed,
+and treating that, like a missed beacon, as evidence to down-weight or suppress
+the link and force the MST to reroute, would react to the failure the operator
+actually experiences rather than waiting for the beacons to age out
+independently. This is implementable within the current architecture, because the
+data plane already observes its own send failures, and it would turn the present
+best-effort recovery into a convergence guarantee for the asymmetric-failure
+case. A related housekeeping point belongs here too. On a reroute the system does
+not currently flush, in a deliberate and deterministic way, the packets still
+buffered for the old next hop. A route-change flush routine exists but is not
+wired into the reroute path, so today stale frames are discarded only implicitly,
+when the dead socket is eventually closed, rather than cleared at the instant the
+route changes. Making this flush explicit at the moment of reroute would remove a
+second small source of post-failure disturbance.
+
+\subsection{Physical-Layer Link Quality and RSSI}
+\label{subsec:fw-rssi}
+
+The routing metric used here is the per-link packet delivery ratio (PDR) derived
+from beacon-reception statistics (Section~\ref{subsec:res-slots}), which drives
+both the MST edge weights and relay activation. PDR is a robust, protocol-level
+signal, but it is also a lagging one. It can only register that a link is failing
+after enough beacons have already been lost, which is the same detection delay
+that dominates convergence. A physical-layer signal such as the received signal
+strength indicator (RSSI) would complement it by reacting before packets are
+actually lost. A link whose RSSI is falling is one that is about to fail, so the
+MST could pre-emptively shift weight toward a stronger path and the system could
+anticipate a break rather than merely detect it after the fact.
+
+Incorporating RSSI was attempted but proved impractical on the chosen hardware.
+The Raspberry Pi Wi-Fi adapters, when operated in ad-hoc (IBSS) mode, did not
+expose a reliable per-neighbour RSSI through the standard interfaces, so the
+metric could not be read at the granularity the routing layer needs. RSSI is in
+any case a noisy measurement, sensitive to multipath, antenna orientation and
+interference, so it would have to be filtered and combined with PDR rather than
+trusted on its own. With hardware that exposes per-link RSSI in ad-hoc mode, an
+RSSI-and-PDR composite weight on the MST is a natural and high-value extension.
+It would add anticipatory robustness to path selection and, together with the
+data-plane liveness signal described above, give the system a faster and more
+certain reaction to the link degradations that matter most for a mobile
+teleoperation link.
+
 \subsection{Multi-Hop Scalability}
 \label{subsec:fw-multihop}
 
 The evaluation used a three-node testbed, the minimum that exercises a relay.
 The forwarding step is identical at every relay (a kernel \texttt{ip\_forward}
 of the unmodified IP datagram, Section~\ref{sec:pkt-flow}), so the design
-generalises to longer paths without change; what grows with the hop count is the
+generalises to longer paths without change. What grows with the hop count is the
 per-hop slot latency and the capacity sharing inherent to a single-channel
 multi-hop chain. A systematic study on a larger testbed, ideally with nodes that
 cannot all hear one another, would characterise these effects and separate them
