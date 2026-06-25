@@ -25,6 +25,7 @@
 \usepackage{colortbl}
 \usepackage{booktabs}   % \toprule \midrule \bottomrule
 \usepackage{longtable}  % tabelas que quebram entre páginas (Lista de Acrónimos)
+\usepackage{multirow}   % \multirow nas tabelas (página dos ODS/SDG)
 
 %% Pacotes matemáticos
 \usepackage{amsmath}
@@ -99,8 +100,8 @@
 %%----------------------------------------
 \begin{Prolog}
   \include{abstract}  % the abstract
-  %\include{un-sdg}   % UN SDGs (optional - remove if not needed)
-  %\include{acknows}   % the acknowledgments
+  \include{un-sdg}    % UN SDGs (FEUP regulations)
+  \include{acknows}   % the acknowledgments
 
   %\include{quote}     % initial quotation if desired
   \cleardoublepage
