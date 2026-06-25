@@ -63,7 +63,8 @@ appear when nodes move into range of each other. Routing protocols must
 therefore adapt continuously, detecting link failures and computing alternative
 paths without any centralised coordinator.
 
-MANETs impose additional constraints beyond those of static ad-hoc networks.
+MANETs impose additional constraints beyond those of static ad-hoc
+networks~\cite{eltahlawy2023survey,xiang2018performance}.
 Nodes are typically battery-powered, so energy efficiency in protocol design
 matters. The topology can change faster than routing protocol convergence
 times, creating transient periods during which some destinations are
@@ -71,17 +72,19 @@ unreachable. Security and privacy are also concerns given the open nature of
 the medium, although these fall outside the scope of the present work.
 
 Despite these challenges, MANETs are the enabling technology for a wide range
-of operational scenarios: emergency coordination after infrastructure
-destruction, military tactical communications in contested environments, and
-teams of autonomous robots that must remain in contact while navigating freely
-through complex environments. The last scenario is the direct motivation for
-this work.
+of operational scenarios~\cite{raza2016mobile,sharmila2016survey}: emergency
+coordination after infrastructure destruction, military tactical communications
+in contested environments, integration with cyber-physical and Internet-of-Things
+deployments~\cite{guerrieri2016management}, and teams of autonomous mobile
+robots~\cite{rubio2019review} that must remain in contact while navigating
+freely through complex environments. The last scenario is the direct motivation
+for this work.
 
 \subsection{Network Layering}
 
 The networking functions relevant to this dissertation are organised according
 to the layered model shared by both the OSI reference model and the TCP/IP
-architecture. The \textbf{Physical layer} converts bits into signals
+architecture~\cite{alani2014guide}. The \textbf{Physical layer} converts bits into signals
 appropriate for the transmission medium (radio waves in the case of WiFi).
 The \textbf{Data Link layer} controls access to the shared medium through the
 MAC sub-layer and groups bits into frames; IEEE 802.11 CSMA/CA and RA-TDMAs+
@@ -112,7 +115,12 @@ external interference from nodes outside the team. The protocol is the
 product of combining the synchronisation method of RA-TDMAs~\cite{sousa2012ra}
 with the topology-tracking and membership-management mechanisms of
 RA-TDMA+~\cite{oliveira2018clockless}, taking the most effective features
-of each.
+of each. This same line of work has previously been applied to multi-hop
+routing of traffic within TDMA slots for teams of cooperating
+robots~\cite{oliveira2015multi} and to robust slot synchronisation in aerial
+multi-hop networks~\cite{pinto2018robust,ramos2018aerial}, building on earlier
+loose-synchronisation schemes for managing RF ranging in mobile ad-hoc
+settings~\cite{oliveira2011loose}.
 
 \subsection{TDMA}
 
@@ -636,8 +644,8 @@ all times. Routes are always ready for immediate use and there is no latency pen
 flow begins. The cost is that control traffic must be exchanged periodically, even during stable
 periods when no application data is being sent.
 
-\textbf{Destination-Sequenced Distance Vector (DSDV)} extends the classical Bellman-Ford
-algorithm with a sequence number mechanism that prevents routing loops and stale entries.
+\textbf{Destination-Sequenced Distance Vector (DSDV)}~\cite{perkins1994highly} extends the
+classical Bellman-Ford algorithm with a sequence number mechanism that prevents routing loops and stale entries.
 Each routing table entry carries a sequence number assigned by the destination node; when a
 node receives an update it retains the entry with the higher sequence number, ensuring that
 more recent information always takes precedence. Updates are broadcast periodically as either
@@ -648,8 +656,8 @@ network size regardless of whether anything has changed, making it inefficient d
 periods. Its main advantages are immediate route availability, low implementation complexity,
 and rapid convergence after a link failure.
 
-\textbf{Optimised Link State Routing (OLSR)} is a proactive link-state protocol that reduces
-control traffic through Multipoint Relays (MPRs). Each node selects a minimal subset of its
+\textbf{Optimised Link State Routing (OLSR)}~\cite{jacquet2001optimized} is a proactive
+link-state protocol that reduces control traffic through Multipoint Relays (MPRs). Each node selects a minimal subset of its
 one-hop neighbours that collectively cover all of its two-hop neighbourhood; these are its
 MPRs. Control messages are still flooded throughout the network, but only MPR nodes
 retransmit them, replacing the full flooding of classical link-state with a targeted relay that
@@ -672,8 +680,8 @@ data to send and no valid route is cached. This eliminates continuous control ov
 idle periods, but introduces a discovery delay at the start of each new flow that may be
 significant in multi-hop networks.
 
-\textbf{Dynamic Source Routing (DSR)} discovers routes by flooding a Route Request (RREQ)
-message that accumulates in its header the list of every node it traverses. When the RREQ
+\textbf{Dynamic Source Routing (DSR)}~\cite{johnson1996dynamic} discovers routes by flooding a
+Route Request (RREQ) message that accumulates in its header the list of every node it traverses. When the RREQ
 reaches the destination or an intermediate node with a valid cached route, a Route Reply
 (RREP) is returned along the reverse path, carrying the complete discovered route. Subsequent
 data packets from the source embed the full sequence of intermediate hops directly in their
@@ -688,7 +696,8 @@ disadvantages are that full-path headers increase packet overhead as hop count g
 in highly mobile networks the route cache becomes stale quickly, increasing the frequency of
 rediscoveries and therefore the effective control overhead.
 
-\textbf{Ad-hoc On-demand Distance Vector (AODV)} shares DSR's on-demand discovery model
+\textbf{Ad-hoc On-demand Distance Vector (AODV)}~\cite{perkins1999adhoc} shares DSR's on-demand
+discovery model
 using the same RREQ/RREP/RERR message types but stores only the next hop toward each
 known destination at each intermediate node, keeping routing state in per-hop tables rather
 than in packet headers. Sequence numbers borrowed from DSDV ensure that only fresh route
@@ -700,8 +709,9 @@ rediscovery.
 AODV avoids the per-packet header overhead of DSR and scales better to larger networks, but
 still incurs the discovery latency inherent to all reactive approaches. In highly mobile
 environments, the balance between route lifetime and rediscovery frequency requires careful
-parameter tuning. Table~\ref{tab:protocols} provides a summary comparison of all four
-protocols.
+parameter tuning. A large body of comparative studies benchmarks these protocols under mobility
+and varying load~\cite{aldhief2018manet,aggarwal2011performance,wheeb2022performance,hinds2013review,ramphull2021review},
+and Table~\ref{tab:protocols} provides a summary comparison of all four protocols.
 
 \begin{table}[h]
 \centering
