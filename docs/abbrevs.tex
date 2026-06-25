@@ -1,53 +1,61 @@
 %% abbrevs.tex: list of acronyms
 %% ------------------------------
 \chapter*{List of Acronyms}
+% Print the list of acronyms
 \chaptermark{LIST OF ACRONYMS}
 
-\begin{longtable}{@{}l@{\hspace{1.5em}}p{0.78\linewidth}@{}}
-\textbf{AODV}      & Ad-hoc On-Demand Distance Vector \\
-\textbf{API}       & Application Programming Interface \\
-\textbf{ARP}       & Address Resolution Protocol \\
-\textbf{CSMA/CA}   & Carrier Sense Multiple Access with Collision Avoidance \\
-\textbf{DaRTES}    & Distributed and Real-Time Embedded Systems \\
-\textbf{DEEC}      & Department of Electrical and Computer Engineering \\
-\textbf{DFS}       & Depth-First Search \\
-\textbf{DSDV}      & Destination-Sequenced Distance Vector \\
-\textbf{DSR}       & Dynamic Source Routing \\
-\textbf{FEUP}      & Faculty of Engineering of the University of Porto \\
-\textbf{GOP}       & Group of Pictures \\
-\textbf{GPS}       & Global Positioning System \\
-\textbf{IA}        & Inter-Arrival (time) \\
-\textbf{IBSS}      & Independent Basic Service Set \\
-\textbf{IEEE}      & Institute of Electrical and Electronics Engineers \\
-\textbf{IP}        & Internet Protocol \\
-\textbf{IPC}       & Inter-Process Communication \\
-\textbf{JSON}      & JavaScript Object Notation \\
-\textbf{MAC}       & Medium Access Control \\
-\textbf{MANET}     & Mobile Ad-hoc Network \\
-\textbf{MPEG-TS}   & Moving Picture Experts Group Transport Stream \\
-\textbf{MPR}       & Multipoint Relays \\
-\textbf{MST}       & Minimum Spanning Tree \\
-\textbf{OLSR}      & Optimized Link State Routing \\
-\textbf{OSI}       & Open Systems Interconnection \\
-\textbf{P2P}       & Peer-to-Peer \\
-\textbf{PDR}       & Packet Delivery Ratio \\
-\textbf{RA-TDMA}   & Reconfigurable and Adaptive Time Division Multiple Access \\
-\textbf{RA-TDMA+}  & Ad-hoc Reconfigurable and Adaptive TDMA \\
-\textbf{RERR}      & Route Error Packet \\
-\textbf{RF}        & Radio Frequency \\
-\textbf{RREP}      & Route Reply Packet \\
-\textbf{RREQ}      & Route Request Packet \\
-\textbf{RRES}      & Route Response \\
-\textbf{RSSI}      & Received Signal Strength Indicator \\
-\textbf{RTT}       & Round-Trip Time \\
-\textbf{SDGs}      & Sustainable Development Goals \\
-\textbf{SSH}       & Secure Shell \\
-\textbf{TAP}       & Network TAP (Virtual Ethernet Device) \\
-\textbf{TCP}       & Transmission Control Protocol \\
-\hypertarget{acr:TDMA}{\textbf{TDMA}} & Time Division Multiple Access \\
-\textbf{TUN}       & Network TUNnel (Virtual Point-to-Point Device) \\
-\textbf{UAV}       & Unmanned Aerial Vehicle \\
-\textbf{UDP}       & User Datagram Protocol \\
-\textbf{USB}       & Universal Serial Bus \\
-\textbf{WiFi}      & Wireless Fidelity \\
-\end{longtable}
+%% Acronyms are managed by the `acronym` package (loaded by feupteses.sty with
+%% the `printonlyused` option): an entry only appears in this list once it has
+%% been referenced in the text with \ac{KEY} (or \acs/\acl/\acf). The first
+%% \ac{KEY} prints the full form followed by the acronym and links to this list;
+%% later uses print just the acronym. Keys with non-letter characters use an
+%% explicit short form in [brackets].
+
+\begin{acronym}[RA-TDMA+] % The longest acronym goes here (for alignment)
+  \acro{AODV}{Ad-hoc On-Demand Distance Vector}
+  \acro{API}{Application Programming Interface}
+  \acro{ARP}{Address Resolution Protocol}
+  \acro{CSMACA}[CSMA/CA]{Carrier Sense Multiple Access with Collision Avoidance}
+  \acro{DaRTES}{Distributed and Real-Time Embedded Systems}
+  \acro{DEEC}{Department of Electrical and Computer Engineering}
+  \acro{DFS}{Depth-First Search}
+  \acro{DSDV}{Destination-Sequenced Distance Vector}
+  \acro{DSR}{Dynamic Source Routing}
+  \acro{FEUP}{Faculty of Engineering of the University of Porto}
+  \acro{GOP}{Group of Pictures}
+  \acro{GPS}{Global Positioning System}
+  \acro{IA}{Inter-Arrival (time)}
+  \acro{IBSS}{Independent Basic Service Set}
+  \acro{IEEE}{Institute of Electrical and Electronics Engineers}
+  \acro{IP}{Internet Protocol}
+  \acro{IPC}{Inter-Process Communication}
+  \acro{JSON}{JavaScript Object Notation}
+  \acro{MAC}{Medium Access Control}
+  \acro{MANET}{Mobile Ad-hoc Network}
+  \acro{MPEGTS}[MPEG-TS]{Moving Picture Experts Group Transport Stream}
+  \acro{MPR}{Multipoint Relays}
+  \acro{MST}{Minimum Spanning Tree}
+  \acro{OLSR}{Optimized Link State Routing}
+  \acro{OSI}{Open Systems Interconnection}
+  \acro{P2P}{Peer-to-Peer}
+  \acro{PDR}{Packet Delivery Ratio}
+  \acro{RATDMA}[RA-TDMA]{Reconfigurable and Adaptive Time Division Multiple Access}
+  \acro{RATDMAplus}[RA-TDMA+]{Ad-hoc Reconfigurable and Adaptive TDMA}
+  \acro{RERR}{Route Error Packet}
+  \acro{RF}{Radio Frequency}
+  \acro{RREP}{Route Reply Packet}
+  \acro{RREQ}{Route Request Packet}
+  \acro{RRES}{Route Response}
+  \acro{RSSI}{Received Signal Strength Indicator}
+  \acro{RTT}{Round-Trip Time}
+  \acro{SDGs}{Sustainable Development Goals}
+  \acro{SSH}{Secure Shell}
+  \acro{TAP}[TAP]{Network TAP (Virtual Ethernet Device)}
+  \acro{TCP}{Transmission Control Protocol}
+  \acro{TDMA}{Time Division Multiple Access}
+  \acro{TUN}[TUN]{Network TUNnel (Virtual Point-to-Point Device)}
+  \acro{UAV}{Unmanned Aerial Vehicle}
+  \acro{UDP}{User Datagram Protocol}
+  \acro{USB}{Universal Serial Bus}
+  \acro{WiFi}{Wireless Fidelity}
+\end{acronym}
