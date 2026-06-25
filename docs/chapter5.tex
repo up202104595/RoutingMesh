@@ -121,12 +121,18 @@ actually experiences rather than waiting for the beacons to age out
 independently. This is implementable within the current architecture, because the
 data plane already observes its own send failures, and it would turn the present
 best-effort recovery into a convergence guarantee for the asymmetric-failure
-case. A related housekeeping point belongs here too. On a reroute the system does
-not currently flush, in a deliberate and deterministic way, the packets still
-buffered for the old next hop. A route-change flush routine exists but is not
-wired into the reroute path, so today stale frames are discarded only implicitly,
-when the dead socket is eventually closed, rather than cleared at the instant the
-route changes. Making this flush explicit at the moment of reroute would remove a
+case. A related design point belongs here too, and it is already handled at the
+transport level. When a peer's TCP connection is re-established, the stale
+connection is deliberately torn down with an abortive close
+(\texttt{SO\_LINGER} set to zero), which discards the kernel's internal TCP send
+buffers so that the re-established link does not carry packets left over from the
+old, dead path. This intentionally clears the internal transport buffers at the
+moment the connection is rebuilt. What is not yet automated is the complementary
+application-level step. A route-change flush of the node's own transmit queue
+exists in the code but is not wired into the reroute path, so application-level
+frames already queued for the old next hop are dropped only when their send
+fails, rather than cleared at the instant the route changes. Wiring this flush in
+would make the buffer clearing deterministic across both layers and remove a
 second small source of post-failure disturbance.
 
 \subsection{Physical-Layer Link Quality and RSSI}
