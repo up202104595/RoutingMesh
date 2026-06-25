@@ -608,6 +608,26 @@ protocol for a MANET must therefore discover the current topology or a sufficien
 compute forwarding paths, install those paths so that packets can be forwarded hop by hop, and
 update them whenever the topology changes, all without a central coordinator.
 
+Ad-hoc routing protocols are commonly organised into a taxonomy according to how
+they structure the network and discover routes, as summarised in
+Figure~\ref{fig:routing-taxonomy}. \emph{Flat} protocols treat every node
+equally and split further into proactive (table-driven) and reactive (on-demand)
+families; \emph{hierarchical} protocols impose a cluster or zone structure to
+improve scalability; and \emph{geographical position-assisted} protocols use node
+location to guide forwarding~\cite{bhatia2022networked}. The work in this
+dissertation sits in the flat category, and the discussion below concentrates on
+the proactive and reactive families that are most relevant to a single-team TDMA
+mesh.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{adhoc_routing_taxonomy}
+\caption{Taxonomy of ad-hoc routing protocols, organised into flat
+(proactive and reactive), hierarchical, and geographical position-assisted
+families~\cite{bhatia2022networked}.}
+\label{fig:routing-taxonomy}
+\end{figure}
+
 \subsection{Routing Challenges in MANETs}
 
 The fundamental difficulty of MANET routing is adapting to an unpredictable and frequently
@@ -704,7 +724,20 @@ than in packet headers. Sequence numbers borrowed from DSDV ensure that only fre
 information is accepted, and routes that remain unused for longer than a configurable Active
 Route Timeout are removed. When a link failure is detected, RERR messages propagate
 upstream to notify affected sources, which may attempt local repair before initiating a full
-rediscovery.
+rediscovery. Figure~\ref{fig:aodv-discovery} illustrates this on-demand discovery: the source
+$S$ floods an RREQ that propagates hop by hop towards the destination $D$, each node recording
+the reverse path through the destination sequence number, and the RRES (route reply) then
+travels back along the established reverse path~\cite{bhatia2022networked}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{aodv_route_discovery}
+\caption{On-demand route discovery in AODV: the source $S$ floods a Route Request (RREQ)
+that propagates towards the destination $D$, and a Route Reply (RRES) returns along the
+established reverse path; each node is tagged with its destination sequence
+number~\cite{bhatia2022networked}.}
+\label{fig:aodv-discovery}
+\end{figure}
 
 AODV avoids the per-packet header overhead of DSR and scales better to larger networks, but
 still incurs the discovery latency inherent to all reactive approaches. In highly mobile
