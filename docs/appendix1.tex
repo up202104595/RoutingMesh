@@ -1,0 +1,164 @@
+%% appendix1.tex — Appendix A: Ad Hoc Interface Mode in Linux Systems
+
+\chapter{Ad Hoc Interface Mode in Linux Systems}
+\label{app:adhoc}
+
+This appendix documents how the wireless interface of each node is placed in
+ad hoc (IBSS) mode, how the network used throughout the evaluation is set up, and
+how the kernel routing tables that carry the mesh traffic are configured. It
+collects, in one place, the steps that the deployment scripts of this work
+(\texttt{adhoc-start.sh} and the node software) perform automatically, so that
+the setup can be reproduced on a fresh system.
+
+%% -----------------------------------------------------------------------
+\section{Active Nodes}
+\label{sec:app-nodes}
+
+Table~\ref{tab:app-nodes} lists the active nodes of the testbed, with their
+role, hardware model, the physical address assigned to the wireless interface
+(\texttt{wlan0}, in the \texttt{172.20.10.0/28} ad hoc plane), the mesh address
+assigned to the TUN interface (in the \texttt{10.0.0.0/24} overlay), and the MAC
+address of the wireless interface.
+
+\begin{table}[h]
+\centering
+\caption{Network information of the active nodes}
+\label{tab:app-nodes}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Node} & \textbf{Model} & \textbf{Physical IP} & \textbf{Mesh IP} & \textbf{MAC Address} \\
+\midrule
+N1 (Robot)        & AlphaBot2-Pi / RPi~5 & 172.20.10.1 & 10.0.0.1 & \texttt{xx:xx:xx:xx:xx:xx} \\
+N2 (Relay)        & Raspberry Pi~5       & 172.20.10.2 & 10.0.0.2 & \texttt{xx:xx:xx:xx:xx:xx} \\
+N3 (Base Station) & Laptop (Ubuntu 22.04)& 172.20.10.3 & 10.0.0.3 & \texttt{xx:xx:xx:xx:xx:xx} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% -----------------------------------------------------------------------
+\section{Configuration of Ad Hoc Interfaces}
+\label{sec:app-config}
+
+The first step is to confirm that the wireless device supports ad hoc mode.
+Assuming the interface is named \texttt{wlan0}, this is checked with:
+
+\begin{lstlisting}[language=bash]
+iw dev wlan0 info
+\end{lstlisting}
+
+The output describes the \texttt{wlan0} interface and, under the entry
+``Supported interface modes'', lists ``IBSS'' (equivalently ``Ad-Hoc'') when ad
+hoc mode is available.
+
+Before the mode can be changed, no service must be holding control of the
+interface, because an active network manager will revert manual changes. If the
+only manager is NetworkManager, the mode can be changed once it is stopped. If a
+service such as \texttt{dhcpcd} or \texttt{wpa\_supplicant} is active, it must be
+stopped or disabled first, as it would otherwise reclaim the interface and
+restrict manual configuration. The state of \texttt{dhcpcd}, for example, can be
+checked with \texttt{sudo systemctl status dhcpcd}. When \texttt{wpa\_supplicant}
+is in use, adding the line \texttt{ap\_scan=2} to
+\texttt{/etc/wpa\_supplicant/wpa\_supplicant.conf} lets the system keep scanning
+for networks even when none is configured.
+
+\subsection{Configuration with the dhcpcd Service}
+\label{subsec:app-dhcpcd}
+
+If \texttt{dhcpcd} (or a similar service) is active, there are two options:
+either disable the service and reboot, or install NetworkManager and start it
+only when needed.
+
+\begin{itemize}
+  \item \textbf{Disable dhcpcd.} Run \texttt{sudo systemctl disable dhcpcd} and
+  reboot. The interface mode can then be changed freely.
+  \item \textbf{Install NetworkManager.} Install NetworkManager and start it on
+  demand (for example from a start-up script), with \texttt{sudo systemctl start
+  NetworkManager}. This keeps an infrastructure connection available for SSH
+  access while still allowing ad hoc mode to be enabled on the same or another
+  interface when required. Code Block~\ref{lst:app-nm} installs the service and
+  its graphical front end.
+\end{itemize}
+
+\begin{lstlisting}[language=bash,caption={Installation of the NetworkManager service},label=lst:app-nm]
+sudo apt update
+sudo apt install network-manager network-manager-gnome \
+     openvpn network-manager-openvpn network-manager-openvpn-gnome -y
+\end{lstlisting}
+
+\subsection{Changing the Interface Mode to Ad Hoc}
+\label{subsec:app-mode}
+
+Once no service is managing the interface restrictively, the mode can be changed
+to ad hoc. This work uses the ESSID \texttt{manet-mesh} on channel~6, with each
+node taking the physical address \texttt{172.20.10.X}, where \texttt{X} is the
+node identifier.
+
+\paragraph{Manually.} Code Block~\ref{lst:app-manual} shows the commands used by
+the deployment script \texttt{adhoc-start.sh} to bring the interface up in ad hoc
+mode with the network used in this dissertation.
+
+\begin{lstlisting}[language=bash,caption={Setting up the ad hoc network manually},label=lst:app-manual]
+systemctl stop NetworkManager
+ip link set wlan0 down
+iwconfig wlan0 mode ad-hoc
+iwconfig wlan0 essid manet-mesh
+iwconfig wlan0 channel 6
+ip link set wlan0 up
+ip addr add 172.20.10.X/28 dev wlan0
+\end{lstlisting}
+
+\paragraph{Automatically.} On the nodes, these commands run unattended at boot
+from a \texttt{systemd} unit (\texttt{adhoc.service}) scheduled before the mesh
+software and before \texttt{wpa\_supplicant} can interfere. Alternatively, where
+no service enforces infrastructure mode, the interface can be brought up in ad
+hoc mode directly by the system's network configuration. Code
+Block~\ref{lst:app-interfaces} shows the equivalent entry in
+\texttt{/etc/network/interfaces}.
+
+\begin{lstlisting}[language=bash,caption={Static ad hoc configuration in the interfaces file (X is the node ID)},label=lst:app-interfaces]
+auto wlan0
+iface wlan0 inet static
+    address 172.20.10.X
+    netmask 255.255.255.240
+    wireless-mode ad-hoc
+    wireless-essid manet-mesh
+    wireless-channel 6
+\end{lstlisting}
+
+Even when another service overrides this file, it is still worth editing it with
+the content above, because the configuration lets the interface keep a static IP
+address of its own.
+
+%% -----------------------------------------------------------------------
+\section{Routing Tables}
+\label{sec:app-routing}
+
+On top of the ad hoc interface, the node software installs the host routes that
+carry the mesh overlay. It uses two kernel routing tables. The \emph{main} table
+holds, for every reachable mesh destination, a host route (\texttt{/32}) toward
+the current next hop, so that ordinary traffic to a \texttt{10.0.0.X} address is
+forwarded along the path chosen by the spanning tree. A separate \emph{relay}
+table (table~200) holds the routes used when this node forwards traffic on behalf
+of others, keeping transit forwarding separate from locally originated traffic.
+Both tables are populated directly through the Netlink interface rather than by
+spawning \texttt{ip} processes, which keeps each route update at roughly
+$50\,\mu$s instead of the few milliseconds an \texttt{ip route}
+fork/exec would cost.
+
+The routes installed are equivalent to the following, where \texttt{<dst>} is a
+mesh destination and \texttt{<next\_hop>} the chosen relay:
+
+\begin{lstlisting}[language=bash,caption={Equivalent routing-table entries (installed via Netlink)},label=lst:app-routes]
+# main table: host route to each mesh destination via its next hop
+ip route add 10.0.0.<dst>/32 via 10.0.0.<next_hop> dev tun
+
+# relay table (200): forwarding entries for transit traffic
+ip route add 10.0.0.<dst>/32 via 10.0.0.<next_hop> dev tun table 200
+
+# the relay table is cleared and rebuilt whenever the topology changes
+ip route flush table 200
+\end{lstlisting}
+
+When the topology changes, the relay table is flushed and rebuilt from the new
+spanning tree, while the main table entries are updated in place, so that the
+forwarding state always reflects the current routes.
