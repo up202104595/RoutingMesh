@@ -1368,7 +1368,9 @@ same 500\,kbps configuration used for the Layer~3 results, and the node-aging
 timeout at the same \texttt{MAX\_AGE} $= 2.0$\,s, to keep the comparison equal
 for equal.
 
-\textbf{Convergence.} The convergence time, measured exactly as in
+\subsubsection{Convergence}
+
+The convergence time, measured exactly as in
 Section~\ref{subsec:res-convergence} (the gap in the delivered video between the
 last packet over the direct path and the first packet forwarded through N2), is
 reported in Table~\ref{tab:l2-conv}. The re-implemented Layer~2 method recovers
@@ -1412,7 +1414,9 @@ Layer~3 (this work)         & $2.0$\,s & $\approx 0.8$\,s  & \textbf{2.77\,s} \\
 \end{tabular}
 \end{table}
 
-\textbf{Streaming stability.} The convergence figure tells only half of the
+\subsubsection{Streaming Stability}
+
+The convergence figure tells only half of the
 story, because it marks when the first relayed packet arrives, not whether the
 stream that follows is usable. Here the re-implementation exposed a genuine
 difference. After recovery, the relayed video did not settle into a smooth flow
@@ -1497,7 +1501,9 @@ both run on the same synchroniser and the same slot structure. What is worth
 discussing, then, is not where they agree but where they differ, and those
 differences are architectural rather than numerical.
 
-\textbf{Latency distribution.} The reference reports a spread, triangular RTT
+\subsubsection{Latency Distribution}
+
+The reference reports a spread, triangular RTT
 distribution, whereas this work observes a clean bimodal distribution. Both
 are manifestations of the same slot-waiting mechanism. The bimodal shape
 arises here because, with three nodes and the requester/responder slots
@@ -1505,7 +1511,9 @@ adjacent across the frame boundary, the reply either catches the next slot or
 misses it by exactly one frame, producing two discrete levels rather than a
 continuum.
 
-\textbf{Convergence.} Both designs detect a dead link the same way and through
+\subsubsection{Convergence}
+
+Both designs detect a dead link the same way and through
 the same node-aging timeout, so their recovery times are of the same order and
 the steps that follow detection are largely matched (Sections~\ref{subsec:res-convergence}
 and~\ref{subsec:l2-rerun} give the breakdown). The modest difference, about half
@@ -1528,7 +1536,9 @@ shortened, the point at which a lighter, connectionless transport at the source
 would be the natural lever. The re-run on the same testbed bears this out
 directly.
 
-\textbf{Observability and stability.} The Layer~3 approach trades convergence
+\subsubsection{Observability and Stability}
+
+The Layer~3 approach trades convergence
 speed for two practical advantages. The relay path is visible to standard IP
 tools, which simplifies debugging and operation, whereas the Layer~2 path is
 invisible at the IP layer. And, in contrast to the bursty, unstable relayed
