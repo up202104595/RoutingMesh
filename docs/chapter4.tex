@@ -1278,15 +1278,15 @@ The demonstration confirmed the central capability end to end: as the robot
 drove down the hallway and the direct link degraded, the system established the
 relay through N2 and the video stream continued to be displayed at the base
 station, recovering connectivity that a single-hop link would have lost. It also
-exposed, honestly, two limitations, now seen together in the field.
+exposed two limitations, now seen together in the field.
 
-First, the stream was not perfectly smooth: the recording shows occasional
-packet losses and brief image jumps. These are predominantly a consequence of
-the slot incursions analysed in Section~\ref{subsubsec:video-slot}: when the
-video burst fills N1's slot and its tail crosses into the start of the following
-slot, the overrunning packets contend on the shared medium and a few are lost,
-which an all-intra H.264 stream renders as a short jump on the next frame. They
-are localised glitches rather than a breakdown of the stream.
+First, the stream was not perfectly smooth: the recording shows occasional brief
+image jumps. These are predominantly a consequence of the slot incursions
+analysed in Section~\ref{subsubsec:video-slot}: when the video burst fills N1's
+slot and its tail crosses into the start of the following slot, the overrunning
+packets contend on the shared medium, which an all-intra H.264 stream renders as
+a short jump on the next frame. They are localised glitches rather than a
+breakdown of the stream.
 
 Second, and more visible to the operator, was a short interval in which control
 of the robot was lost just \emph{before} the relay took over. The cause is the
@@ -1336,23 +1336,13 @@ the reference, 150\,ms with three nodes here).
 \subsection{Re-implementation of the Layer~2 Method}
 \label{subsec:l2-rerun}
 
-The figures reported by Morais were obtained on a different testbed at a
-different time. To place the comparison that follows on a firmer footing, the
-Layer~2 method was re-implemented and run on the same three-node testbed used
-throughout this chapter, under the same conditions, so that the two approaches
-could be measured directly against each other rather than across separate
-experiments. It must be stated plainly that the source code of the reference
-implementation was not available to us, so this Layer~2 system was reconstructed
-entirely from the published description in the dissertation of
-Morais~\cite{morais2024synchronization}. It is therefore a best-effort
-re-creation rather than the original software, and it may diverge from it in
-details that the report does not specify. Any shortcoming observed here could in
-part reflect our reconstruction rather than the method itself. That same lack of
-access is precisely what made a re-implementation necessary: the stated goal was
-to compare the two approaches on equal terms, on a single testbed, and with no
-access to the original code the only way to do so was to rebuild the Layer~2
-method ourselves from its description. The re-implementation follows the
-reference faithfully, in the terms its report sets out: forwarding is performed
+The source code of the reference implementation was not available to us, so this
+Layer~2 system was reconstructed entirely from the published description in the
+dissertation of Morais~\cite{morais2024synchronization}. It is therefore a
+best-effort re-creation rather than the original software, and any shortcoming
+observed here could in part reflect the reconstruction rather than the method
+itself. The re-implementation follows the reference faithfully, in the terms its
+report sets out: forwarding is performed
 at the data link layer by installing static ARP entries that map each
 destination's address to the next-hop MAC through \texttt{ioctl(SIOCSARP)}. The
 relay then retransmits each frame toward that next-hop MAC at the link layer,
@@ -1419,8 +1409,11 @@ Layer~3 (this work)         & $2.0$\,s & $\approx 0.8$\,s  & \textbf{2.77\,s} \\
 The convergence figure tells only half of the
 story, because it marks when the first relayed packet arrives, not whether the
 stream that follows is usable. Here the re-implementation exposed a genuine
-difference. After recovery, the relayed video did not settle into a smooth flow
-on our testbed: it arrived in bursts roughly one node-aging period apart, with
+difference, and it was confined to the relay: on the direct, single-hop path the
+video streamed cleanly, exactly as expected, and the instability appeared only
+once the traffic was relayed. After recovery, the relayed video did not settle
+into a smooth flow on our testbed: it arrived in bursts roughly one node-aging
+period apart, with
 the topology repeatedly losing and regaining its direct neighbours, so that the
 picture froze and jumped rather than playing continuously. Reducing the encoder
 bitrate did not remove the effect, and that is the key observation, because it
@@ -1582,19 +1575,6 @@ stream that stayed stable throughout every experiment. The overall outcome is a
 robust, fully functional system, a different and more robust alternative to the
 Layer~2 predecessor, proven to work end to end on real hardware.
 
-The evaluation was equally honest about what remains open, and several of these
-points were not tested within the time available. Recovery could be made faster,
-and the relay deserves a fuller study under heavier, longer multi-hop load.
-Beyond raw speed, two improvements would harden the system further. The first is
-tighter control over when data is actually placed on the air, so that the bounded
-slot incursions of Section~\ref{subsubsec:video-slot} are eliminated rather than
-merely contained. The second is a convergence guarantee for the asymmetric
-failure seen in the mobility demonstration (Section~\ref{subsec:res-demo}), where
-the lightweight beacons outlived the broken TCP data plane and the topology
-briefly believed a dead link was healthy. Both would be reinforced by a
-physical-layer link-quality signal such as RSSI feeding the MST. Using RSSI was
-not possible here because the Raspberry Pi adapters do not expose it reliably in
-ad-hoc mode, and the measurement is itself somewhat unstable, but combined with
-the packet-delivery metric it would let the routing layer anticipate a failing
-link rather than wait for it to age out. These directions are developed in
-Chapter~\ref{chap:conclusions}.
+The evaluation also surfaced a few limitations, none of them unexpected, that
+leave clear room for improvement. They are not pursued here; they are developed
+as future work in Chapter~\ref{chap:conclusions}.

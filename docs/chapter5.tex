@@ -25,7 +25,7 @@ gaining reliable in-order delivery, standard observability, and a relayed stream
 that stayed stable across every experiment. It is, in short, a different and more
 robust way of solving the same problem.
 
-The work also exposed, honestly, the limits of the chosen design, and these
+The work also exposed the limits of the chosen design, and these
 define the most useful directions for future work. Two stand out. The first is
 tighter control over \emph{when} data is actually sent. The second is a stronger
 convergence guarantee for the case in which the lightweight beacons outlive a
@@ -113,38 +113,29 @@ after the heavier TCP data plane has already broken
 link is healthy while the operator has already lost the video and the command
 channel. In that window the system does not reroute, because the aging timeout
 is still counting and, from the control plane's point of view, no beacons have
-been missed. Closing this gap requires a \emph{data-plane liveness signal}.
-Detecting that the TCP connection to the current next hop has stalled or failed,
-and treating that, like a missed beacon, as evidence to down-weight or suppress
-the link and force the MST to reroute, would react to the failure the operator
-actually experiences rather than waiting for the beacons to age out
-independently. This is implementable within the current architecture, because the
-data plane already observes its own send failures, and it would turn the present
-best-effort recovery into a convergence guarantee for the asymmetric-failure
-case. A related design point belongs here too, and it is already handled correctly at
-the transport level. When a peer's TCP connection is re-established, the stale
-connection is deliberately torn down with an abortive close
-(\texttt{SO\_LINGER} set to zero), which discards the kernel's internal TCP send
-buffers so that the re-established link does not carry packets left over from the
-old, dead path. The node's own application-level transmit queue, by contrast, is
-deliberately \emph{not} flushed. Those packets must still be delivered, because
-reliable in-order delivery is exactly what the TCP data plane exists to provide,
-and they are not what delays recovery. The dominant cost is the source-side
-connection wind-down analysed in Section~\ref{subsec:res-convergence}. After the
-direct link fails, the source can stall on the dead socket up to the one-second
-send timeout (\texttt{SO\_SNDTIMEO}) before the stream settles onto the relay
-path. That tail, not any buffered data, is the main target for improvement, and
-the data-plane liveness signal above is the most direct way to shorten it, by
-letting the source abandon the dead connection as soon as the failure is
-observed rather than waiting for the timeout to expire.
+been missed. Closing this gap requires a \emph{data-plane liveness signal}: detecting that the
+TCP connection to the current next hop has stalled or failed and treating that,
+like a missed beacon, as evidence to suppress the link and force the MST to
+reroute. This was attempted in the present work, with a mechanism that marked a
+link as dead once its TCP connection died and triggered an immediate reroute. It
+did not, however, yield stable recovery on the testbed, and is therefore left as
+future work; the hook exists within the architecture, since the data plane
+already observes its own send failures, but turning it into a reliable
+convergence guarantee for the asymmetric-failure case remains open. The dominant
+cost to shorten is the source-side connection wind-down
+(Section~\ref{subsec:res-convergence}): after the direct link fails the source
+can stall on the dead socket up to the one-second send timeout
+(\texttt{SO\_SNDTIMEO}) before the stream settles onto the relay path, and a
+liveness signal is the most direct way to cut that tail.
 
 \subsection{Physical-Layer Link Quality and RSSI}
 \label{subsec:fw-rssi}
 
-The routing metric used here is the per-link packet delivery ratio (PDR) derived
-from beacon-reception statistics (Section~\ref{subsec:res-slots}), which drives
-both the MST edge weights and relay activation. PDR is a robust, protocol-level
-signal, but it is also a lagging one. It can only register that a link is failing
+This work already routes on a link-quality metric: the per-link packet delivery
+ratio (PDR) derived from beacon-reception statistics
+(Section~\ref{subsec:res-slots}) drives both the MST edge weights and relay
+activation. PDR is a robust, protocol-level signal, but it is not the most
+effective one, because it is lagging: it can only register that a link is failing
 after enough beacons have already been lost, which is the same detection delay
 that dominates convergence. A physical-layer signal such as the received signal
 strength indicator (RSSI) would complement it by reacting before packets are
