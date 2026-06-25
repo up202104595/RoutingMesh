@@ -196,7 +196,6 @@ Layer~2 ARP-manipulation approach of Morais~\cite{morais2024synchronization}.
 Figure~\ref{fig:l2-vs-l3} illustrates the key structural difference between the two
 approaches.
 
-\begin{landscape}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{layer2v3}
@@ -204,7 +203,6 @@ approaches.
 to Network in L3.}
 \label{fig:l2-vs-l3}
 \end{figure}
-\end{landscape}
 
 \subsection{Layer~2 Approach (Morais, 2024)}
 
@@ -412,14 +410,12 @@ established once at startup by the TUN module. This section describes the four c
 groups and their interaction with the routing tables maintained by the Routing module.
 Figure~\ref{fig:trafico} shows the two traffic paths and the routing tables that govern them.
 
-\begin{landscape}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{trafico}
 \caption{Separation of application traffic (Table~100) and relay traffic (Table~200).}
 \label{fig:trafico}
 \end{figure}
-\end{landscape}
 
 \subsection{IP Forwarding and Interface Setup}
 
@@ -525,14 +521,12 @@ illustrates the mechanism: packets P1, P2 and P3 (blue) are sent during the slot
 \texttt{slot\_end} is detected, packets P4 and P5 (red) are pushed back into the queue
 and sent in the following round.
 
-\begin{landscape}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{buffercontrol}
 \caption{Slot data control: packets sent during the slot (blue) and pushed back on slot\_end (red).}
 \label{fig:buffercontrol}
 \end{figure}
-\end{landscape}
 
 \begin{lstlisting}[language=C,
     caption={Back-pressure mechanism in the transmitter thread (\texttt{tx\_loop})},
@@ -594,14 +588,12 @@ PDR values is fed into Prim's MST algorithm, which produces a spanning tree reta
 the highest-quality links; a DFS over that tree then derives the routing table with the
 correct next-hop for each destination.
 
-\begin{landscape}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{quality}
 \caption{PDR-weighted MST routing: from network topology to routing table.}
 \label{fig:quality}
 \end{figure}
-\end{landscape}
 
 
 
