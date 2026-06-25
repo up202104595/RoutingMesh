@@ -42,22 +42,24 @@ signal such as RSSI, which the current hardware did not allow us to use.
 
 The framework controls how \emph{much} data it offers per slot, through the
 per-slot byte budget and back-pressure mechanism (Section~\ref{sec:slot-control}),
-but not the exact transmit instant. Because the data plane runs over TCP, a
-\texttt{send()} only hands the data to the kernel, which then schedules
-transmission on its own terms (TCP flow and congestion control, then CSMA/CA
-medium access); a batch offered near the slot end can therefore spill slightly
-into the next slot, the small, bounded incursion observed in
+but not the exact transmit instant. Because the data plane runs over TCP, the
+application only hands the data to the kernel, which then schedules transmission
+on its own terms, first through TCP flow and congestion control and then through
+CSMA/CA medium access. A batch offered near the slot end can therefore spill
+slightly into the next slot, the small, bounded incursion observed in
 Section~\ref{subsubsec:video-slot}. The byte budget keeps this localised, but it
 is not a hard, wire-level guarantee.
 
-Several refinements would tighten it, from least to most invasive: a
-conservative, empirically calibrated budget that leaves the kernel headroom to
-drain before the boundary; intra-slot pacing of the packets across the slot
-window; bounding the kernel's unsent backlog (\texttt{TCP\_NOTSENT\_LOWAT} and a
-small \texttt{SO\_SNDBUF}); kernel-assisted pacing (an \texttt{fq} qdisc with
-\texttt{SO\_MAX\_PACING\_RATE}); and, most thoroughly, gating transmission below
-the socket by sending the slot-critical traffic as raw \texttt{AF\_PACKET} frames
-timed to the slot. The last recovers the wire-level timing that the
+Several refinements would tighten it, from the least to the most invasive. The
+budget could be set conservatively below the theoretical slot capacity,
+calibrated empirically so that the kernel has headroom to drain the batch before
+the boundary. The packets could be paced across the slot window instead of being
+sent in a single burst at its start. The amount of unsent data the kernel is
+allowed to hold for the connection could be bounded, so that it does not keep a
+tail of bytes to put on the air late. The kernel's own traffic-pacing facilities
+could be used to rate-limit the flow to the per-slot budget. Most thoroughly, the
+slot gate could be moved below the transport layer, emitting the slot-critical
+traffic as raw link-layer frames timed to the slot. The last recovers the wire-level timing that the
 connectionless Layer~2 design of Morais~\cite{morais2024synchronization} has by
 construction, at the cost of re-introducing some of the complexity the TCP data
 plane was chosen to avoid. Quantifying how much each refinement reduces the
@@ -69,7 +71,7 @@ work.
 
 Recovery after a link failure is dominated by the node-aging timeout
 (\texttt{MAX\_AGE} $= 2.0$\,s) used to detect a dead direct link
-(Section~\ref{subsec:res-convergence}); the routing computation itself is
+(Section~\ref{subsec:res-convergence}). The routing computation itself is
 negligible. Reducing \texttt{MAX\_AGE}, or replacing the fixed timeout with an
 adaptive scheme that reacts to the recent beacon-loss rate, would speed up
 recovery, traded against robustness to transient beacon loss in the shared
@@ -86,7 +88,7 @@ link and force a reroute. This was attempted here, marking a link dead once its
 TCP connection died and triggering an immediate reroute, but it did not yield
 stable recovery on the testbed and is left as future work. The dominant cost to
 cut is the source-side wind-down: after the failure the source can stall on the
-dead socket up to the one-second send timeout (\texttt{SO\_SNDTIMEO}) before the
+dead socket up to the one-second send timeout before the
 stream settles onto the relay, and a liveness signal is the most direct way to
 shorten that tail.
 
@@ -114,7 +116,7 @@ teleoperation link.
 \label{subsec:fw-multihop}
 
 The evaluation used a three-node testbed, the minimum that exercises a relay. The
-forwarding step is identical at every relay (a kernel \texttt{ip\_forward} of the
+forwarding step is identical at every relay (kernel IP forwarding of the
 unmodified IP datagram, Section~\ref{sec:pkt-flow}), so the design generalises to
 longer paths without change. What grows with the hop count is the per-hop slot
 latency and the capacity sharing inherent to a single-channel multi-hop chain. A
