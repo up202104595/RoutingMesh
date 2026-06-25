@@ -685,6 +685,19 @@ substantially reduces the number of transmissions in dense networks. Nodes excha
 messages to discover their neighbourhood and negotiate MPR selections; MPR nodes generate
 Topology Control (TC) messages that allow every node to reconstruct a partial view of the
 network graph. Dijkstra's algorithm is then applied to this graph to compute the routing table.
+Figure~\ref{fig:olsr-mpr} illustrates the MPR mechanism: the source node $S$ selects a minimal
+set of one-hop neighbours (the filled nodes $M_1$, $M_2$, $M_3$) that together cover its entire
+two-hop neighbourhood, and only these MPRs retransmit its control traffic~\cite{almayouf2025enhancing}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.62\textwidth]{olsr_mpr}
+\caption{Multipoint Relay (MPR) selection in OLSR: the source $S$ designates a minimal subset
+of its one-hop neighbours ($M_1$, $M_2$, $M_3$, filled) that covers all of its two-hop
+neighbourhood, so that only the MPRs retransmit flooded control
+messages~\cite{almayouf2025enhancing}.}
+\label{fig:olsr-mpr}
+\end{figure}
 
 OLSR excels in large, dense networks where the MPR optimisation yields the greatest savings
 in control overhead. In sparse networks with few two-hop neighbours the MPR mechanism
