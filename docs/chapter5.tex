@@ -4,28 +4,33 @@
 \label{chap:conclusions}
 
 This dissertation set out to add dynamic, multi-hop routing to the RA-TDMAs+
-framework while preserving its TDMA slot discipline, and to do so reliably and
-observably enough for a real teleoperation link. The system meets that goal: it
-routes at Layer~3 over a TUN overlay, carries the video on a TCP data plane
-separated from the UDP control beacons, and adds per-link quality monitoring and
-a per-slot byte budget. The evaluation of Chapter~\ref{chap:evaluation} showed a
-responsive, loss-free control channel, video delivered at full rate, automatic
-recovery through the relay after a link failure, and, centrally, that the nodes
-keep to their TDMA slots for both beacons and continuous video, with the relay
-leaving latency, throughput and timing essentially unchanged.
+framework while preserving its TDMA slot discipline, and to do so in a way that
+is reliable and observable enough for a real teleoperation link. The system
+developed here meets that goal: it routes at Layer~3 over a TUN overlay, carries
+the video on a TCP data plane separated from the UDP control beacons, and adds
+per-link quality monitoring and a per-slot byte budget to the routing and
+transmission path. The experimental evaluation of Chapter~\ref{chap:evaluation}
+showed that the control channel is responsive and loss-free, that the video is
+delivered at full rate, that recovery through the relay after a link failure is
+automatic, and, centrally, that the nodes keep to their TDMA slots for both
+periodic beacons and continuous video, with the relay leaving latency,
+throughput and timing essentially unchanged.
 
-The system is therefore a robust, fully functional alternative to the Layer~2
-predecessor of Morais~\cite{morais2024synchronization}: a different architectural
-route, proven on real hardware to match it at the TDMA level while gaining
-reliable in-order delivery, standard observability, and a relayed stream that
-stayed stable across every experiment.
+Taken together, these results show that the system is a robust and fully
+functional alternative to the Layer~2 predecessor of
+Morais~\cite{morais2024synchronization}. It follows a different architectural
+route, routing at Layer~3 with kernel forwarding over a TCP data plane, and it
+was proven on real hardware to match that approach at the TDMA level while
+gaining reliable in-order delivery, standard observability, and a relayed stream
+that stayed stable across every experiment. It is, in short, a different and more
+robust way of solving the same problem.
 
-The work also exposed the limits of the chosen design, which define the most
-useful directions for future work: tighter control over \emph{when} data is
-actually sent, and a stronger convergence guarantee for the case in which the
-lightweight beacons outlive a broken TCP data plane. Both would be reinforced by
-a physical-layer link-quality signal such as RSSI, which the current hardware did
-not allow us to use.
+The work also exposed the limits of the chosen design, and these
+define the most useful directions for future work. Two stand out. The first is
+tighter control over \emph{when} data is actually sent. The second is a stronger
+convergence guarantee for the case in which the lightweight beacons outlive a
+broken TCP data plane. Both would be reinforced by a physical-layer link-quality
+signal such as RSSI, which the current hardware did not allow us to use.
 
 
 %% -----------------------------------------------------------------------
