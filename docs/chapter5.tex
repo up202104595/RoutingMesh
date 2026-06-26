@@ -117,6 +117,21 @@ Closing the loop with on-air measurement, and quantifying how much each of these
 refinements actually reduces the incursions, was outside the time available for
 this work and is left as a direct continuation of it.
 
+A complementary approach is to relax the equal-slot assumption itself. The
+incursions arise partly because N1, the only heavy source, must fit its whole
+video burst into the same fixed slot granted to the near-idle N2 and N3. A
+variable slot-length scheme, in the spirit of the Distributed Variable
+Slot-length Protocol (DVSP) of Pinto~\cite{ramos2018aerial}, keeps the round
+period constant but allocates slot time according to each node's offered load,
+granting the video source a longer slot while shrinking the relay and sink slots.
+A longer source slot gives the burst more room and reduces the chance that its
+tail spills into a neighbour. This is complementary to the per-slot byte budget,
+which bounds how much data is offered within a slot rather than sizing the slot
+to the traffic; it does not by itself remove the incursion, since the exact
+on-air instant still belongs to the kernel below the TCP layer, but it attacks
+the problem at its root by lifting the artificial constraint that forces a
+high-rate source through the same window as near-silent nodes.
+
 \subsection{Faster Convergence}
 \label{subsec:fw-convergence}
 
