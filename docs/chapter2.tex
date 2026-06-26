@@ -112,7 +112,7 @@ synchronisation without requiring GPS or any external time reference,
 reduces interference among team members, and runs as an overlay on top of
 the underlying IEEE 802.11 CSMA/CA hardware, which continues to handle
 external interference from nodes outside the team. The protocol is the
-product of combining the synchronisation method of RA-TDMAs~\cite{sousa2012ra}
+product of combining the synchronisation method of RA-TDMAs~\cite{pinto2018robust}
 with the topology-tracking and membership-management mechanisms of
 RA-TDMA+~\cite{oliveira2018clockless}, taking the most effective features
 of each. This same line of work has previously been applied to multi-hop
@@ -173,7 +173,7 @@ delay estimate. These estimates are used to progressively adjust slot
 boundaries so that overlaps are driven toward zero. The protocol can
 be layered on top of any wireless communication technology.
 
-Two versions of RA-TDMA are relevant to this work: RA-TDMAs~\cite{sousa2012ra},
+Two versions of RA-TDMA are relevant to this work: RA-TDMAs~\cite{pinto2018robust},
 which contributed the synchronisation algorithm, and
 RA-TDMA+~\cite{oliveira2018clockless}, which contributed the
 topology-tracking mechanism.
@@ -181,7 +181,7 @@ topology-tracking mechanism.
 \subsection{RA-TDMAs: Synchronisation Algorithm}
 \label{sec:ratdmas-sync}
 
-RA-TDMAs~\cite{sousa2012ra} was originally developed to support video
+RA-TDMAs~\cite{pinto2018robust} was originally developed to support video
 streaming between Unmanned Aerial Vehicles (UAVs) and a ground base
 station over a multi-hop line topology. In this setting each UAV relays
 the video stream one hop closer to the base station, up to a maximum of
