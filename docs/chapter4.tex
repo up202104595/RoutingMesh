@@ -190,7 +190,7 @@ two transport layers involved, because they matter for the throughput and
 convergence analyses. The video application itself uses UDP, which is the
 natural choice for a real-time stream. That UDP traffic is then carried between
 the physical nodes by the TDMA framework, whose data plane is built on a TCP
-connection over the wireless interface (the framework's periodic beacons, in
+connection over the wireless interface (the periodic beacons of the framework, in
 contrast, are sent over UDP). The relay therefore forwards the IP datagrams
 below this framework transport, a distinction that becomes important in
 Sections~\ref{subsec:res-throughput} and~\ref{subsec:res-convergence}. On N3,
@@ -225,7 +225,7 @@ RTT echo port         & UDP 19876             & \texttt{rtt\_test.py} \\
 \label{subsec:cmd-channel}
 
 The video stream described above is only one half of the teleoperation loop. The
-other half is the command channel that carries the operator's input from the
+other half is the command channel that carries the operator input from the
 base station back to the robot, and it is this channel whose latency ultimately
 determines how responsive the robot feels to drive. At N3, \texttt{base\_station.py}
 reads a DualShock~4 gamepad through \texttt{pygame} and translates its state into
@@ -291,7 +291,7 @@ N2.
 This section defines the metrics used throughout the evaluation. They are the
 standard quantities used to characterise a packet network, adapted where
 necessary to the TDMA context in which each leg of a transmission can only
-depart within its node's slot.
+depart within the slot of its node.
 
 \subsection{Round-Trip Time (RTT)}
 \label{subsec:m-rtt}
@@ -308,7 +308,7 @@ at N3.
 \end{equation}
 
 In a TDMA network the RTT reflects the slot structure directly, since each leg
-of the round trip can leave its node only during that node's slot.
+of the round trip can leave its node only during the slot of that node.
 
 \subsection{Packet Delivery Ratio (PDR)}
 \label{subsec:m-pdr}
@@ -354,7 +354,7 @@ T = \frac{8\,B_{\mathrm{total}}}{\Delta t} \quad [\text{kbps}]
 
 The video application emits an MPEG-TS stream over UDP into the mesh interface.
 This traffic is then carried between physical nodes by the TDMA framework, whose
-data plane uses a TCP connection (the framework's beacons, by contrast, use
+data plane uses a TCP connection (the beacons of the framework, by contrast, use
 UDP). Throughput is measured at the application level, the delivered video
 payload, so that the direct and relay conditions count the same quantity
 regardless of how the framework encapsulates it on the wire
@@ -439,8 +439,8 @@ The RTT does not concentrate around a single value. It splits into two
 well-separated clusters with an empty band between roughly 60 and 190\,ms.
 This is a direct consequence of the slot structure, and it is best understood
 by following a single probe through the schedule. The round trip is made of
-two independent legs, and each leg can leave its node only during that node's
-50\,ms slot. When N3 wishes to send the echo request it cannot transmit
+two independent legs, and each leg can leave its node only during the 50\,ms
+slot of that node. When N3 wishes to send the echo request it cannot transmit
 immediately: it must wait until N3's slot comes round, so the request is held
 in the transmit queue for up to one frame before it even enters the medium.
 Once the request reaches N1, the reply faces the symmetric constraint: it
@@ -467,7 +467,7 @@ present results differ in \emph{shape} from the reference: Morais reports a
 broadly triangular RTT histogram, a continuum of values filling the range,
 whereas here the histogram is cleanly two-valued. Both shapes arise from the
 same slot-waiting mechanism, but the geometry differs. In the reference the RTT
-is dominated by the wait between a probe's generation by the free-running ping
+is dominated by the wait between the generation of a probe by the free-running ping
 and the start of its slot. That wait is spread almost uniformly across the round
 and, combined over the two legs, fills the histogram into the triangular shape
 Morais describes. Here the within-slot transmit jitter is small, so the residual
@@ -583,7 +583,7 @@ MPEG-TS video payload delivered end-to-end from N1 to N3, identified by the
 mesh flow \texttt{10.0.0.1}\,$\to$\,\texttt{10.0.0.3:5000}. It deliberately
 excludes the wire-level framing, and this choice is what makes the direct and
 relay numbers comparable. On the direct path the video is carried inside the
-TDMA framework's own transport encapsulation, whereas on the relay path N2
+transport encapsulation of the TDMA framework itself, whereas on the relay path N2
 forwards the raw IP datagrams. Counting the encapsulated wire bytes would
 therefore measure two different things and would wrongly suggest that the relay
 halves the throughput. Counting the delivered video payload instead measures
@@ -661,7 +661,7 @@ mean of 558\,kbps while transmitting for only a third of the time, the
 \emph{instantaneous} rate inside the slot must be roughly three times the mean,
 about 1.7\,Mbps. This is a small fraction of the raw rate available on the
 IEEE~802.11 channel, so the slot has ample headroom: the burst of $\approx 8$
-datagrams that constitutes one frame's worth of video (derived in
+datagrams that constitutes the data for one video frame (derived in
 Equation~\ref{eq:pkts-per-slot}, Section~\ref{subsec:res-ia}) drains well
 within the 50\,ms slot, leaving the guard interval clear. This headroom is what
 allows the stream to coexist with the periodic beacons and the teleoperation
@@ -698,8 +698,8 @@ probing different regimes, and the contrast is itself informative.
 The reduction reported in the reference is the classic capacity collapse of a
 single-channel multi-hop wireless chain. When every node shares one radio
 channel and the medium is half-duplex, a packet forwarded by a relay must be
-\emph{received} and then \emph{re-transmitted} on the same channel. The relay's
-two transmissions, plus those of the source, contend for one shared resource,
+\emph{received} and then \emph{re-transmitted} on the same channel. The two
+transmissions of the relay, plus those of the source, contend for one shared resource,
 so the maximum end-to-end rate falls roughly as $C/n$ with the number of hops
 $n$. Crucially, that ceiling is only \emph{reached}, and therefore only
 \emph{measured}, by a flow that deliberately saturates the link. The reference
@@ -712,13 +712,13 @@ The measurement here is of a fundamentally different kind. The video is a
 \emph{fixed-rate, non-saturating} application stream of $\approx 558$\,kbps,
 which is between one and two per cent of the per-hop capacity, even after a
 single relay hop has halved that capacity, several megabits per second of
-headroom remain. The quantity of interest is therefore not the link's maximum
+headroom remain. The quantity of interest is therefore not the maximum throughput of the link
 capacity but whether the offered rate is \emph{preserved} end to end, and at a
 load this far below the ceiling the second hop forwards the stream without ever
 throttling it. The bottleneck that produces the collapse binds only as the
 offered load approaches capacity. Our application never operates in that
 regime. Two further factors widen the gap: the TDMA schedule eliminates the
-CSMA/CA collisions and retransmissions that account for much of the reference's
+CSMA/CA collisions and retransmissions that account for much of the loss in the reference
 loss, and, as established above, the kernel forward at N2 does not consume a
 separate TDMA slot. We did not run a saturating \texttt{iperf3} test on the relay
 path, because it does not correspond to how the system is used. In such a test
@@ -754,7 +754,6 @@ the $\approx 1\,\%$ throughput difference reported above.
 
 \begin{figure}[H]
 \centering
-% TODO: insert received-stream screenshot over the direct link
 \includegraphics[width=0.70\textwidth]{stream_received_direct}
 \caption{Frame of the live video stream as received at the base station (N3)
 over the direct link.}
@@ -763,7 +762,6 @@ over the direct link.}
 
 \begin{figure}[H]
 \centering
-% TODO: insert received-stream screenshot over the relay path
 \includegraphics[width=0.70\textwidth]{stream_received_relay}
 \caption{Frame of the live video stream as received at the base station (N3)
 after re-routing through the relay (N2). The image is delivered with no
@@ -773,7 +771,7 @@ perceptible loss of quality relative to the direct link.}
 
 A recording of the full teleoperation session, including the live video and the
 automatic recovery through the relay after the direct link is severed, is
-available at: \url{TODO-INSERT-VIDEO-LINK}.
+available at \url{https://youtu.be/KpsvMXNd8x4}.
 
 \subsection{Routing Convergence}
 \label{subsec:res-convergence}
@@ -827,7 +825,7 @@ breakdown below confirms.
 The dominant component of the convergence time is the \emph{link-failure
 detection}, which is governed by the node-aging mechanism of the RA-TDMAs+
 adjacency matrix. Each node keeps, for every neighbour, the timestamp of the
-last beacon received from it. The neighbour's \emph{age} is the elapsed time
+last beacon received from it. The \emph{age} of the neighbour is the elapsed time
 since that beacon. On every round the function \texttt{removeDeadLinks()}
 compares each age against the constant \texttt{MAX\_AGE}, and a neighbour whose
 age reaches \texttt{MAX\_AGE} is declared dead and removed from the matrix. In
@@ -870,7 +868,7 @@ entirely by the $2.0$\,s aging timeout, plus a sub-second tail for the relay
 path to be established and the first forwarded packet to arrive. This
 localisation of the cost has a clear practical consequence. Because detection
 dominates and route installation is essentially free, the convergence time is
-not a property of the routing layer's efficiency at all, a faster routing
+not a property of the efficiency of the routing layer at all, a faster routing
 algorithm or a smaller graph would not change it, but a property of a single
 tunable constant. The most direct way to accelerate convergence is therefore to
 reduce \texttt{MAX\_AGE}: halving it to $1.0$\,s would roughly halve the
@@ -983,7 +981,7 @@ The distribution has two peaks: $\approx 88\,\%$ of inter-arrivals fall below
 130 to 150\,ms range (the inter-burst gap of one frame). This arises directly
 from the schedule: N1 accumulates encoded data for $\approx 100$\,ms and then
 transmits a burst during its 50\,ms slot. At 558\,kbps with 1316-byte MPEG-TS
-UDP packets, each frame's worth of data is
+UDP packets, the data for each frame is
 \begin{equation}
 n_{\mathrm{pkts}} = \frac{558{,}000 \times 0.150}{8 \times 1316} \approx 8\,\text{packets},
 \label{eq:pkts-per-slot}
@@ -1059,7 +1057,7 @@ reception, a small per-node timing asymmetry. N3's own transmissions also occupy
 part of the medium it is measuring. We accept this for three reasons. It needs no
 additional hardware or observer node. N3 is in radio range of both N1 and N2 and
 so receives all three beacons, which gives the complete slot structure. And it is
-precisely the base station's operational viewpoint, which is the perspective that
+precisely the operational viewpoint of the base station, which is the perspective that
 matters for a teleoperation link. The asymmetry amounts to a few milliseconds of
 receive-path delay, far below the 50\,ms slot, so it nudges the absolute positions
 slightly but leaves the slot ordering and the inter-node spacing (the
@@ -1070,8 +1068,8 @@ N1\,$\to$\,N2\,$\to$\,N3, each separated from the next by approximately one
 slot, and each remains in its region across rounds. Quantitatively, after the
 processing described below, the per-node standard deviation of the transmission
 instant is $\approx 16$\,ms, small relative to the 50\,ms slot, and
-84 to 89\,\% of all beacons fall within their node's assigned slot, the remainder
-lying in the 5\,ms guard band or spilling marginally into a neighbour's slot
+84 to 89\,\% of all beacons fall within the assigned slot of their node, the remainder
+lying in the 5\,ms guard band or spilling marginally into the slot of a neighbour
 under transient load. That the three clouds neither overlap nor exchange order
 across the captured rounds is the direct, transmitter-side evidence that the
 schedule is being respected: each node is in fact confining its transmissions
@@ -1188,7 +1186,7 @@ amounts to a loss of slot discipline.
 
 The first effect, and the more fundamental, lies in the data plane. When the
 transmitter calls \texttt{send()} during N1's slot it does not put the bytes on
-the air. It hands them to the kernel's TCP/IP stack, which then schedules their
+the air. It hands them to the TCP/IP stack of the kernel, which then schedules their
 transmission on its own terms, first TCP flow and congestion control and then
 CSMA/CA medium access. The framework controls \emph{how much} it offers per slot
 but not the exact instant each byte leaves the antenna, so a batch handed over
@@ -1201,7 +1199,7 @@ after round rather than smearing across the frame, but it cannot enforce a hard
 wire-level boundary, because below the socket the transmit timing belongs to the
 kernel. This is not a fault of our implementation but a known property of the
 protocol. Pinto and Almeida already evidenced it as \emph{packet spreading},
-where data accumulating in the transmitter's socket send queue is delivered late
+where data accumulating in the socket send queue of the transmitter is delivered late
 and overlaps the following slot~\cite{pinto2018robust, ramos2018aerial}. They
 reduce it by capping the unsent data in the socket queue to roughly one packet,
 which lessens the spreading but does not remove it, and our TCP data plane does
@@ -1218,7 +1216,7 @@ Pinto and Almeida, who measured about 1\,ms every 150 rounds when the clocks are
 synchronised only at start-up, enough to overlap the slots within minutes, and
 the adaptive re-synchronisation that runs every round is precisely what absorbs
 it~\cite{pinto2018robust, ramos2018aerial}. Because that rotation was estimated
-on the beacons, the video's residual phase is not removed perfectly over the
+on the beacons, the residual phase of the video is not removed perfectly over the
 window, so the plotted burst wanders by a few milliseconds from round to round
 and exaggerates the apparent incursion relative to the true airtime. The slow
 drift of the burst across rounds in Figure~\ref{fig:video-slot} is the signature
@@ -1238,8 +1236,8 @@ byte the kernel puts on the air: because the data plane runs over TCP, the
 kernel emits bare acknowledgements (a few tens of bytes) outside N1's slot,
 since they are generated by the kernel stack rather than by the slot-gated
 transmitter. These are negligible in size, carry no video, and are absorbed by
-CSMA/CA. They simply mark the point where the framework's slot control ends and
-the kernel's autonomous traffic begins, the same boundary already noted at the
+CSMA/CA. They simply mark the point where the slot control of the framework ends and
+the autonomous traffic of the kernel begins, the same boundary already noted at the
 relay (Section~\ref{subsec:res-throughput}).
 
 Combined with the construction argument (in the direct configuration only N1
@@ -1280,13 +1278,13 @@ Figure~\ref{fig:setup-mobility} shows the layout.
 \caption{Hallway deployment for the streaming-in-motion demonstration. The base
 station (N3) is in the DaRTES laboratory at the starting point (left). The relay
 (N2) is positioned partway down the hallway (right). The robot (N1) drives away
-from the laboratory, and the hallway's concrete walls attenuate the direct link
+from the laboratory, and the concrete walls of the hallway attenuate the direct link
 so that the video is forwarded through N2.}
 \label{fig:setup-mobility}
 \end{figure}
 \vspace{0.5cm}
 
-A recording of the full run is available at \url{TODO-INSERT-YOUTUBE-LINK}.
+A recording of the full run is available at \url{https://youtu.be/KpsvMXNd8x4}.
 
 The demonstration confirmed the central capability end to end: as the robot
 drove down the hallway and the direct link degraded, the system established the
@@ -1333,11 +1331,11 @@ manipulating ARP tables so that the relay forwards frames transparently below
 IP. It is worth being concrete about what this means for the relay hop, because
 the two designs differ exactly there. In the Layer~2 method the relayed packet
 still transits the intermediate node, N2 is not bypassed, but N2 forwards it by
-simply rewriting the frame's destination MAC to the next hop and retransmitting
+simply rewriting the destination MAC of the frame to the next hop and retransmitting
 it at the link layer, leaving the IP header untouched and never lifting the
 packet into user space. Our relay does strictly more: it carries each forwarded
 packet up to the user-space TCP receive thread at N2 and then back down through
-\texttt{tun\_write} and the kernel's IP-forwarding engine. Both run on the same
+\texttt{tun\_write} and the IP-forwarding engine of the kernel. Both run on the same
 RA-TDMAs+ synchroniser and the same class of hardware. To compare the two on equal terms, on a single testbed and under the
 same conditions, rather than across separate experiments, the Layer~2 method
 was re-implemented and run on the same three-node testbed used throughout this
@@ -1363,10 +1361,10 @@ access to the original code the only way to do so was to rebuild the Layer~2
 method ourselves from its description. The re-implementation follows the
 reference faithfully, in the terms its report sets out: forwarding is performed
 at the data link layer by installing static ARP entries that map each
-destination's address to the next-hop MAC through \texttt{ioctl(SIOCSARP)}. The
+destination address to the next-hop MAC through \texttt{ioctl(SIOCSARP)}. The
 relay then retransmits each frame toward that next-hop MAC at the link layer,
 leaving the IP header and the end-to-end source and destination addresses
-untouched, rather than lifting the packet into the kernel's IP-forwarding path
+untouched, rather than lifting the packet into the IP-forwarding path of the kernel
 as our own Layer~3 design does. The video is carried over UDP. The routing
 module builds the same binary spanning tree from the connectivity matrix. The decisive point for a fair comparison is that both
 methods run on the identical RA-TDMAs+ synchroniser and the identical
@@ -1401,8 +1399,8 @@ source-side connection state is the $\approx 0.8$\,s tail isolated earlier. The
 measured gap of $\approx 0.5$\,s between the two totals is therefore the
 empirical price of the connection-oriented data plane at the source, and it
 confirms, on the same hardware, the architectural
-analysis that had previously been argued only from the reference's reported
-numbers.
+analysis that had previously been argued only from the numbers reported in the
+reference.
 
 \begin{table}[H]
 \centering

@@ -154,7 +154,7 @@ This primary objective decomposes into the following specific objectives:
 
     \item Integrate the relay forwarding mechanism with the \textbf{Linux
     kernel networking stack} using a dual routing table architecture, so that
-    transit packets are forwarded by the kernel's own IP forwarding engine
+    transit packets are forwarded by the IP forwarding engine of the kernel
     without user-space intervention;
 
     \item Separate the communication stack into a \textbf{UDP control plane}
@@ -186,7 +186,7 @@ This dissertation makes the following contributions:
 
     \item Integration of the routing and relay forwarding mechanism with
     the Linux kernel networking stack, using standard operating system
-    interfaces and leveraging the kernel's built-in IP forwarding;
+    interfaces and leveraging the built-in IP forwarding of the kernel;
 
     \item Separation of the communication stack into a UDP control plane and
     a TCP data plane, with per-peer TCP connections and a complete socket

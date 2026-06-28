@@ -37,7 +37,7 @@ select the same backoff value, their transmissions collide.
 
 A more subtle problem arises from the limited range of wireless radios. Two nodes
 that are each within range of a common third node may be out of range of each
-other, so neither can detect the other's transmissions. When both transmit
+other, so neither can detect the transmissions of the other. When both transmit
 simultaneously, the frames collide at the common node without either sender
 being aware. This is the hidden terminal problem, and it cannot be fully
 resolved by CSMA/CA alone. Under high traffic load, repeated collisions and
@@ -174,7 +174,7 @@ lock onto. In ad-hoc networks this centralised reference does not exist,
 and a distributed synchronisation mechanism is needed instead.
 
 RA-TDMA addresses this by having nodes synchronise through the timing
-of each other's transmissions, without requiring any shared external
+of the transmissions of one another, without requiring any shared external
 clock. Each node transmits a state packet at the beginning of its
 designated slot. Receivers observe when those packets arrive and
 compare the arrival time to the expected time, deriving a per-packet
@@ -199,8 +199,8 @@ accumulates at the destination.
 
 The synchronisation mechanism works as follows. The header of each
 transmitted packet carries the slot ID and the transmission offset
-$p_k$, defined as the time elapsed since the start of the sender's
-slot at the moment the packet was sent. A receiving node $j$ observes
+$p_k$, defined as the time elapsed since the start of the slot of the
+sender at the moment the packet was sent. A receiving node $j$ observes
 the real arrival time $rx_k$ of packet $k$ from node $i$ and computes
 the synchronisation delay $\delta_k$ as the difference between the
 observed arrival and the arrival that would have occurred if the two
@@ -301,7 +301,7 @@ remains fixed. Each node receives exactly one slot of duration
 $t_{slot} = T_{up} / N$, so that as the team grows, slot duration
 decreases proportionally, allowing new members to be absorbed without
 changing the total round period. Slots are assigned in ascending order
-of each node's unique numeric ID: the node with the smallest ID in
+of the unique numeric ID of each node: the node with the smallest ID in
 $\tau_A$ receives slot $s_0$, the next smallest $s_1$, and so on. For
 example, if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$,
 then $\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$, and
@@ -388,13 +388,13 @@ essential for correct slot allocation. Node additions and removals are
 detected through the connectivity matrix:
 
 \begin{itemize}
-  \item \textbf{Node joins:} when a new node's row appears for the
+  \item \textbf{Node joins:} when the row of a new node appears for the
     first time in a received matrix broadcast, the local copy is
     extended with a new row and column, $N$ is incremented, and the
     TDMA core is notified to reorganise the round. The updated layout
     propagates through the network in the following broadcast.
 
-  \item \textbf{Node leaves:} when a node's row has not been refreshed
+  \item \textbf{Node leaves:} when the row of a node has not been refreshed
     for longer than the dead-link timeout \texttt{MAX\_AGE} (2.0\,s in
     the implementation used in this work, roughly thirteen rounds at a
     150\,ms frame), all nodes independently detect the departure,
@@ -455,7 +455,7 @@ virtual device and with plug-in modules through AF\_UNIX local sockets
 
 \texttt{TDMA\_Core} is the central component of the framework and is responsible for managing
 medium access according to the TDMA slot schedule. It implements four concurrent threads.
-The transmit thread (TX) is scheduled to wake at the beginning of the node's assigned slot and
+The transmit thread (TX) is scheduled to wake at the beginning of the assigned slot of the node and
 remains dormant for the rest of the frame. When active, it dequeues pending packets, prepends
 a TDMA header, and forwards them via a UDP socket over the wireless interface (\texttt{wlan0}).
 The TDMA header carries the packet type, a global sequence number, the relative sending
@@ -479,8 +479,8 @@ The framework exposes the network to applications through a TUN virtual network 
 (\texttt{tun0}). TUN operates at Layer~3, handling IP packets as if they were passing through a
 physical network interface card, unlike TAP which operates at Layer~2 and processes Ethernet
 frames. IP packets sent by an application to \texttt{tun0} are read by \texttt{TDMA\_Core} in
-user space, encapsulated with the TDMA header, and queued for transmission during the node's
-slot. On the receive side, stripped payloads are injected back into \texttt{tun0} and delivered
+user space, encapsulated with the TDMA header, and queued for transmission during the slot
+of the node. On the receive side, stripped payloads are injected back into \texttt{tun0} and delivered
 to the destination application as ordinary IP datagrams, making the TDMA transport layer
 transparent to higher layers. Figure~\ref{fig:tdma-header} illustrates the headers a packet
 carries when leaving the TDMA framework.
@@ -506,7 +506,7 @@ active nodes, their respective identifiers, the connectivity matrix containing l
 between nodes, and a per-row age vector that allows the most recent information to be retained.
 These fields are stored in the \texttt{tdma\_matrix\_t} structure shown in
 Code Block~\ref{lst:matrix}, which is serialised into a compact beacon and broadcast via multicast
-at the beginning of each node's slot. Figure~\ref{fig:matrix-packet} shows the layout of this
+at the beginning of the slot of each node. Figure~\ref{fig:matrix-packet} shows the layout of this
 beacon packet.
 
 \begin{figure}[H]
@@ -710,7 +710,7 @@ messages~\cite{almayouf2025enhancing}.}
 
 OLSR excels in large, dense networks where the MPR optimisation yields the greatest savings
 in control overhead. In sparse networks with few two-hop neighbours the MPR mechanism
-offers diminishing returns and the protocol's overhead approaches that of standard link-state
+offers diminishing returns and the protocol overhead approaches that of standard link-state
 flooding. The protocol is also more complex to implement and to tune than DSDV, requiring
 careful selection of Hello and TC intervals to balance responsiveness against overhead.
 
@@ -846,7 +846,7 @@ approach, as analysed by Morais~\cite{morais2024synchronization}.
 
 For reactive protocols, flooding a RREQ to discover routes is redundant when the topology is already known at every
 node from the MATRIX beacon. Moreover, in a TDMA network each hop of a RREQ flood
-must wait for the transmitting node's assigned slot before the request can be forwarded. A
+must wait for the assigned slot of the transmitting node before the request can be forwarded. A
 three-hop discovery therefore requires at least three complete frame periods to complete. At a
 typical frame period, this represents hundreds of milliseconds of unavoidable latency per
 discovery, which is unacceptable for real-time video teleoperation. Additionally, the reactive
@@ -984,7 +984,7 @@ primary entry (\texttt{next}), and a pointer to the secondary list of reachable 
 
 The original MATRIX beacon carried only connectivity and identifier information, with no MAC
 address data. Since ARP injection requires MAC addresses, Morais extended the
-\texttt{tdma\_matrix\_t} structure to include each node's MAC address as an additional field,
+\texttt{tdma\_matrix\_t} structure to include the MAC address of each node as an additional field,
 adding six bytes to every state beacon. Figure~\ref{fig:statshare-ana} shows the updated beacon
 layout.
 
@@ -999,7 +999,7 @@ field~\cite{morais2024synchronization}.}
 \bigskip
 
 The updated structure is shown in Code Block~\ref{lst:matrix-ana}. When a node receives a beacon,
-it records the sender's MAC address in a shared-memory table indexed by node identifier. The
+it records the MAC address of the sender in a shared-memory table indexed by node identifier. The
 address is retained only while the corresponding link remains active.
 
 \medskip
@@ -1018,7 +1018,7 @@ typedef struct {
 \end{lstlisting}
 
 The collected MAC addresses are stored in a shared-memory structure, \texttt{macArraySHM\_t},
-whose entries pair each MAC address with the last octet of the node's IP address (used as the
+whose entries pair each MAC address with the last octet of the IP address of the node (used as the
 node identifier in the framework):
 
 \medskip
@@ -1096,7 +1096,7 @@ The OUTPUT chain marks all outgoing \texttt{wlan0} packets with a non-zero mark,
 resets the mark to zero for TDMA framework packets identified by their fixed UDP port number
 (4000 + node~ID). A policy routing rule then sends all marked packets to a secondary routing
 table that routes them through \texttt{tun0}. This mechanism ensures that only application
-traffic enters the TDMA framework, while the framework's own UDP transmissions are excluded
+traffic enters the TDMA framework, while the UDP transmissions of the framework itself are excluded
 to prevent routing loops.
 
 When a packet arrives at \texttt{tun0} at the destination node, it must be delivered back to the

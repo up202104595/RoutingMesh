@@ -90,7 +90,7 @@ ip addr add 172.20.10.X/28 dev wlan0
 from a \texttt{systemd} unit (\texttt{adhoc.service}) scheduled before the mesh
 software and before \texttt{wpa\_supplicant} can interfere. Alternatively, where
 no service enforces infrastructure mode, the interface can be brought up in ad
-hoc mode directly by the system's network configuration. Code
+hoc mode directly by the network configuration of the system. Code
 Block~\ref{lst:app-interfaces} shows the equivalent entry in
 \texttt{/etc/network/interfaces}.
 

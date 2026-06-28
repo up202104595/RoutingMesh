@@ -24,8 +24,8 @@ link-quality metric derived from TDMA beacon-reception statistics was defined an
 used both to weight the spanning tree and to trigger relay activation. A
 topology-aware routing algorithm derives next-hop decisions from a Minimum
 Spanning Tree over that graph and installs the resulting routes into the Linux
-kernel over Netlink. The relay forwarding was integrated with the kernel's own
-IP-forwarding engine through a dual routing-table architecture, so that transit
+kernel over Netlink. The relay forwarding was integrated with the
+IP-forwarding engine of the kernel through a dual routing-table architecture, so that transit
 traffic moves between interfaces without ever entering user space. And the
 communication stack was split into a UDP control plane for the topology beacons
 and a TCP data plane for application data, giving reliable in-order delivery of
@@ -90,7 +90,7 @@ arise partly because N1, the only heavy source, must fit its whole burst into th
 same fixed slot granted to the near-idle N2 and N3. A variable slot-length
 scheme, in the spirit of the Distributed Variable Slot-length Protocol (DVSP) of
 Pinto~\cite{ramos2018aerial}, keeps the round period constant but sizes each slot
-to its node's load, giving the source a longer slot and the relay and sink
+to the load of its node, giving the source a longer slot and the relay and sink
 shorter ones. This attacks the cause rather than the symptom, although it still
 cannot fix the exact on-air instant, which remains with the kernel.
 
