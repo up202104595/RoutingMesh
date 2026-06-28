@@ -96,6 +96,15 @@ end-to-end reliability and flow control (TCP) or lightweight datagram delivery
 (UDP). \textbf{Application layer} protocols make use of the transport
 services; in this work the application is a real-time video stream.
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\textwidth]{network_layering}
+\caption{The layered network model and representative protocols at each layer.
+RA-TDMAs+ overlays the IEEE~802.11 CSMA/CA medium-access control at the data link
+layer, and IP operates at the network layer.}
+\label{fig:layering}
+\end{figure}
+
 The distinction between Layer 2 (data link) and Layer 3 (network) forwarding
 is central to understanding the difference between the previous routing
 approach by Morais and the one developed here, as discussed in
