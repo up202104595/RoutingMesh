@@ -1055,10 +1055,7 @@ node to observing the medium. Here the measurement is taken from N3, an
 \emph{active participant}. That choice carries a minor, known cost: the radio is
 half-duplex, so N3 cannot capture during its own transmission, and its own slot
 is therefore seen from the transmit side while the other two are seen on
-reception, a small per-node timing asymmetry (a transmit-versus-reception
-timing difference also documented in the RA-TDMAs synchroniser of Pinto and
-Almeida~\cite{pinto2018robust}, with a fuller treatment in the PhD
-dissertation~\cite{ramos2018aerial}). N3's own transmissions also occupy
+reception, a small per-node timing asymmetry. N3's own transmissions also occupy
 part of the medium it is measuring. We accept this for three reasons. It needs no
 additional hardware or observer node. N3 is in radio range of both N1 and N2 and
 so receives all three beacons, which gives the complete slot structure. And it is
@@ -1092,7 +1089,13 @@ nodes, not their absolute positions, that matter. Second, the synchroniser does
 not hold the frame fixed in wall-clock time. To keep the nodes aligned it
 advances all slots by a small common amount on every round, with the effect that
 the entire frame rotates slowly against wall-clock time, at $\approx 18$\,ms/s
-in these captures. This rotation is visible in Figure~\ref{fig:slots-drift},
+in these captures. This continual forward drift is not an artefact of our
+measurement at N3 but an intrinsic property of the RA-TDMAs synchroniser: it
+arises from the protocol continually compensating for the timing difference
+between when a beacon is transmitted and when it is received, and it is
+documented by Pinto and Almeida~\cite{pinto2018robust}, with a fuller treatment
+in the PhD dissertation~\cite{ramos2018aerial}. This rotation is visible in
+Figure~\ref{fig:slots-drift},
 which plots the same beacons \emph{without} the de-rotation applied: the three
 clouds sweep diagonally across the frame as the rounds advance, each node moving
 by the same amount per round so that their mutual spacing is preserved while
