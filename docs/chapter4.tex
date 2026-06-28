@@ -185,8 +185,7 @@ On N1, \texttt{rpicam-vid} captures raw YUV~4:2:0 frames and pipes them to
 \texttt{ffmpeg}, which encodes them with \texttt{libx264}, wraps the output in
 MPEG-TS, and sends each transport-stream segment as a UDP datagram to
 \texttt{10.0.0.3:5000}. Because the destination is a mesh (TUN) address, the
-datagram enters the TDMA routing layer transparently. It is worth noting the
-two transport layers involved, because they matter for the throughput and
+datagram enters the TDMA routing layer transparently. Two transport layers are involved, and they matter for the throughput and
 convergence analyses. The video application itself uses UDP, which is the
 natural choice for a real-time stream. That UDP traffic is then carried between
 the physical nodes by the TDMA framework, whose data plane is built on a TCP
@@ -519,9 +518,8 @@ data-plane results are thus two views of the same property: the relay is
 transparent because forwarding happens below the application and does not
 consume a separate scheduling step.
 
-It is worth stating explicitly why this RTT behaviour supports, rather than
-merely fails to contradict, the central claim that the nodes respect their
-slots. If the nodes were \emph{not} synchronised, if slots overlapped or
+This RTT behaviour positively supports the central claim that the nodes
+respect their slots. If the nodes were \emph{not} synchronised, if slots overlapped or
 drifted unboundedly, the medium would suffer collisions and contention, and
 the resulting RTT would be unstructured: a long, ragged tail of values with no
 preferred levels, accompanied by packet loss from collided transmissions.
@@ -588,8 +586,7 @@ forwards the raw IP datagrams. Counting the encapsulated wire bytes would
 therefore measure two different things and would wrongly suggest that the relay
 halves the throughput. Counting the delivered video payload instead measures
 the same thing in both cases, the bytes the player actually consumes, and
-isolates the effect of the relay hop from the framing overhead. A useful
-by-product of inspecting the relay capture is direct evidence that the
+isolates the effect of the relay hop from the framing overhead. Inspecting the relay capture also gives direct evidence that the
 forwarding is transparent: the relayed video appears on the wire as plain
 MPEG-TS/UDP datagrams addressed \texttt{10.0.0.1}\,$\to$\,\texttt{10.0.0.3},
 \emph{not} re-wrapped in any additional framework header. The relay is thus a
@@ -886,8 +883,7 @@ than a bounded, one-off recovery delay. Tuning this constant, or replacing the
 fixed timeout with an adaptive scheme that reacts to the recent beacon-loss
 rate, is identified as a concrete avenue for future work.
 
-It is worth being precise about the origin of the sub-second tail, and about how
-large it should be expected to be, because it reflects a genuine architectural
+The origin of the sub-second tail reflects a genuine architectural
 difference from the Layer~2 reference rather than an inefficiency. The tail is
 not route computation, which is microseconds. It is also not, as one might first
 assume, the cost of opening a connection: the TCP links between neighbours are
@@ -911,8 +907,8 @@ N3 again, a transition a stateless forwarder never has to make. The practical
 impact is a modest sub-second penalty added to detection on each recovery, and a
 negligible per-packet user-space cost in steady state.
 
-This narrow step is where the Layer~2 approach of Morais would be faster, and it
-is worth being precise about \emph{which} step, because the rest is comparable.
+This narrow step is where the Layer~2 approach of Morais would be faster. The
+rest is comparable.
 Detection is identical: that design removes a dead link through the same
 connectivity-matrix aging, so it incurs the same \texttt{MAX\_AGE} wait before
 anything can change (Morais does not report a convergence figure. This follows
@@ -1179,9 +1175,8 @@ the beacon of N1 and occupies most of the slot of N1, well separated from the N3
 the far end of the frame. The burst is not, however, perfectly contained: at
 several rounds its tail crosses the 50\,ms boundary and reaches into the start
 of the slot of N2, and these incursions are plainly visible in
-Figure~\ref{fig:video-slot}. We address them directly rather than gloss over
-them, because understanding their cause is what turns the figure into evidence
-rather than a worry. Two effects combine to produce the spillover, and neither
+Figure~\ref{fig:video-slot}. Understanding their cause turns the figure into evidence rather than a
+worry. Two effects combine to produce the spillover, and neither
 amounts to a loss of slot discipline.
 
 The first effect, and the more fundamental, lies in the data plane. When the
@@ -1324,8 +1319,7 @@ The system evaluated here implements routing at Layer~3 (IP), using kernel
 forwarding and standard routing tables over a TUN overlay. The prior work of
 Morais~\cite{morais2024synchronization} implements routing at Layer~2, by
 manipulating ARP tables so that the relay forwards frames transparently below
-IP. It is worth being concrete about what this means for the relay hop, because
-the two designs differ exactly there. In the Layer~2 method the relayed packet
+IP. The two designs differ exactly at the relay hop. In the Layer~2 method the relayed packet
 still transits the intermediate node, N2 is not bypassed, but N2 forwards it by
 simply rewriting the destination MAC of the frame to the next hop and retransmitting
 it at the link layer, leaving the IP header untouched and never lifting the
@@ -1357,7 +1351,7 @@ strictly more work per forwarded packet.}
 \subsection{Re-implementation of the Layer~2 Method}
 \label{subsec:l2-rerun}
 
-It must be stated plainly that the source code of the reference
+The source code of the reference
 implementation was not available to us, so this Layer~2 system was reconstructed
 entirely from the published description in the dissertation of
 Morais~\cite{morais2024synchronization}. It is therefore a best-effort
@@ -1433,8 +1427,7 @@ Layer~3 (this work)         & $2.0$\,s & $\approx 0.8$\,s  & \textbf{2.77\,s} \\
 
 The convergence figure tells only half of the
 story, because it marks when the first relayed packet arrives, not whether the
-stream that follows is usable. It is important to be clear about where the
-difficulty did and did not appear. Over the \emph{direct} link the
+stream that follows is usable. Over the \emph{direct} link the
 re-implemented Layer~2 stream behaved exactly as expected, delivering the video
 as cleanly and as smoothly as the Layer~3 (IP-forwarding) system: the two were
 indistinguishable in the single-hop case. The difference emerged only on the
@@ -1587,7 +1580,7 @@ slots while doing so. Both are answered in the affirmative.
 The system performs well. The control channel is responsive and loses no
 packets, the video stream is delivered at its full rate, and when the direct
 link fails the traffic is restored automatically through the relay in under
-three seconds. Crucially, inserting the relay changes almost nothing: the
+three seconds. Inserting the relay changes almost nothing: the
 latency, the throughput, and the timing of the stream are practically the same
 whether the video travels directly or through an intermediate node. This is the
 central practical result, the relay is, in effect, invisible to the

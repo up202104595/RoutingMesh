@@ -550,8 +550,8 @@ into the queue and the loop exits. The packet will be sent in the next slot of t
 later. This back-pressure mechanism ensures that the transmitter thread stops \emph{offering}
 data to the channel before its slot expires, regardless of queue depth or packet size.
 
-It is worth being precise about what this mechanism does and does not control, because the
-data plane runs over TCP. The transmitter releases each packet with a \texttt{send()} call,
+What this mechanism does and does not control depends on the
+data plane running over TCP. The transmitter releases each packet with a \texttt{send()} call,
 which copies the data into the socket and transmit buffers of the kernel and returns; the kernel
 then schedules the actual transmission on its own terms (TCP flow and congestion control,
 then CSMA/CA medium access). The byte budget therefore bounds the \emph{volume} of data
