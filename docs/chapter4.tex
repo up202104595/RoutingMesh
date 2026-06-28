@@ -1446,9 +1446,15 @@ the instant N2 receives a video frame from N1 it re-transmits it, which happens
 inside N1's slot rather than within a slot of N2's own. With the
 three nodes in mutual range on one channel, these out-of-slot relay
 transmissions contend with, and collide with, the synchronisation beacons, and
-the resulting beacon loss stresses the RA-TDMAs+ synchroniser. This coupling is
-not a surprise: Morais herself documents it, noting that forwarding delays at
-the kernel level can place stress on the network and end up ``influencing the
+the resulting beacon loss stresses the RA-TDMAs+ synchroniser. This is the same
+data-plane-to-synchroniser coupling already discussed for our own incursions in
+Section~\ref{subsubsec:video-slot}, the one Pinto and Almeida evidenced as a
+protocol-level problem where out-of-slot transmissions stress the
+synchroniser~\cite{pinto2018robust, ramos2018aerial}. Here it is far more severe,
+because the non-slot-aware relay re-transmits \emph{every} forwarded frame out of
+slot rather than merely letting a burst spill slightly at the slot edge. Morais
+documents the same coupling from her own side, noting that forwarding delays at
+the kernel level place stress on the network and end up ``influencing the
 synchronization protocol''. In our conditions the coupling was strong enough to
 push neighbours past the $2.0$\,s aging timeout in bursts, so the route
 oscillated between direct and relayed and the video was delivered in the
