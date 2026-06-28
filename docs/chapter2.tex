@@ -37,7 +37,7 @@ select the same backoff value, their transmissions collide.
 
 A more subtle problem arises from the limited range of wireless radios. Two nodes
 that are each within range of a common third node may be out of range of each
-other, so neither can detect the other's transmissions. When both transmit
+other, so neither can detect the transmissions of the other. When both transmit
 simultaneously, the frames collide at the common node without either sender
 being aware. This is the hidden terminal problem, and it cannot be fully
 resolved by CSMA/CA alone. Under high traffic load, repeated collisions and
@@ -53,12 +53,7 @@ pre-existing infrastructure. Each device is simultaneously a communication
 endpoint and a potential relay for traffic destined to other nodes. When two
 nodes are not within direct radio range, packets can still reach their
 destination by traversing one or more intermediate relay nodes, a mechanism
-known as multi-hop forwarding. This is illustrated in Figure~\ref{fig:manet}:
-the source (S) and the destination (D) lie beyond each other's radio range, so
-their traffic cannot travel in a single hop and is instead carried hop by hop
-through the intermediate relays A and B, along the highlighted route. The dashed
-circle marks the radio range of the source, which reaches A and C but not D,
-which is precisely why a relay is needed.
+known as multi-hop forwarding.
 
 A Mobile Ad-hoc Network (MANET) extends this concept to scenarios where nodes
 move freely~\cite{conti2014mobile}. Node mobility causes the set of available
@@ -66,19 +61,10 @@ wireless links to change continuously: a link that exists at one moment may
 disappear moments later as a node moves out of radio range, and new links
 appear when nodes move into range of each other. Routing protocols must
 therefore adapt continuously, detecting link failures and computing alternative
-paths without any centralised coordinator. This dynamic behaviour is also
-visible in Figure~\ref{fig:manet}, where node F is moving away and its link to B
-is breaking, forcing any route that relied on it to be recomputed.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.85\textwidth]{manet}
-\caption{A multi-hop mobile ad-hoc network: the source (S) reaches the destination (D) through intermediate relays, and node mobility continuously changes the available links.}
-\label{fig:manet}
-\end{figure}
+paths without any centralised coordinator.
 
 MANETs impose additional constraints beyond those of static ad-hoc
-networks~\cite{eltahlawy2023survey,xiang2018performance}.
+networks~\cite{eltahlawy2023survey}.
 Nodes are typically battery-powered, so energy efficiency in protocol design
 matters. The topology can change faster than routing protocol convergence
 times, creating transient periods during which some destinations are
@@ -109,6 +95,15 @@ forwarding decisions into the kernel. The \textbf{Transport layer} provides
 end-to-end reliability and flow control (TCP) or lightweight datagram delivery
 (UDP). \textbf{Application layer} protocols make use of the transport
 services; in this work the application is a real-time video stream.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\textwidth]{networklayer}
+\caption{The layered network model and representative protocols at each layer.
+RA-TDMAs+ overlays the IEEE~802.11 CSMA/CA medium-access control at the data link
+layer, and IP operates at the network layer.}
+\label{fig:networklayer}
+\end{figure}
 
 The distinction between Layer 2 (data link) and Layer 3 (network) forwarding
 is central to understanding the difference between the previous routing
@@ -160,8 +155,7 @@ the sequence repeats periodically.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.78\textwidth]{fig_tdma_round}
-\caption{TDMA round structure. Each node is assigned one numbered slot
-per round; the round repeats with period $T$.}
+\caption{TDMA round structure~\cite{morais2024synchronization}.}
 \label{fig:tdma-round}
 \end{figure}
 
@@ -179,8 +173,8 @@ lock onto. In ad-hoc networks this centralised reference does not exist,
 and a distributed synchronisation mechanism is needed instead.
 
 RA-TDMA addresses this by having nodes synchronise through the timing
-of each other's transmissions, without requiring any shared external
-clock. Each node transmits a state packet at the beginning of its
+of the transmissions they receive from one another, without requiring any
+shared external clock. Each node transmits a state packet at the beginning of its
 designated slot. Receivers observe when those packets arrive and
 compare the arrival time to the expected time, deriving a per-packet
 delay estimate. These estimates are used to progressively adjust slot
@@ -204,8 +198,8 @@ accumulates at the destination.
 
 The synchronisation mechanism works as follows. The header of each
 transmitted packet carries the slot ID and the transmission offset
-$p_k$, defined as the time elapsed since the start of the sender's
-slot at the moment the packet was sent. A receiving node $j$ observes
+$p_k$, defined as the time elapsed since the start of the slot of the sender
+at the moment the packet was sent. A receiving node $j$ observes
 the real arrival time $rx_k$ of packet $k$ from node $i$ and computes
 the synchronisation delay $\delta_k$ as the difference between the
 observed arrival and the arrival that would have occurred if the two
@@ -220,8 +214,8 @@ The modular arithmetic, denoted by the subscript $T$, wraps the result
 into the interval $(-T/2,\; T/2)$, disambiguating whether the packet
 arrived early or late relative to the expected slot.
 
-To compute $\hat{rx}_k$, the receiver must first estimate where node
-$i$'s slot begins. Given that node $j$ knows its own slot start
+To compute $\hat{rx}_k$, the receiver must first estimate where the slot of
+node $i$ begins. Given that node $j$ knows its own slot start
 $B^{(j)}$ and that slots are of equal length $s = T/n$ and ordered by
 node ID, the expected slot start of node $i$ as seen by node $j$ is:
 
@@ -306,7 +300,7 @@ remains fixed. Each node receives exactly one slot of duration
 $t_{slot} = T_{up} / N$, so that as the team grows, slot duration
 decreases proportionally, allowing new members to be absorbed without
 changing the total round period. Slots are assigned in ascending order
-of each node's unique numeric ID: the node with the smallest ID in
+of the unique numeric ID of each node: the node with the smallest ID in
 $\tau_A$ receives slot $s_0$, the next smallest $s_1$, and so on. For
 example, if $\tau_A = \{\text{ID}_2, \text{ID}_3, \text{ID}_5\}$,
 then $\text{ID}_2 \to s_0$, $\text{ID}_3 \to s_1$, and
@@ -393,13 +387,13 @@ essential for correct slot allocation. Node additions and removals are
 detected through the connectivity matrix:
 
 \begin{itemize}
-  \item \textbf{Node joins:} when a new node's row appears for the
+  \item \textbf{Node joins:} when the row of a new node appears for the
     first time in a received matrix broadcast, the local copy is
     extended with a new row and column, $N$ is incremented, and the
     TDMA core is notified to reorganise the round. The updated layout
     propagates through the network in the following broadcast.
 
-  \item \textbf{Node leaves:} when a node's row has not been refreshed
+  \item \textbf{Node leaves:} when the row of a node has not been refreshed
     for longer than the dead-link timeout \texttt{MAX\_AGE} (2.0\,s in
     the implementation used in this work, roughly thirteen rounds at a
     150\,ms frame), all nodes independently detect the departure,
@@ -460,7 +454,7 @@ virtual device and with plug-in modules through AF\_UNIX local sockets
 
 \texttt{TDMA\_Core} is the central component of the framework and is responsible for managing
 medium access according to the TDMA slot schedule. It implements four concurrent threads.
-The transmit thread (TX) is scheduled to wake at the beginning of the node's assigned slot and
+The transmit thread (TX) is scheduled to wake at the beginning of the slot assigned to the node and
 remains dormant for the rest of the frame. When active, it dequeues pending packets, prepends
 a TDMA header, and forwards them via a UDP socket over the wireless interface (\texttt{wlan0}).
 The TDMA header carries the packet type, a global sequence number, the relative sending
@@ -484,8 +478,8 @@ The framework exposes the network to applications through a TUN virtual network 
 (\texttt{tun0}). TUN operates at Layer~3, handling IP packets as if they were passing through a
 physical network interface card, unlike TAP which operates at Layer~2 and processes Ethernet
 frames. IP packets sent by an application to \texttt{tun0} are read by \texttt{TDMA\_Core} in
-user space, encapsulated with the TDMA header, and queued for transmission during the node's
-slot. On the receive side, stripped payloads are injected back into \texttt{tun0} and delivered
+user space, encapsulated with the TDMA header, and queued for transmission during the slot of
+the node. On the receive side, stripped payloads are injected back into \texttt{tun0} and delivered
 to the destination application as ordinary IP datagrams, making the TDMA transport layer
 transparent to higher layers. Figure~\ref{fig:tdma-header} illustrates the headers a packet
 carries when leaving the TDMA framework.
@@ -511,7 +505,7 @@ active nodes, their respective identifiers, the connectivity matrix containing l
 between nodes, and a per-row age vector that allows the most recent information to be retained.
 These fields are stored in the \texttt{tdma\_matrix\_t} structure shown in
 Code Block~\ref{lst:matrix}, which is serialised into a compact beacon and broadcast via multicast
-at the beginning of each node's slot. Figure~\ref{fig:matrix-packet} shows the layout of this
+at the beginning of the slot of each node. Figure~\ref{fig:matrix-packet} shows the layout of this
 beacon packet.
 
 \begin{figure}[H]
@@ -715,7 +709,7 @@ messages~\cite{almayouf2025enhancing}.}
 
 OLSR excels in large, dense networks where the MPR optimisation yields the greatest savings
 in control overhead. In sparse networks with few two-hop neighbours the MPR mechanism
-offers diminishing returns and the protocol's overhead approaches that of standard link-state
+offers diminishing returns and the overhead of the protocol approaches that of standard link-state
 flooding. The protocol is also more complex to implement and to tune than DSDV, requiring
 careful selection of Hello and TC intervals to balance responsiveness against overhead.
 
@@ -743,8 +737,8 @@ disadvantages are that full-path headers increase packet overhead as hop count g
 in highly mobile networks the route cache becomes stale quickly, increasing the frequency of
 rediscoveries and therefore the effective control overhead.
 
-\textbf{Ad-hoc On-demand Distance Vector (AODV)}~\cite{perkins1999adhoc} shares DSR's on-demand
-discovery model
+\textbf{Ad-hoc On-demand Distance Vector (AODV)}~\cite{perkins1999adhoc} shares the on-demand
+discovery model of DSR
 using the same RREQ/RREP/RERR message types but stores only the next hop toward each
 known destination at each intermediate node, keeping routing state in per-hop tables rather
 than in packet headers. Sequence numbers borrowed from DSDV ensure that only fresh route
@@ -851,7 +845,7 @@ approach, as analysed by Morais~\cite{morais2024synchronization}.
 
 For reactive protocols, flooding a RREQ to discover routes is redundant when the topology is already known at every
 node from the MATRIX beacon. Moreover, in a TDMA network each hop of a RREQ flood
-must wait for the transmitting node's assigned slot before the request can be forwarded. A
+must wait for the slot assigned to the transmitting node before the request can be forwarded. A
 three-hop discovery therefore requires at least three complete frame periods to complete. At a
 typical frame period, this represents hundreds of milliseconds of unavoidable latency per
 discovery, which is unacceptable for real-time video teleoperation. Additionally, the reactive
@@ -860,7 +854,7 @@ wasting the infrastructure that the medium-access layer has already established.
 
 For proactive protocols, the periodic sharing of the connectivity matrix in RA-TDMAs+ is itself a proactive topology
 exchange, so proactive routing is the natural fit. However, standard proactive protocols
-introduce redundancy. OLSR's Hello messages duplicate the neighbour-discovery function
+introduce redundancy. The Hello messages of OLSR duplicate the neighbour-discovery function
 already performed by the MATRIX beacon; the MPR selection mechanism reduces flooding
 overhead but provides diminishing returns in the small networks typical of robotic deployments
 where nearly all nodes are within two hops of each other. DSDV requires nodes to share a
@@ -989,7 +983,7 @@ primary entry (\texttt{next}), and a pointer to the secondary list of reachable 
 
 The original MATRIX beacon carried only connectivity and identifier information, with no MAC
 address data. Since ARP injection requires MAC addresses, Morais extended the
-\texttt{tdma\_matrix\_t} structure to include each node's MAC address as an additional field,
+\texttt{tdma\_matrix\_t} structure to include the MAC address of each node as an additional field,
 adding six bytes to every state beacon. Figure~\ref{fig:statshare-ana} shows the updated beacon
 layout.
 
@@ -1004,7 +998,7 @@ field~\cite{morais2024synchronization}.}
 \bigskip
 
 The updated structure is shown in Code Block~\ref{lst:matrix-ana}. When a node receives a beacon,
-it records the sender's MAC address in a shared-memory table indexed by node identifier. The
+it records the MAC address of the sender in a shared-memory table indexed by node identifier. The
 address is retained only while the corresponding link remains active.
 
 \medskip
@@ -1023,7 +1017,7 @@ typedef struct {
 \end{lstlisting}
 
 The collected MAC addresses are stored in a shared-memory structure, \texttt{macArraySHM\_t},
-whose entries pair each MAC address with the last octet of the node's IP address (used as the
+whose entries pair each MAC address with the last octet of the IP address of the node (used as the
 node identifier in the framework):
 
 \medskip
@@ -1101,8 +1095,8 @@ The OUTPUT chain marks all outgoing \texttt{wlan0} packets with a non-zero mark,
 resets the mark to zero for TDMA framework packets identified by their fixed UDP port number
 (4000 + node~ID). A policy routing rule then sends all marked packets to a secondary routing
 table that routes them through \texttt{tun0}. This mechanism ensures that only application
-traffic enters the TDMA framework, while the framework's own UDP transmissions are excluded
-to prevent routing loops.
+traffic enters the TDMA framework, while the UDP transmissions of the framework itself are
+excluded to prevent routing loops.
 
 When a packet arrives at \texttt{tun0} at the destination node, it must be delivered back to the
 application on \texttt{wlan0}. A raw socket of type \texttt{IPPROTO\_RAW} reads the packet
