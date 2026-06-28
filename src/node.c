@@ -40,6 +40,14 @@
 #define SLOT_USEFUL_US   (SLOT_DURATION_US - GUARD_US)
 #define MAX_BYTES_SLOT   ((SLOT_USEFUL_US / T_TRANS_US(1500)) * 1500ULL)
 
+/* ---- Experimental, rate-agnostic slot send control -----------------------
+ * Fraction of the (synchronised) slot window during which packets may still be
+ * OFFERED to the kernel. The remaining (1-PACING_FRAC) is reserved as drain
+ * headroom, so the last packet reaches the air before the slot boundary.
+ * Uses ONLY the slot duration (from synchronisation) and the queue depth --
+ * never an assumed link rate such as WIFI_BPS. */
+#define PACING_FRAC      0.80
+
 /* Tamanho REAL do cabecalho MSG_DATA no fio (campos ate payload), SEM o array
  * fixo payload[1500]. Usar sizeof(msg_data_hdr_t) enviava o buffer inteiro
  * (~1.5KB) a cada pacote — inflava cada pacote para >1500 bytes. */
@@ -636,8 +644,22 @@ void* tx_loop(void *arg) {
         uint64_t bytes_sent = 0;
         tx_pkt_t *pkt;
 
+        /* Rate-agnostic send control (experimental): em vez de um teto de bytes
+         * derivado de uma taxa de link ASSUMIDA (WIFI_BPS), usamos so a duracao
+         * do slot (da sincronizacao) e a profundidade da fila. (1) paramos de
+         * oferecer em PACING_FRAC do slot (margem de escoamento) e (2) espacamos
+         * os envios por essa janela, evitando bunching junto a fronteira. */
+        uint64_t pace_start  = get_time_us();
+        uint64_t pace_cutoff = (slot_end > pace_start)
+                               ? pace_start + (uint64_t)((double)(slot_end - pace_start) * PACING_FRAC)
+                               : pace_start;
+        int      pace_q      = tx_queue_size(node->tx_queue);
+        if (pace_q < 1) pace_q = 1;
+        uint64_t pace_intv   = (pace_cutoff > pace_start)
+                               ? (pace_cutoff - pace_start) / (uint64_t)pace_q : 0;
+
         while ((pkt = tx_queue_pop(node->tx_queue)) != NULL) {
-            if (get_time_us() >= slot_end) {
+            if (get_time_us() >= pace_cutoff) {
                 tx_queue_push(node->tx_queue, pkt->data, pkt->len, pkt->dst_id);
                 free(pkt);
                 break;
@@ -665,11 +687,8 @@ void* tx_loop(void *arg) {
             data->msg_id   = data_msg_id++;
             data->data_len = (uint16_t)pkt->len;
 
-            if (bytes_sent + sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE + pkt->len > MAX_BYTES_SLOT) {
-                tx_queue_push(node->tx_queue, pkt->data, pkt->len, pkt->dst_id);
-                free(pkt);
-                break;
-            }
+            /* (byte-budget baseado em WIFI_BPS removido: o controlo passa a ser
+             * o gate de tempo pace_cutoff + pacing, ambos rate-agnostic) */
 
             memcpy(data->payload, pkt->data, pkt->len);
             data->data_len = (uint16_t)pkt->len;
@@ -716,6 +735,15 @@ void* tx_loop(void *arg) {
             printf("[TX] MSG_DATA  dst=%d  next_hop=%d(%s)  msg_id=%u  ip_len=%u  sent=%zd\n",
                    data->dst_id, next_hop, next_hop_ip, data->msg_id, data->data_len, sent);
             if (sent > 0) { pkts_sent++; bytes_sent += (uint64_t)sent; }
+
+            /* (2) pacing rate-agnostic: espera ate ao instante-alvo do proximo
+             * pacote, distribuindo os envios pela janela [pace_start, pace_cutoff]. */
+            if (pace_intv > 0) {
+                uint64_t pace_target = pace_start + (uint64_t)pkts_sent * pace_intv;
+                uint64_t pace_now    = get_time_us();
+                if (pace_now < pace_target && pace_target < pace_cutoff)
+                    usleep((useconds_t)(pace_target - pace_now));
+            }
         }
 
         /* END-OF-SLOT: sincroniza o slot UMA vez no fim do nosso slot, depois de
