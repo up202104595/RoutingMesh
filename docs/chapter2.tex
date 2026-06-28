@@ -126,7 +126,7 @@ synchronisation without requiring GPS or any external time reference,
 reduces interference among team members, and runs as an overlay on top of
 the underlying IEEE 802.11 CSMA/CA hardware, which continues to handle
 external interference from nodes outside the team. The protocol is the
-product of combining the synchronisation method of RA-TDMAs~\cite{sousa2012ra}
+product of combining the synchronisation method of RA-TDMAs~\cite{pinto2018robust}
 with the topology-tracking and membership-management mechanisms of
 RA-TDMA+~\cite{oliveira2018clockless}, taking the most effective features
 of each. This same line of work has previously been applied to multi-hop
@@ -160,7 +160,8 @@ the sequence repeats periodically.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.78\textwidth]{fig_tdma_round}
-\caption{TDMA round structure: each node owns one numbered slot per round of period $T$.}
+\caption{TDMA round structure. Each node is assigned one numbered slot
+per round; the round repeats with period $T$.}
 \label{fig:tdma-round}
 \end{figure}
 
@@ -186,7 +187,7 @@ delay estimate. These estimates are used to progressively adjust slot
 boundaries so that overlaps are driven toward zero. The protocol can
 be layered on top of any wireless communication technology.
 
-Two versions of RA-TDMA are relevant to this work: RA-TDMAs~\cite{sousa2012ra},
+Two versions of RA-TDMA are relevant to this work: RA-TDMAs~\cite{pinto2018robust},
 which contributed the synchronisation algorithm, and
 RA-TDMA+~\cite{oliveira2018clockless}, which contributed the
 topology-tracking mechanism.
@@ -194,7 +195,7 @@ topology-tracking mechanism.
 \subsection{RA-TDMAs: Synchronisation Algorithm}
 \label{sec:ratdmas-sync}
 
-RA-TDMAs~\cite{sousa2012ra} was originally developed to support video
+RA-TDMAs~\cite{pinto2018robust} was originally developed to support video
 streaming between Unmanned Aerial Vehicles (UAVs) and a ground base
 station over a multi-hop line topology. In this setting each UAV relays
 the video stream one hop closer to the base station, up to a maximum of
@@ -342,7 +343,10 @@ After two rounds the entire network holds a consistent shared state.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.90\textwidth]{fig_flooding}
-\caption{Flooding with aggregation, which disseminates a node's state to the whole network in two rounds.}
+\caption{Flooding with aggregation. In round~1 (left), node~4 broadcasts
+its state to its sole neighbour, node~2. In round~2 (right), node~2
+rebroadcasts the merged state to all its neighbours, completing
+global dissemination in two rounds.}
 \label{fig:flooding}
 \end{figure}
 
@@ -376,7 +380,9 @@ topology is reflected in the network graph.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.82\textwidth]{connectivity}
-\caption{Update of the connectivity matrix and topology after node~2 joins the network.}
+\caption{Update of the connectivity matrix and network topology after
+node~2 joins the network. The matrix gains a new row and column,
+and the link between node~2 and node~4 becomes visible to all nodes.}
 \label{fig:connectivity}
 \end{figure}
 
@@ -443,7 +449,10 @@ Synchroniser. Figure~\ref{fig:tdma-framework} shows the overall architecture.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.72\textwidth]{tdmaframeworkDiogo}
-\caption{Architecture of the TDMA framework~\cite{almeida2023synchronization}.}
+\caption{Architecture of the TDMA framework~\cite{almeida2023synchronization}.
+The \texttt{TDMA\_Core} communicates with the application through the TUN
+virtual device and with plug-in modules through AF\_UNIX local sockets
+(red) and shared memory (green).}
 \label{fig:tdma-framework}
 \end{figure}
 
@@ -484,7 +493,9 @@ carries when leaving the TDMA framework.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.75\textwidth]{headerstdma}
-\caption{Headers present in a packet leaving the TDMA framework~\cite{almeida2023synchronization}.}
+\caption{Headers present in a packet leaving the TDMA framework. The application payload
+(Transport and Application layers) is encapsulated with the TDMA header and transmitted via
+a UDP socket over \texttt{wlan0}~\cite{almeida2023synchronization}.}
 \label{fig:tdma-header}
 \end{figure}
 
@@ -506,7 +517,8 @@ beacon packet.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{matrixpacket}
-\caption{Structure of the matrix beacon broadcast by each node in its slot~\cite{almeida2023synchronization}.}
+\caption{Structure of the matrix beacon packet broadcast by each node at the beginning of its
+slot~\cite{almeida2023synchronization}.}
 \label{fig:matrix-packet}
 \end{figure}
 
@@ -590,7 +602,10 @@ Figure~\ref{fig:sync-module} illustrates the complete execution cycle of the Syn
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.70\textwidth]{syncmodule}
-\caption{Execution cycle of the Synchroniser module~\cite{almeida2023synchronization}.}
+\caption{Execution cycle of the Synchroniser module. The module wakes near the end of each
+round, reads and filters packet delays from shared memory, computes the bounded shift
+$\Delta(r)$, and delivers it to \texttt{TDMA\_Core} via AF\_UNIX before the next round
+begins~\cite{almeida2023synchronization}.}
 \label{fig:sync-module}
 \end{figure}
 
@@ -621,7 +636,9 @@ mesh.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.85\textwidth]{adhoc_routing_taxonomy}
-\caption{Taxonomy of ad-hoc routing protocols~\cite{bhatia2022networked}.}
+\caption{Taxonomy of ad-hoc routing protocols, organised into flat
+(proactive and reactive), hierarchical, and geographical position-assisted
+families~\cite{bhatia2022networked}.}
 \label{fig:routing-taxonomy}
 \end{figure}
 
@@ -689,7 +706,10 @@ two-hop neighbourhood, and only these MPRs retransmit its control traffic~\cite{
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.62\textwidth]{olsr_mpr}
-\caption{Multipoint Relay (MPR) selection in OLSR, where only the chosen MPRs retransmit flooded control messages~\cite{almayouf2025enhancing}.}
+\caption{Multipoint Relay (MPR) selection in OLSR: the source $S$ designates a minimal subset
+of its one-hop neighbours ($M_1$, $M_2$, $M_3$, filled) that covers all of its two-hop
+neighbourhood, so that only the MPRs retransmit flooded control
+messages~\cite{almayouf2025enhancing}.}
 \label{fig:olsr-mpr}
 \end{figure}
 
@@ -739,7 +759,10 @@ travels back along the established reverse path~\cite{bhatia2022networked}.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.95\textwidth]{aodv_route_discovery}
-\caption{On-demand route discovery in AODV~\cite{bhatia2022networked}.}
+\caption{On-demand route discovery in AODV: the source $S$ floods a Route Request (RREQ)
+that propagates towards the destination $D$, and a Route Reply (RRES) returns along the
+established reverse path; each node is tagged with its destination sequence
+number~\cite{bhatia2022networked}.}
 \label{fig:aodv-discovery}
 \end{figure}
 
@@ -796,7 +819,9 @@ tree structure without ambiguity or any further search.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{MSTexample}
-\caption{MST topology update after a node moves and a new node joins~\cite{morais2024synchronization}.}
+\caption{MST topology update after a node movement and a new node join. On the left, the
+original spanning tree; on the right, the recomputed tree after node~E changes position
+(orange) and node~H is added as a new entry (green)~\cite{morais2024synchronization}.}
 \label{fig:mst-example}
 \end{figure}
 
@@ -906,7 +931,10 @@ after the addition of the routing module.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\textwidth]{frameworkAna}
-\caption{Updated TDMA framework architecture incorporating the Routing module~\cite{morais2024synchronization}.}
+\caption{Updated TDMA framework architecture incorporating the Routing
+module~\cite{morais2024synchronization}. The Routing module reads the MAC address table
+and the Spanning Tree from shared memory and updates the kernel ARP table via
+\texttt{ioctl()} system calls.}
 \label{fig:framework-ana}
 \end{figure}
 \bigskip
@@ -931,7 +959,9 @@ source nodes.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist1}
-\caption{Routing linked list for example source nodes A, C, and G~\cite{morais2024synchronization}.}
+\caption{Routing linked list for three example source nodes A, C, and G. Each primary entry
+corresponds to a directly connected neighbour; its secondary list contains all nodes reachable
+through that neighbour~\cite{morais2024synchronization}.}
 \label{fig:linkedlist1}
 \end{figure}
 \bigskip
@@ -967,7 +997,8 @@ layout.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{statshareAna}
-\caption{Updated state beacon layout, extending the original fields with a MAC address~\cite{morais2024synchronization}.}
+\caption{Updated state beacon layout, extending the original four fields with a MAC address
+field~\cite{morais2024synchronization}.}
 \label{fig:statshare-ana}
 \end{figure}
 \bigskip
@@ -1019,7 +1050,9 @@ the correct MAC address for ARP injection in a single list traversal.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist2}
-\caption{MAC address association in the routing linked list for source nodes A and G~\cite{morais2024synchronization}.}
+\caption{MAC address association in the routing linked list for source nodes A and G. The MAC
+address of each direct neighbour is stored alongside its secondary list of reachable
+nodes~\cite{morais2024synchronization}.}
 \label{fig:linkedlist2}
 \end{figure}
 \bigskip
@@ -1048,7 +1081,9 @@ before the list is rebuilt from the DFS output.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\textwidth]{linkedlist}
-\caption{Incremental routing table update for source node~A~\cite{morais2024synchronization}.}
+\caption{Incremental routing table update for source node~A. The DFS over neighbour~C yields
+the sorted array $\{E, F, G, H\}$; comparing it against the existing secondary list reveals H as
+a new addition (green), inserted without modifying the unchanged entries~\cite{morais2024synchronization}.}
 \label{fig:linkedlist-update}
 \end{figure}
 \bigskip
