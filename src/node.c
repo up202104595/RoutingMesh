@@ -653,7 +653,15 @@ void* tx_loop(void *arg) {
         uint64_t pace_cutoff = (slot_end > pace_start)
                                ? pace_start + (uint64_t)((double)(slot_end - pace_start) * PACING_FRAC)
                                : pace_start;
+        /* Estimativa MEDIDA do volume por slot: media exponencial (EWMA) dos
+         * pacotes efetivamente enviados em slots anteriores -- procura real,
+         * sem qualquer taxa de link assumida. Usamos a maior entre a fila atual
+         * e a media aprendida, para o intervalo de pacing ser estavel mesmo que
+         * cheguem mais pacotes durante o slot. */
+        static double est_pkts_slot = 0.0;
         int      pace_q      = tx_queue_size(node->tx_queue);
+        int      est         = (int)(est_pkts_slot + 0.5);
+        if (est > pace_q) pace_q = est;
         if (pace_q < 1) pace_q = 1;
         uint64_t pace_intv   = (pace_cutoff > pace_start)
                                ? (pace_cutoff - pace_start) / (uint64_t)pace_q : 0;
@@ -745,6 +753,10 @@ void* tx_loop(void *arg) {
                     usleep((useconds_t)(pace_target - pace_now));
             }
         }
+
+        /* Atualiza a estimativa MEDIDA do volume (so em slots ativos). */
+        if (pkts_sent > 0)
+            est_pkts_slot = 0.2 * (double)pkts_sent + 0.8 * est_pkts_slot;
 
         /* END-OF-SLOT: sincroniza o slot UMA vez no fim do nosso slot, depois de
          * ter recolhido os delays dos beacons dos vizinhos durante a ronda.
