@@ -126,8 +126,7 @@ impractical for a mobile network.
 if the TCP send buffer fills because the peer is slow or unreachable but not yet detected as
 dead, the \texttt{send()} call inside the transmitter thread would block indefinitely. Because the
 transmitter thread must release the channel before the TDMA slot boundary, an indefinitely
-blocking send would cause it to overstay the slot and transmit into the following node's
-allocation, corrupting slot boundaries for all nodes in the network.
+blocking send would cause it to overstay the slot and transmit into the allocation of the following node, corrupting slot boundaries for all nodes in the network.
 
 \textbf{\texttt{SO\_RCVTIMEO}} applies a two-second timeout to receive operations. Without
 it, the per-peer receive thread would block on \texttt{recv()} indefinitely if the peer stops
@@ -166,7 +165,7 @@ identifier so the Core can reorganise the round before the next transmission.
 The Routing module reads two inputs from shared memory: the Spanning Tree produced by
 the Topology-Tracking module, and the per-link quality scores maintained by the PDR
 sub-module. Because node identifiers in the framework correspond directly to the last octet
-of each node's IP address, no separate IP address distribution is required; the Routing
+of the IP address of each node, no separate IP address distribution is required; the Routing
 module derives every destination IP from the node identifiers already present in the Spanning
 Tree. This contrasts with the Layer~2 approach of Morais~\cite{morais2024synchronization},
 which required distributing MAC addresses through the MATRIX beacon because MAC
@@ -213,8 +212,7 @@ hop and retransmitting on the wireless interface, leaving the IP header untouche
 the entire path. This approach proved effective in the experimental context of that work,
 requiring no changes to the kernel IP stack and keeping the implementation compact.
 
-To enable MAC-based forwarding, Morais extended the MATRIX beacon to distribute each
-node's MAC address across the mesh, a clean solution that kept all necessary information
+To enable MAC-based forwarding, Morais extended the MATRIX beacon to distribute the MAC address of each node across the mesh, a clean solution that kept all necessary information
 within the existing beacon infrastructure. A notable advantage of this design is that
 topology changes require only a lightweight update to the ARP table entries, with no
 interaction with the kernel routing subsystem. This makes route recomputation fast and
@@ -271,7 +269,7 @@ TCP RX (per peer) & \texttt{tcp\_rx\_peer\_loop()}    & Receives MSG\_DATA from 
 \end{table}
 
 The transmitter thread is the timing-critical component. It wakes at the beginning of the
-node's assigned TDMA slot, drains the transmission queue, and sends each queued packet
+assigned TDMA slot of the node, drains the transmission queue, and sends each queued packet
 over the appropriate TCP connection to the next-hop peer determined by the routing module.
 The TUN reader thread runs continuously, capturing outgoing IP packets from \texttt{tun0} and
 pushing them into the transmission queue with the destination peer ID, decoupling packet
@@ -318,7 +316,7 @@ Four synchronisation primitives protect shared state accessed by multiple thread
 \subsection{Transmission Queue}
 
 The transmission queue (\texttt{tx\_queue.c}) is a circular buffer that stores packets captured
-from \texttt{tun0} until the transmitter thread can send them during the node's TDMA slot.
+from \texttt{tun0} until the transmitter thread can send them during the TDMA slot of the node.
 Its parameters are a capacity of 64 packets (\texttt{TX\_QUEUE\_CAPACITY}) and a maximum
 entry size of 2048 bytes (\texttt{TX\_QUEUE\_MAX\_PKT\_SIZE}). When the buffer is full, the
 oldest packet at the head is discarded to make room for the new arrival (tail-drop policy),
@@ -335,7 +333,7 @@ Morais~\cite{morais2024synchronization}: primary list entries represent directly
 neighbours, and each primary entry carries a secondary list of all nodes reachable through
 that neighbour, as described in Section~\ref{sec:related-work}. The \texttt{routingList\_t}
 type is unchanged. In the Layer~3 design no MAC address distribution is needed: the routing module derives each
-destination's IP address directly from its node identifier as the last octet of the
+destination IP address directly from its node identifier as the last octet of the
 10.0.0.0/24 prefix, so the lookup result is a TCP socket index rather than a link-layer
 address.
 
@@ -430,7 +428,7 @@ that the kernel forwards IP packets between interfaces; without it, packets arri
 \texttt{tun\textit{id}} would be silently dropped instead of being routed towards
 \texttt{wlan0}. \texttt{net.ipv4.conf.*.rp\_filter} is disabled on all relevant interfaces
 because relay traffic injected through \texttt{tun\textit{id}} originates from the
-10.0.0.0/24 prefix but exits on \texttt{wlan0}; the kernel's reverse-path check would
+10.0.0.0/24 prefix but exits on \texttt{wlan0}; the reverse-path check of the kernel would
 reject these packets if left enabled.
 
 The wireless interface \texttt{wlan0} is placed in IEEE~802.11 ad-hoc mode with a fixed
@@ -450,7 +448,7 @@ thread can capture it. This is achieved through three iptables and policy routin
 First, an \texttt{iptables} mangle rule in the OUTPUT chain marks all outgoing
 \texttt{wlan0} packets destined for \texttt{10.0.0.0/24} with \texttt{fwmark~1}. A second
 rule immediately clears the mark for TDMA beacon packets, identified by their fixed UDP
-source port (\texttt{7000\,+\,\textit{id}}), so that the framework's own control traffic
+source port (\texttt{7000\,+\,\textit{id}}), so that the control traffic of the framework itself
 never enters the TUN path. Finally, a policy routing rule directs all packets with
 \texttt{fwmark~1} to table~100, which holds a single default route via
 \texttt{tun\textit{id}}.
@@ -464,8 +462,8 @@ next-hop peer ID, and sends the framed packet over the corresponding TCP connect
 \subsection{Relay Forwarding Path (Table~200)}
 
 When a relay node receives a TCP packet destined for a further node, it injects the IP
-payload into \texttt{tun\textit{id}} via \texttt{tun\_write()}. From the kernel's
-perspective the packet appears as traffic arriving on the TUN interface and requiring IP
+payload into \texttt{tun\textit{id}} via \texttt{tun\_write()}. From the perspective of the kernel
+the packet appears as traffic arriving on the TUN interface and requiring IP
 forwarding. A policy rule with priority~100, lower than the default table priority of
 32766, directs all packets ingressing on \texttt{tun\textit{id}} to table~200, where
 the Routing module installs a \texttt{/32} host route per destination. Each host route
@@ -473,7 +471,7 @@ specifies the physical \texttt{172.20.10.\textit{x}} address of the next-hop nod
 gateway and \texttt{wlan0} as the outgoing interface, so forwarded packets exit directly
 onto the ad-hoc link without re-entering \texttt{tun\textit{id}}. Two \texttt{iptables}
 FORWARD rules explicitly permit traffic in both directions between \texttt{tun\textit{id}}
-and \texttt{wlan0}, since the Linux kernel's default FORWARD policy is DROP and relay
+and \texttt{wlan0}, since the default FORWARD policy of the Linux kernel is DROP and relay
 traffic would otherwise be silently discarded.
 
 \subsection{Kernel Route Installation via Netlink}
@@ -517,7 +515,7 @@ At teardown, \texttt{ip\_route\_flush\_table(200)} issues a single
 A limitation of the routing work of Morais~\cite{morais2024synchronization} was the
 absence of any mechanism to limit the volume of data transmitted within a single TDMA slot.
 Without such a mechanism, a burst of queued packets could cause the transmitter thread to
-overstay its slot, causing its transmissions to overlap with the following node's slot and
+overstay its slot, causing its transmissions to overlap with the slot of the following node and
 degrading synchronisation quality.
 
 This work introduces a per-slot byte budget, \texttt{MAX\_BYTES\_SLOT}, computed from the
@@ -548,16 +546,16 @@ while ((pkt = tx_queue_pop(node->tx_queue)) != NULL) {
 \end{lstlisting}
 
 If the slot boundary is reached before the queue is empty, the current packet is pushed back
-into the queue and the loop exits. The packet will be sent in the node's next slot, one round
+into the queue and the loop exits. The packet will be sent in the next slot of the node, one round
 later. This back-pressure mechanism ensures that the transmitter thread stops \emph{offering}
 data to the channel before its slot expires, regardless of queue depth or packet size.
 
 It is worth being precise about what this mechanism does and does not control, because the
 data plane runs over TCP. The transmitter releases each packet with a \texttt{send()} call,
-which copies the data into the kernel's socket and transmit buffers and returns; the kernel
+which copies the data into the socket and transmit buffers of the kernel and returns; the kernel
 then schedules the actual transmission on its own terms (TCP flow and congestion control,
 then CSMA/CA medium access). The byte budget therefore bounds the \emph{volume} of data
-handed to the kernel within a slot, which is the only quantity under the framework's control;
+handed to the kernel within a slot, which is the only quantity under the control of the framework;
 it does not, and cannot, fix the exact instant at which the kernel puts each byte on the air.
 A batch offered near the slot end may thus be transmitted by the kernel slightly into the
 following slot. This is a deliberate consequence of operating the data plane over TCP, and the
@@ -613,8 +611,7 @@ the direct case (two nodes) and the relay case (three nodes).
 Figure~\ref{fig:endtoend2} shows the direct case where source and destination are
 neighbours. The source application writes an IP packet to \texttt{tun0}; the TUN reader
 captures it and pushes it to the transmission queue; during its TDMA slot the transmitter
-sends it over the TCP connection directly to the destination. The destination's
-\texttt{tcp\_rx\_peer} thread receives it, calls \texttt{tun\_write()}, and the kernel
+sends it over the TCP connection directly to the destination. The \texttt{tcp\_rx\_peer} thread of the destination receives it, calls \texttt{tun\_write()}, and the kernel
 delivers it to the destination application via \texttt{tun0}.
 
 \begin{figure}[H]
@@ -635,19 +632,18 @@ Figure~\ref{fig:endtoend} shows the three-node relay case, traced node by node b
 
 At the source node, the video application writes IP packets addressed to the destination into \texttt{tun0}. The
 TUN reader thread captures each packet, extracts the destination identifier from the IP
-header, and pushes the packet into the transmission queue. During the source node's TDMA
-slot, the transmitter thread pops the packet, calls \texttt{routing\_manager\_lookup()} to
+header, and pushes the packet into the transmission queue. During the TDMA slot of the source node, the transmitter thread pops the packet, calls \texttt{routing\_manager\_lookup()} to
 obtain the next-hop peer ID, and sends the framed packet over the TCP connection to that
 peer. If the slot boundary is reached, remaining packets are held for the following round.
 
 At the relay node, the \texttt{tcp\_rx\_peer\_loop} thread receives the framed packet, updates the PDR estimate
 for the source link, and inspects the destination IP address. Because the destination is not
 the local node, the IP payload is written to \texttt{tun0} via \texttt{tun\_write()}. From
-there the kernel's own IP forwarding engine takes over: the policy rule for traffic
+there the IP forwarding engine of the kernel takes over: the policy rule for traffic
 ingressing on \texttt{tun0} directs the packet to table~200, whose \texttt{/32} host route
 sends it straight out of \texttt{wlan0} to the physical \texttt{172.20.10.x} address of the
 next hop. The relay therefore forwards the datagram at the network layer, without
-re-queueing it for the framework's TCP data plane, so the forwarded packet travels on the
+re-queueing it for the TCP data plane of the framework, so the forwarded packet travels on the
 air as a plain IP datagram rather than re-encapsulated framework traffic.
 
 At the destination node, the forwarded IP datagram is received on \texttt{wlan0} and the kernel delivers
@@ -676,8 +672,8 @@ the data structures, or the kernel configuration assumes a three-node topology.
 
 What does grow with the hop count is governed by the TDMA structure rather than
 by the routing design. Each additional relay adds one slot of store-and-forward
-latency, because a packet that arrives during one node's slot can only be
-retransmitted in that node's next slot, so the end-to-end delay increases by
+latency, because a packet that arrives during the slot of one node can only be
+retransmitted in the next slot of that node, so the end-to-end delay increases by
 roughly one frame period per hop. The single shared channel is also divided
 among all active nodes, so the throughput available to any one flow falls as the
 network grows, an effect inherent to a single-channel multi-hop TDMA chain
@@ -703,9 +699,9 @@ and a TCP data plane for application traffic. This separation ensures reliable, 
 delivery of video frames without affecting the beacon mechanism, and is the primary
 architectural motivation for operating at Layer~3.
 
-Second, forwarding is performed at the Network layer through the Linux kernel's own IP
-forwarding engine, making the relay path visible to standard diagnostic tools and
-compatible with the operating system's networking subsystems. A dual routing table
+Second, forwarding is performed at the Network layer through the IP
+forwarding engine of the Linux kernel, making the relay path visible to standard diagnostic tools and
+compatible with the networking subsystems of the operating system. A dual routing table
 architecture separates application-originated traffic from relay-forwarded traffic, ensuring
 correct forwarding without routing loops.
 
