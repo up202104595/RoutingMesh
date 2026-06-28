@@ -1186,40 +1186,43 @@ them, because understanding their cause is what turns the figure into evidence
 rather than a worry. Two effects combine to produce the spillover, and neither
 amounts to a loss of slot discipline.
 
-The first, and the more fundamental, lies in the data plane. When the
+The first effect, and the more fundamental, lies in the data plane. When the
 transmitter calls \texttt{send()} during N1's slot it does not put the bytes on
-the air: it hands them to the kernel's TCP/IP stack, which then schedules their
-transmission on its own terms, TCP flow and congestion control followed by
-CSMA/CA medium access. The framework therefore controls \emph{how much} it
-offers per slot but not the exact instant each byte leaves the antenna, so a
-batch of packets handed over near the slot end can be put on the air by the
-kernel a few milliseconds into the next slot. This is exactly where the per-slot
-byte budget and back-pressure mechanism (Section~\ref{sec:slot-control}) acts,
-and it is the \emph{only} lever available: at \texttt{slot\_end} the transmitter
-stops dequeuing and returns the next packet to its queue, bounding the volume of
-data offered to the kernel within the slot. It works as a coarse bound, the
-burst stays localised to N1's slot round after round rather than smearing across
-the frame, but it cannot enforce a hard wire-level boundary, because once the
-data is below the socket the transmit timing belongs to the kernel and is no
-longer ours to schedule. This is the same effect that Pinto and Almeida term
-\emph{packet spreading}, where data accumulating in the transmitter's socket
-send queue is delivered late and spills into the following
-slot~\cite{pinto2018robust, ramos2018aerial}. They mitigate it by capping the
-unsent data allowed in the socket queue to roughly a single packet, which
-\emph{reduces} the spreading but does not eliminate it; our TCP data plane does
-not yet impose even that socket-level cap. The visible incursions are
-the signature of that limit, not of the transmitter losing its slot, and
-tightening the boundary, by bounding the socket send queue as in that reference,
-gating transmission below the TCP layer, or pacing it within the slot, remains
-an open problem and a concrete improvement we identify as future work
-(Chapter~\ref{chap:conclusions}). The
-second effect is a measurement artefact of the de-rotation.
-The common frame rotation was estimated on the beacons, and the video's residual
-phase is not removed perfectly over the window, so the plotted burst wanders by
-a few milliseconds from round to round, which exaggerates the apparent incursion
-relative to the true airtime. The slow drift of the burst's position across
-rounds in Figure~\ref{fig:video-slot} is the visible signature of this residual
-rotation, not of the transmitter losing its slot.
+the air. It hands them to the kernel's TCP/IP stack, which then schedules their
+transmission on its own terms, first TCP flow and congestion control and then
+CSMA/CA medium access. The framework controls \emph{how much} it offers per slot
+but not the exact instant each byte leaves the antenna, so a batch handed over
+near the slot end can reach the air a few milliseconds into the next slot. The
+per-slot byte budget and back-pressure mechanism (Section~\ref{sec:slot-control})
+is the only lever available. At \texttt{slot\_end} the transmitter stops
+dequeuing and returns the next packet to its queue, bounding the volume offered
+to the kernel within the slot. This keeps the burst localised to N1's slot round
+after round rather than smearing across the frame, but it cannot enforce a hard
+wire-level boundary, because below the socket the transmit timing belongs to the
+kernel. This is not a fault of our implementation but a known property of the
+protocol. Pinto and Almeida already evidenced it as \emph{packet spreading},
+where data accumulating in the transmitter's socket send queue is delivered late
+and overlaps the following slot~\cite{pinto2018robust, ramos2018aerial}. They
+reduce it by capping the unsent data in the socket queue to roughly one packet,
+which lessens the spreading but does not remove it, and our TCP data plane does
+not yet impose even that cap. The visible incursions are the signature of this
+limit, not of the transmitter losing its slot. Tightening the boundary, by
+bounding the socket send queue as in that work, gating transmission below the
+TCP layer, or pacing within the slot, remains an open problem that we identify
+as future work (Chapter~\ref{chap:conclusions}).
+
+The second effect is a measurement artefact of the de-rotation. The frame does
+not stand still in wall-clock time, because the synchroniser continually
+corrects the physical-clock drift between the nodes. That drift was identified by
+Pinto and Almeida, who measured about 1\,ms every 150 rounds when the clocks are
+synchronised only at start-up, enough to overlap the slots within minutes, and
+the adaptive re-synchronisation that runs every round is precisely what absorbs
+it~\cite{pinto2018robust, ramos2018aerial}. Because that rotation was estimated
+on the beacons, the video's residual phase is not removed perfectly over the
+window, so the plotted burst wanders by a few milliseconds from round to round
+and exaggerates the apparent incursion relative to the true airtime. The slow
+drift of the burst across rounds in Figure~\ref{fig:video-slot} is the signature
+of this residual rotation, not of the transmitter losing its slot.
 
 The incursions are thus small, occasional, and bounded, consistent with the
 84 to 89\,\% in-slot fraction measured for the beacons, and they overlap only
