@@ -1089,13 +1089,7 @@ nodes, not their absolute positions, that matter. Second, the synchroniser does
 not hold the frame fixed in wall-clock time. To keep the nodes aligned it
 advances all slots by a small common amount on every round, with the effect that
 the entire frame rotates slowly against wall-clock time, at $\approx 18$\,ms/s
-in these captures. This continual forward drift is not an artefact of our
-measurement at N3 but an intrinsic property of the RA-TDMAs synchroniser: it
-arises from the protocol continually compensating for the timing difference
-between when a beacon is transmitted and when it is received, and it is
-documented by Pinto and Almeida~\cite{pinto2018robust}, with a fuller treatment
-in the PhD dissertation~\cite{ramos2018aerial}. This rotation is visible in
-Figure~\ref{fig:slots-drift},
+in these captures. This rotation is visible in Figure~\ref{fig:slots-drift},
 which plots the same beacons \emph{without} the de-rotation applied: the three
 clouds sweep diagonally across the frame as the rounds advance, each node moving
 by the same amount per round so that their mutual spacing is preserved while
@@ -1207,10 +1201,17 @@ data offered to the kernel within the slot. It works as a coarse bound, the
 burst stays localised to N1's slot round after round rather than smearing across
 the frame, but it cannot enforce a hard wire-level boundary, because once the
 data is below the socket the transmit timing belongs to the kernel and is no
-longer ours to schedule. The visible incursions are the signature of that limit,
-not of the transmitter losing its slot, and tightening the boundary, by gating
-transmission below the TCP layer or pacing it within the slot, is a concrete
-improvement we identify as future work (Chapter~\ref{chap:conclusions}). The
+longer ours to schedule. This is the same effect that Pinto and Almeida term
+\emph{packet spreading}, where data accumulating in the transmitter's socket
+send queue is delivered late and spills into the following
+slot~\cite{pinto2018robust, ramos2018aerial}; they remove it by capping the
+unsent data allowed in the socket queue to a single packet, a socket-level
+control that our TCP data plane does not yet impose. The visible incursions are
+the signature of that limit, not of the transmitter losing its slot, and
+tightening the boundary, by bounding the socket send queue as in that reference,
+gating transmission below the TCP layer, or pacing it within the slot, is a
+concrete improvement we identify as future work
+(Chapter~\ref{chap:conclusions}). The
 second effect is a measurement artefact of the de-rotation.
 The common frame rotation was estimated on the beacons, and the video's residual
 phase is not removed perfectly over the window, so the plotted burst wanders by
