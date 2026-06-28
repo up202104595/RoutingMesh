@@ -98,10 +98,10 @@ Table~\ref{tab:hardware} lists the hardware of each node.
 Platform         & AlphaBot2-Pi    & Raspberry Pi 5  & Laptop (Ubuntu 22.04) \\
 Processor        & RPi 5, 8\,GB    & RPi 5, 8\,GB    & Intel Core i7 \\
 Wireless         & Wi-Fi (ad-hoc)  & Wi-Fi (ad-hoc)  & Wi-Fi (ad-hoc) \\
-Camera           & Pi Camera v2    &,             &, \\
-Motor driver     & TB6612FNG       &,             &, \\
-Servo controller & PCA9685         &,             &, \\
-Gamepad          &,             &,             & DualShock 4 (USB) \\
+Camera           & Pi Camera v2    & --              & --                    \\
+Motor driver     & TB6612FNG       & --              & --                    \\
+Servo controller & PCA9685         & --              & --                    \\
+Gamepad          & --              & --              & DualShock 4 (USB)     \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -148,6 +148,8 @@ enables IP forwarding.
 \centering
 \caption{Network information of the active nodes}
 \label{tab:netconfig}
+\small
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lllll}
 \toprule
 \textbf{Node} & \textbf{Model} & \textbf{Physical IP} & \textbf{Mesh IP} & \textbf{MAC Address} \\
@@ -199,6 +201,7 @@ it to \texttt{ffplay}. Table~\ref{tab:app-params} lists the parameters.
 \centering
 \caption{Application parameters used in all experiments}
 \label{tab:app-params}
+\small
 \begin{tabular}{lll}
 \toprule
 \textbf{Parameter} & \textbf{Value} & \textbf{Source} \\
@@ -1054,7 +1057,8 @@ half-duplex, so N3 cannot capture during its own transmission, and its own slot
 is therefore seen from the transmit side while the other two are seen on
 reception, a small per-node timing asymmetry (a transmit-versus-reception
 timing difference also documented in the RA-TDMAs synchroniser of Pinto and
-Almeida~\cite{pinto2018robust}). N3's own transmissions also occupy
+Almeida~\cite{pinto2018robust}, with a fuller treatment in the PhD
+dissertation~\cite{ramos2018aerial}). N3's own transmissions also occupy
 part of the medium it is measuring. We accept this for three reasons. It needs no
 additional hardware or observer node. N3 is in radio range of both N1 and N2 and
 so receives all three beacons, which gives the complete slot structure. And it is
