@@ -1332,6 +1332,19 @@ and the measurements it produced. Section~\ref{subsec:l2-comparison} then draws
 the side-by-side comparison, with latency figures normalised to the frame
 period to account for the different frame durations (100\,ms with four nodes in
 the reference, 150\,ms with three nodes here).
+Figure~\ref{fig:relay-l2l3} contrasts the relay hop in the two designs.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{relay_l2_l3}
+\caption{Relay forwarding at N2 in the two designs. In the Layer~2 method the
+frame rises only to the Data Link layer, where the destination MAC is rewritten
+and the frame retransmitted, entirely within the kernel. In the Layer~3 design
+the packet rises to the user-space TCP thread and is then handed back to the
+kernel IP-forwarding engine before leaving on \texttt{wlan0}, so the relay does
+strictly more work per forwarded packet.}
+\label{fig:relay-l2l3}
+\end{figure}
 
 \subsection{Re-implementation of the Layer~2 Method}
 \label{subsec:l2-rerun}
