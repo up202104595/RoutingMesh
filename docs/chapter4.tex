@@ -1204,13 +1204,14 @@ data is below the socket the transmit timing belongs to the kernel and is no
 longer ours to schedule. This is the same effect that Pinto and Almeida term
 \emph{packet spreading}, where data accumulating in the transmitter's socket
 send queue is delivered late and spills into the following
-slot~\cite{pinto2018robust, ramos2018aerial}; they remove it by capping the
-unsent data allowed in the socket queue to a single packet, a socket-level
-control that our TCP data plane does not yet impose. The visible incursions are
+slot~\cite{pinto2018robust, ramos2018aerial}. They mitigate it by capping the
+unsent data allowed in the socket queue to roughly a single packet, which
+\emph{reduces} the spreading but does not eliminate it; our TCP data plane does
+not yet impose even that socket-level cap. The visible incursions are
 the signature of that limit, not of the transmitter losing its slot, and
 tightening the boundary, by bounding the socket send queue as in that reference,
-gating transmission below the TCP layer, or pacing it within the slot, is a
-concrete improvement we identify as future work
+gating transmission below the TCP layer, or pacing it within the slot, remains
+an open problem and a concrete improvement we identify as future work
 (Chapter~\ref{chap:conclusions}). The
 second effect is a measurement artefact of the de-rotation.
 The common frame rotation was estimated on the beacons, and the video's residual
