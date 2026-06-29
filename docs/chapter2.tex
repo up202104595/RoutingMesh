@@ -517,6 +517,7 @@ slot~\cite{almeida2023synchronization}.}
 \end{figure}
 
 \FloatBarrier
+\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}[language=C,
     caption={Variables used to save the matrix information (\texttt{matrix.c})~\cite{almeida2023synchronization}},
     label={lst:matrix}]
@@ -529,6 +530,7 @@ typedef struct {
     double  age[MNUM_DRONES];
 } __attribute__((__packed__)) tdma_matrix_t;
 \end{lstlisting}
+\end{minipage}
 
 Three functions govern the lifecycle of this module. \texttt{MATRIX\_init()} initialises all
 necessary variables when the module loads. \texttt{MATRIX\_parsePkt()} parses received beacon
@@ -556,6 +558,7 @@ a Minimum Spanning Tree (MST) and writes the result to a shared-memory region pr
 a mutex, as shown in Code Block~\ref{lst:spanning}. This structure is consumed by the Synchroniser
 to filter delay measurements and by higher-level components to derive forwarding decisions.
 
+\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}[language=C,
     caption={Variables stored in the shared memory for the Spanning Tree~\cite{almeida2023synchronization}},
     label={lst:spanning}]
@@ -566,6 +569,7 @@ typedef struct {
     uint8_t idOfActiveNodes[MNUM_DRONES];
 } spanningTreeSHM_t;
 \end{lstlisting}
+\end{minipage}
 
 \subsection{Synchroniser Module}
 
@@ -963,6 +967,7 @@ through that neighbour~\cite{morais2024synchronization}.}
 The linked list node structure is defined as follows:
 
 \medskip
+\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}[language=C,
     caption={Linked list structure for the routing matrix~\cite{morais2024synchronization}},
     label={lst:routinglist}]
@@ -973,6 +978,7 @@ typedef struct routingList_ {
     struct routingList_* accessibleNodes;
 } routingList_t;
 \end{lstlisting}
+\end{minipage}
 
 Each node stores the neighbour identifier, the corresponding MAC address, a pointer to the next
 primary entry (\texttt{next}), and a pointer to the secondary list of reachable nodes
@@ -1002,6 +1008,7 @@ it records the MAC address of the sender in a shared-memory table indexed by nod
 address is retained only while the corresponding link remains active.
 
 \medskip
+\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}[language=C,
     caption={Updated connectivity matrix structure including MAC address~\cite{morais2024synchronization}},
     label={lst:matrix-ana}]
@@ -1015,12 +1022,14 @@ typedef struct {
     double  age[MNUM_DRONES];
 } __attribute__((__packed__)) tdma_matrix_t;
 \end{lstlisting}
+\end{minipage}
 
 The collected MAC addresses are stored in a shared-memory structure, \texttt{macArraySHM\_t},
 whose entries pair each MAC address with the last octet of the IP address of the node (used as the
 node identifier in the framework):
 
 \medskip
+\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}[language=C,
     caption={MAC address shared-memory structure~\cite{morais2024synchronization}},
     label={lst:macarray}]
@@ -1035,6 +1044,7 @@ typedef struct {
     size_t size;
 } macArraySHM_t;
 \end{lstlisting}
+\end{minipage}
 
 Figure~\ref{fig:linkedlist2} shows how the MAC address of each primary neighbour is stored
 alongside its secondary list in the routing linked list, allowing the routing module to look up
