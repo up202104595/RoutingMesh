@@ -25,8 +25,9 @@ used both to weight the spanning tree and to trigger relay activation. A
 topology-aware routing algorithm derives next-hop decisions from a Minimum
 Spanning Tree over that graph and installs the resulting routes into the Linux
 kernel over Netlink. The relay forwarding was integrated with the IP-forwarding
-engine of the kernel through a dual routing-table architecture, so that transit
-traffic moves between interfaces without ever entering user space. And the
+engine of the kernel through a dual routing-table architecture, so that once a
+transit packet is re-injected into the TUN interface the kernel itself forwards
+it between interfaces. And the
 communication stack was split into a UDP control plane for the topology beacons
 and a TCP data plane for application data, giving reliable in-order delivery of
 video without altering the beacon mechanism inherited from the base framework.
