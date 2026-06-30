@@ -3,65 +3,56 @@
 \chapter{Conclusions and Future Work}
 \label{chap:conclusions}
 
-This dissertation set out to close a specific gap in the RA-TDMAs+ framework.
-The framework already provided collision-free, slot-based medium access and
-disseminated a connectivity matrix among the nodes, but it had no routing layer
-to turn that topology knowledge into multi-hop forwarding for arbitrary IP
-traffic (Section~\ref{sec:problem}). The objective set out in
-Chapter~\ref{chap:intro} was to supply that missing layer, a routing mechanism
-that enables peer-to-peer IP communication between any two nodes regardless of
-the current topology, while leaving intact the TDMA slot discipline on which the
-whole framework rests. Chapter~\ref{chap:implementation} described the design and
+This dissertation set out to close a specific gap in the RA-TDMAs+ framework,
+which provided collision-free slot-based medium access and a shared connectivity
+matrix but no routing layer to turn that topology knowledge into multi-hop
+forwarding for arbitrary IP traffic (Section~\ref{sec:problem}). The objective set
+out in Chapter~\ref{chap:intro} was to supply that layer, enabling peer-to-peer IP
+communication between any two nodes regardless of the current topology while
+preserving the TDMA slot discipline on which the framework rests.
+Chapter~\ref{chap:implementation} described the design and
 Chapter~\ref{chap:evaluation} validated it on real hardware. This section draws
-the overall conclusions. The directions the work opens up are developed
-afterwards under Future Work.
+the overall conclusions. The directions the work opens up follow under Future
+Work.
 
 \section{Conclusions}
 \label{sec:conclusions}
 
 The specific objectives defined in Chapter~\ref{chap:intro} were met. A
-link-quality metric derived from TDMA beacon-reception statistics was defined and
-used both to weight the spanning tree and to trigger relay activation. A
-topology-aware routing algorithm derives next-hop decisions from a Minimum
-Spanning Tree over that graph and installs the resulting routes into the Linux
-kernel over Netlink. The relay forwarding was integrated with the IP-forwarding
-engine of the kernel through a dual routing-table architecture, so that once a
-transit packet is re-injected into the TUN interface the kernel itself forwards
-it between interfaces. And the
-communication stack was split into a UDP control plane for the topology beacons
-and a TCP data plane for application data, giving reliable in-order delivery of
-video without altering the beacon mechanism inherited from the base framework.
-Practical experimentation then confirmed that these parts work together end to
-end.
+link-quality metric derived from beacon-reception statistics weights the spanning
+tree and triggers relay activation. A topology-aware algorithm derives next-hop
+decisions from a Minimum Spanning Tree over that graph and installs the resulting
+routes into the Linux kernel over Netlink. The relay forwarding was integrated
+with the kernel IP-forwarding engine through a dual routing-table architecture, so
+that once a transit packet is re-injected into the TUN interface the kernel
+forwards it between interfaces. And the communication stack was split into a UDP
+control plane for the topology beacons and a TCP data plane for application data,
+giving reliable in-order delivery of video without altering the beacon mechanism
+inherited from the base framework. Practical experimentation confirmed that these
+parts work together end to end.
 
 The significance of the result is as much architectural as quantitative. By
 routing at Layer~3 with kernel forwarding over a TCP data plane, the system
 reaches the same TDMA-level behaviour as the earlier Layer~2 approach of
 Morais~\cite{morais2024synchronization} while operating entirely through standard
-operating-system interfaces. The forwarding path is visible to ordinary IP tools,
-the data plane delivers video reliably and in order, and the relay is, in effect,
-transparent to the application. It therefore stands as a distinct and more
-observable alternative to the Layer~2 predecessor, solving the same multi-hop
-problem by different means and showing that a kernel-integrated,
+operating-system interfaces: the forwarding path is visible to ordinary IP tools,
+the data plane delivers video reliably and in order, and the relay is transparent
+to the application. It therefore stands as a distinct and more observable
+alternative to the Layer~2 predecessor, showing that a kernel-integrated,
 connection-oriented data plane can coexist with strict TDMA slotting. For the
 scenario that motivated the work, a mobile robot streaming live video to a remote
 operator over a network the nodes build themselves, this is the outcome that
-matters. When a direct link is lost, connectivity that a single-hop system could
+matters: when a direct link is lost, connectivity that a single-hop system could
 not have kept is restored automatically and the stream continues.
 
-Not every goal was carried through to completion. The core objectives were met,
-but a few threads were left open for want of time. The clearest is the comparison
-with the Layer~2 method, which could not be fully closed: the re-implementation
-was reconstructed from the published description rather than the original source,
-so the streaming instability it showed cannot yet be cleanly separated into what
-is intrinsic to the design, what is an artefact of the shared-domain testbed, and
-what is a limitation of the reconstruction. A few refinements were likewise left
-unmeasured, such as running the system with a shorter \texttt{MAX\_AGE}. More
-broadly, the evaluation made clear where the design can be taken further: the
-objectives were met within deliberate engineering trade-offs, and exercising the
-system, on the bench and then in motion, brought out which of those trade-offs
-are most worth revisiting. The remainder of this chapter develops these
-directions.
+Not everything was carried through to completion. The core objectives were met,
+but a few threads were left open for want of time: most clearly the comparison
+with the Layer~2 method, which rests on a reconstruction from the published
+description and could not be fully closed (Section~\ref{subsec:fw-l2}), and a few
+unmeasured refinements such as running the system with a shorter
+\texttt{MAX\_AGE}. More broadly, exercising the system on the bench and then in
+motion brought out which of its deliberate trade-offs are most worth revisiting.
+The remainder of this chapter develops these directions.
 
 
 %% -----------------------------------------------------------------------
@@ -71,91 +62,85 @@ directions.
 \subsection{Wire-Level Slot Containment}
 \label{subsec:fw-slot-containment}
 
-The clearest limitation surfaced by the evaluation concerns \emph{when} data
-leaves the antenna. The framework controls the \emph{volume} offered per slot,
-through the per-slot byte budget and back-pressure of
-Section~\ref{sec:slot-control}, but not the exact transmit instant, because below
-the TCP socket the kernel schedules transmission on its own terms. A batch
-offered near the slot end can therefore reach the air slightly into the next
-slot, the bounded incursion of Section~\ref{subsubsec:video-slot}, which is the
-\emph{packet spreading} that Pinto and Almeida evidenced as a protocol-level
+The clearest limitation concerns \emph{when} data leaves the antenna. The
+framework bounds the \emph{volume} offered per slot, through the per-slot byte
+budget and back-pressure of Section~\ref{sec:slot-control}, but not the exact
+transmit instant, because below the TCP socket the kernel schedules transmission
+on its own terms. A batch offered near the slot end can therefore reach the air
+slightly into the next slot, the bounded incursion of
+Section~\ref{subsubsec:video-slot}, which is the \emph{packet spreading} that
+Pinto and Almeida evidenced as a protocol-level
 problem~\cite{pinto2018robust, ramos2018aerial}.
 
-Several refinements would tighten the boundary, from least to most invasive. The
-byte budget can be set conservatively below the slot capacity and calibrated
-against on-air measurement. The packets can be paced across the slot instead of
-being burst at its start. The unsent data the kernel may hold can be bounded so
-that it does not transmit a late tail, the socket-queue cap Pinto used to reduce
-packet spreading and which our TCP data plane does not yet impose
-(\texttt{TCP\_NOTSENT\_LOWAT}, a small \texttt{SO\_SNDBUF}). Most thoroughly, the
-slot gate can be moved below TCP, emitting the slot-critical traffic as raw
-frames timed to the slot, which recovers the wire-level timing the connectionless
-Layer~2 design has by construction at the cost of re-introducing the complexity
-the TCP plane was chosen to avoid. Quantifying how much each refinement reduces
-the incursions, with on-air measurement, is a direct continuation of this work.
-
-A complementary approach relaxes the equal-slot assumption itself. The incursions
-arise partly because N1, the only heavy source, must fit its whole burst into the
-same fixed slot granted to the near-idle N2 and N3. A variable slot-length
-scheme, in the spirit of the Distributed Variable Slot-length Protocol (DVSP) of
-Pinto~\cite{ramos2018aerial}, keeps the round period constant but sizes each slot
-to the load of its node, giving the source a longer slot and the relay and sink
-shorter ones. This attacks the cause rather than the symptom, although it still
-cannot fix the exact on-air instant, which remains with the kernel.
+Several refinements would tighten the boundary, from least to most invasive:
+calibrating the byte budget conservatively below the slot capacity, pacing the
+packets across the slot rather than bursting them at its start, bounding the
+unsent data the kernel may hold so it does not emit a late tail
+(\texttt{TCP\_NOTSENT\_LOWAT} with a small \texttt{SO\_SNDBUF}, the socket-queue
+cap Pinto used and which our data plane does not yet impose), or, most thoroughly,
+moving the slot gate below TCP and emitting the slot-critical traffic as raw frames
+timed to the slot. That last option recovers the wire-level timing the
+connectionless Layer~2 design has by construction, at the cost of re-introducing
+the complexity the TCP plane was chosen to avoid. A complementary route relaxes
+the equal-slot assumption itself: because N1, the only heavy source, must fit its
+whole burst into the same slot granted to the near-idle N2 and N3, a variable
+slot-length scheme in the spirit of the Distributed Variable Slot-length Protocol
+(DVSP) of Pinto~\cite{ramos2018aerial} would size each slot to the load of its
+node, attacking the cause rather than the symptom. None of these fixes the exact
+on-air instant, which stays with the kernel. Quantifying how much each reduces the
+incursions, with on-air measurement, is a direct continuation of this work.
 
 \subsection{Faster Convergence}
 \label{subsec:fw-convergence}
 
 Recovery after a link failure is dominated by the node-aging timeout
-(\texttt{MAX\_AGE} $= 2.0$\,s) used to detect a dead direct link
-(Section~\ref{subsec:res-convergence}), the routing computation itself being
-negligible. Reducing \texttt{MAX\_AGE}, or replacing the fixed timeout with an
-adaptive scheme that reacts to the recent beacon-loss rate, would speed up
-recovery at the cost of robustness to transient beacon loss in the shared
-collision domain.
+(\texttt{MAX\_AGE} $= 2.0$\,s) that detects a dead direct link
+(Section~\ref{subsec:res-convergence}), the routing computation being negligible.
+Reducing \texttt{MAX\_AGE}, or replacing the fixed timeout with an adaptive scheme
+that reacts to the recent beacon-loss rate, would speed up recovery at the cost of
+robustness to transient beacon loss in the shared collision domain.
 
 A more fundamental gap concerns a link that degrades unevenly across the two
-planes. The lightweight UDP beacons can keep arriving after the heavier TCP data
-plane has already broken (Section~\ref{subsec:res-demo}), so the topology still
-believes the direct link is healthy while the operator has already lost the video
-and the command channel, and the system does not reroute. Closing this gap needs
-a \emph{data-plane liveness signal}, treating a stalled or failed TCP connection
+planes: the lightweight UDP beacons can keep arriving after the heavier TCP data
+plane has broken (Section~\ref{subsec:res-demo}), so the topology still believes
+the direct link healthy while the operator has already lost the video and the
+command channel, and the system does not reroute. Closing this gap needs a
+\emph{data-plane liveness signal} that treats a stalled or failed TCP connection
 to the next hop, like a missed beacon, as evidence to suppress the link and force
-the MST to reroute. This is implementable within the current architecture, since
-the data plane already observes its own send failures, and it directly targets
-the dominant cost analysed in Section~\ref{subsec:res-convergence}, the
-source-side wind-down in which the transmitter can stall on the dead socket up to
-the one-second send timeout before the stream settles onto the relay.
+the MST to reroute. It is implementable within the current architecture, since the
+data plane already observes its own send failures, and it targets the dominant
+cost analysed in Section~\ref{subsec:res-convergence}, the source-side wind-down
+in which the transmitter can stall on the dead socket up to the one-second send
+timeout before the stream settles onto the relay.
 
 \subsection{Physical-Layer Link Quality and RSSI}
 \label{subsec:fw-rssi}
 
-The routing metric used here is the per-link packet delivery ratio (PDR) derived
-from beacon statistics (Section~\ref{subsec:res-slots}), which drives both the MST
-edge weights and relay activation. PDR is robust but lagging, registering a
-failing link only after enough beacons are lost, the same delay that dominates
+The routing metric used here is the per-link packet delivery ratio (PDR) from
+beacon statistics (Section~\ref{subsec:res-slots}), which drives both the MST edge
+weights and relay activation. PDR is robust but lagging, registering a failing
+link only after enough beacons are lost, the same delay that dominates
 convergence. A physical-layer signal such as the received signal strength
-indicator (RSSI) would complement it by reacting before packets are lost, letting
-the MST shift weight toward a stronger path pre-emptively rather than detecting
-the break after the fact. Incorporating RSSI was attempted but proved impractical,
-because the Raspberry~Pi adapters do not expose a reliable per-neighbour RSSI in
-ad-hoc (IBSS) mode, and RSSI is in any case noisy and would have to be filtered
-and combined with PDR rather than trusted alone. With suitable hardware, an
-RSSI-and-PDR composite weight on the MST, together with the data-plane liveness
-signal above, would give a faster and more certain reaction to the degradations
-that matter most for a mobile teleoperation link.
+indicator (RSSI) would react before packets are lost, letting the MST shift weight
+toward a stronger path pre-emptively. Incorporating RSSI was attempted but proved
+impractical, because the Raspberry~Pi adapters do not expose a reliable
+per-neighbour RSSI in ad-hoc (IBSS) mode, and RSSI is in any case noisy and would
+have to be filtered and combined with PDR rather than trusted alone. With suitable
+hardware, an RSSI-and-PDR composite weight on the MST, together with the
+data-plane liveness signal above, would give a faster and more certain reaction to
+the degradations that matter most for a mobile teleoperation link.
 
 \subsection{Multi-Hop Scalability}
 \label{subsec:fw-multihop}
 
 The evaluation used a three-node testbed, the minimum that exercises a relay. The
-forwarding step is identical at every relay, a kernel IP-forward of the
-unmodified datagram (Section~\ref{sec:pkt-flow}), so the design generalises to
-longer paths without change. What grows with the hop count is the per-hop slot
-latency and the capacity sharing inherent to a single-channel multi-hop chain. A
-systematic study on a larger testbed, ideally with nodes that cannot all hear one
-another, would characterise these effects and separate them from the artefacts of
-a single shared collision domain.
+forwarding step is identical at every relay, a kernel IP-forward of the unmodified
+datagram (Section~\ref{sec:pkt-flow}), so the design generalises to longer paths
+without change. What grows with the hop count is the per-hop slot latency and the
+capacity sharing inherent to a single-channel multi-hop chain. A systematic study
+on a larger testbed, ideally with nodes that cannot all hear one another, would
+characterise these effects and separate them from the artefacts of a single
+shared collision domain.
 
 \subsection{Closing the Layer~2 Comparison}
 \label{subsec:fw-l2}
