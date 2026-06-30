@@ -45,14 +45,18 @@ operator over a network the nodes build themselves, this is the outcome that
 matters: when a direct link is lost, connectivity that a single-hop system could
 not have kept is restored automatically and the stream continues.
 
-Not everything was carried through to completion. The core objectives were met,
-but a few threads were left open for want of time: most clearly the comparison
-with the Layer~2 method, which rests on a reconstruction from the published
-description and could not be fully closed (Section~\ref{subsec:fw-l2}), and a few
-unmeasured refinements such as running the system with a shorter
-\texttt{MAX\_AGE}. More broadly, exercising the system on the bench and then in
-motion brought out which of its deliberate trade-offs are most worth revisiting.
-The remainder of this chapter develops these directions.
+Not everything was carried through to completion, mostly for lack of time. The
+core objectives were met, but a few threads were left open. The main one is the
+slot-incursion problem of Section~\ref{subsubsec:video-slot}: considerable effort
+went into containing the video burst within the slot at the wire level, without
+success, so it remains the clearest open question
+(Section~\ref{subsec:fw-slot-containment}). A shorter \texttt{MAX\_AGE} was also
+tried and showed some instability, but the experiment was not instrumented to
+quantify it. And the comparison with the Layer~2 method rests on a reconstruction
+from the published description and could not be fully closed
+(Section~\ref{subsec:fw-l2}). More broadly, exercising the system on the bench and
+then in motion brought out which of its deliberate trade-offs are most worth
+revisiting. The remainder of this chapter develops these directions.
 
 
 %% -----------------------------------------------------------------------
