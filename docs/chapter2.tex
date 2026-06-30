@@ -783,11 +783,11 @@ and Table~\ref{tab:protocols} provides a summary comparison of all four protocol
 \midrule
 Type                         & Proactive  & Proactive  & Reactive   & Reactive   \\
 Route availability           & Immediate  & Immediate  & On-demand  & On-demand  \\
-Control traffic              & Periodic   & Optimised  & Only on change & Only on change \\
+Control traffic              & Periodic   & Periodic (opt.)  & Only on change & Only on change \\
 Routing state per node       & Full table & Full table & Route cache & Per-dest next-hop \\
 Path information in header   & No         & No         & Yes (full path) & No        \\
 Scales to large networks     & Limited    & Good       & Limited    & Moderate   \\
-Handles high mobility        & Moderate   & Moderate   & Limited    & Moderate   \\
+Handles high mobility        & Limited    & Moderate   & Limited    & Moderate   \\
 \bottomrule
 \end{tabular}
 \end{table}
