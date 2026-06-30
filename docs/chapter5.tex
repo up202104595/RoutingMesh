@@ -49,7 +49,15 @@ operator over a network the nodes build themselves, this is the outcome that
 matters. When a direct link is lost, connectivity that a single-hop system could
 not have kept is restored automatically and the stream continues.
 
-The same evaluation also made clear where the design can be taken further. The
+Not every goal was carried through to completion. The core objectives were met,
+but a few threads were left open for want of time. The clearest is the comparison
+with the Layer~2 method, which could not be fully closed: the re-implementation
+was reconstructed from the published description rather than the original source,
+so the streaming instability it showed cannot yet be cleanly separated into what
+is intrinsic to the design, what is an artefact of the shared-domain testbed, and
+what is a limitation of the reconstruction. A few refinements were likewise left
+unmeasured, such as running the system with a shorter \texttt{MAX\_AGE}. More
+broadly, the evaluation made clear where the design can be taken further: the
 objectives were met within deliberate engineering trade-offs, and exercising the
 system, on the bench and then in motion, brought out which of those trade-offs
 are most worth revisiting. The remainder of this chapter develops these
