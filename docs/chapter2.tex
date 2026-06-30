@@ -29,7 +29,7 @@ Medium Access Control (MAC) protocol.
 
 IEEE 802.11 (WiFi), the standard used in this work, employs Carrier Sense
 Multiple Access with Collision Avoidance (CSMA/CA). A node wishing to
-transmit first listens to the channel; if the channel is detected as idle,
+transmit first listens to the channel. If the channel is detected as idle,
 the node waits a randomly chosen backoff interval and then transmits. The
 random backoff reduces the probability that two nodes attempt to transmit
 simultaneously, but it does not eliminate it: when two nodes independently
@@ -63,6 +63,19 @@ appear when nodes move into range of each other. Routing protocols must
 therefore adapt continuously, detecting link failures and computing alternative
 paths without any centralised coordinator.
 
+Figure~\ref{fig:manet} illustrates a multi-hop mobile ad-hoc network: the
+source~(S) reaches the destination~(D) through intermediate relays
+(S\,$\to$\,A\,$\to$\,B\,$\to$\,D), while node mobility continuously changes the
+available links, as with the link between B and F breaking as F moves out of
+radio range.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{manet}
+\caption{Multi-hop forwarding and link changes in a mobile ad-hoc network.}
+\label{fig:manet}
+\end{figure}
+
 MANETs impose additional constraints beyond those of static ad-hoc
 networks~\cite{eltahlawy2023survey}.
 Nodes are typically battery-powered, so energy efficiency in protocol design
@@ -87,21 +100,19 @@ to the layered model shared by both the OSI reference model and the TCP/IP
 architecture~\cite{alani2014guide}. The \textbf{Physical layer} converts bits into signals
 appropriate for the transmission medium (radio waves in the case of WiFi).
 The \textbf{Data Link layer} controls access to the shared medium through the
-MAC sub-layer and groups bits into frames; IEEE 802.11 CSMA/CA and RA-TDMAs+
+MAC sub-layer and groups bits into frames. IEEE 802.11 CSMA/CA and RA-TDMAs+
 operate at this layer. The \textbf{Network layer} handles logical addressing
-and packet forwarding across multiple hops; IP operates here, and it is at
+and packet forwarding across multiple hops. IP operates here, and it is at
 this layer that the routing mechanism developed in this dissertation installs
 forwarding decisions into the kernel. The \textbf{Transport layer} provides
 end-to-end reliability and flow control (TCP) or lightweight datagram delivery
 (UDP). \textbf{Application layer} protocols make use of the transport
-services; in this work the application is a real-time video stream.
+services. In this work the application is a real-time video stream.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.9\textwidth]{networklayer}
-\caption{The layered network model and representative protocols at each layer.
-RA-TDMAs+ overlays the IEEE~802.11 CSMA/CA medium-access control at the data link
-layer, and IP operates at the network layer.}
+\caption{The layered network model and representative protocols at each layer.}
 \label{fig:networklayer}
 \end{figure}
 
@@ -193,7 +204,7 @@ RA-TDMAs~\cite{pinto2018robust} was originally developed to support video
 streaming between Unmanned Aerial Vehicles (UAVs) and a ground base
 station over a multi-hop line topology. In this setting each UAV relays
 the video stream one hop closer to the base station, up to a maximum of
-five hops; each additional hop introduces forwarding delay that
+five hops. Each additional hop introduces forwarding delay that
 accumulates at the destination.
 
 The synchronisation mechanism works as follows. The header of each
@@ -337,10 +348,7 @@ After two rounds the entire network holds a consistent shared state.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.90\textwidth]{fig_flooding}
-\caption{Flooding with aggregation. In round~1 (left), node~4 broadcasts
-its state to its sole neighbour, node~2. In round~2 (right), node~2
-rebroadcasts the merged state to all its neighbours, completing
-global dissemination in two rounds.}
+\caption{Flooding with aggregation over two rounds.}
 \label{fig:flooding}
 \end{figure}
 
@@ -374,9 +382,7 @@ topology is reflected in the network graph.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.82\textwidth]{connectivity}
-\caption{Update of the connectivity matrix and network topology after
-node~2 joins the network. The matrix gains a new row and column,
-and the link between node~2 and node~4 becomes visible to all nodes.}
+\caption{Connectivity matrix and topology update when a node joins.}
 \label{fig:connectivity}
 \end{figure}
 
@@ -471,7 +477,7 @@ thread.
 Each module operates as a separate process and communicates with \texttt{TDMA\_Core} through
 two IPC mechanisms: AF\_UNIX local sockets, used to send control events between modules and
 the core, and shared memory, which allows essential data to be exchanged with minimal overhead.
-\texttt{TDMA\_Core} holds exclusive write permissions over the shared memory it creates; if
+\texttt{TDMA\_Core} holds exclusive write permissions over the shared memory it creates. If
 another module needs to modify a shared variable, it must send a request event via AF\_UNIX.
 
 The framework exposes the network to applications through a TUN virtual network interface
@@ -487,9 +493,7 @@ carries when leaving the TDMA framework.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.75\textwidth]{headerstdma}
-\caption{Headers present in a packet leaving the TDMA framework. The application payload
-(Transport and Application layers) is encapsulated with the TDMA header and transmitted via
-a UDP socket over \texttt{wlan0}~\cite{almeida2023synchronization}.}
+\caption{Headers present in a packet leaving the TDMA framework~\cite{almeida2023synchronization}.}
 \label{fig:tdma-header}
 \end{figure}
 
@@ -511,8 +515,7 @@ beacon packet.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{matrixpacket}
-\caption{Structure of the matrix beacon packet broadcast by each node at the beginning of its
-slot~\cite{almeida2023synchronization}.}
+\caption{Structure of the matrix beacon packet~\cite{almeida2023synchronization}.}
 \label{fig:matrix-packet}
 \end{figure}
 
@@ -602,10 +605,7 @@ Figure~\ref{fig:sync-module} illustrates the complete execution cycle of the Syn
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.70\textwidth]{syncmodule}
-\caption{Execution cycle of the Synchroniser module. The module wakes near the end of each
-round, reads and filters packet delays from shared memory, computes the bounded shift
-$\Delta(r)$, and delivers it to \texttt{TDMA\_Core} via AF\_UNIX before the next round
-begins~\cite{almeida2023synchronization}.}
+\caption{Execution cycle of the Synchroniser module~\cite{almeida2023synchronization}.}
 \label{fig:sync-module}
 \end{figure}
 
@@ -616,7 +616,7 @@ begins~\cite{almeida2023synchronization}.}
 
 Routing is the process of determining paths along which data packets travel from a source node
 to a destination across a network. In infrastructure networks this task is performed by dedicated
-routers with stable connectivity; in a MANET every node must simultaneously act as a host and
+routers with stable connectivity, in a MANET every node must simultaneously act as a host and
 a potential forwarder, and the topology may change continuously as nodes move. A routing
 protocol for a MANET must therefore discover the current topology or a sufficient portion of it,
 compute forwarding paths, install those paths so that packets can be forwarded hop by hop, and
@@ -626,8 +626,8 @@ Ad-hoc routing protocols are commonly organised into a taxonomy according to how
 they structure the network and discover routes, as summarised in
 Figure~\ref{fig:routing-taxonomy}. \emph{Flat} protocols treat every node
 equally and split further into proactive (table-driven) and reactive (on-demand)
-families; \emph{hierarchical} protocols impose a cluster or zone structure to
-improve scalability; and \emph{geographical position-assisted} protocols use node
+families. The \emph{hierarchical} protocols impose a cluster or zone structure to
+improve scalability and \emph{geographical position-assisted} protocols use node
 location to guide forwarding~\cite{bhatia2022networked}. The work in this
 dissertation sits in the flat category, and the discussion below concentrates on
 the proactive and reactive families that are most relevant to a single-team TDMA
@@ -636,9 +636,7 @@ mesh.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.85\textwidth]{adhoc_routing_taxonomy}
-\caption{Taxonomy of ad-hoc routing protocols, organised into flat
-(proactive and reactive), hierarchical, and geographical position-assisted
-families~\cite{bhatia2022networked}.}
+\caption{Taxonomy of ad-hoc routing protocols~\cite{bhatia2022networked}.}
 \label{fig:routing-taxonomy}
 \end{figure}
 
@@ -680,7 +678,7 @@ periods when no application data is being sent.
 
 \textbf{Destination-Sequenced Distance Vector (DSDV)}~\cite{perkins1994highly} extends the
 classical Bellman-Ford algorithm with a sequence number mechanism that prevents routing loops and stale entries.
-Each routing table entry carries a sequence number assigned by the destination node; when a
+Each routing table entry carries a sequence number assigned by the destination node. When a
 node receives an update it retains the entry with the higher sequence number, ensuring that
 more recent information always takes precedence. Updates are broadcast periodically as either
 full table dumps or smaller incremental updates that list only changed entries. DSDV is simple
@@ -692,11 +690,11 @@ and rapid convergence after a link failure.
 
 \textbf{Optimised Link State Routing (OLSR)}~\cite{jacquet2001optimized} is a proactive
 link-state protocol that reduces control traffic through Multipoint Relays (MPRs). Each node selects a minimal subset of its
-one-hop neighbours that collectively cover all of its two-hop neighbourhood; these are its
+one-hop neighbours that collectively cover all of its two-hop neighbourhood. These are its
 MPRs. Control messages are still flooded throughout the network, but only MPR nodes
 retransmit them, replacing the full flooding of classical link-state with a targeted relay that
 substantially reduces the number of transmissions in dense networks. Nodes exchange Hello
-messages to discover their neighbourhood and negotiate MPR selections; MPR nodes generate
+messages to discover their neighbourhood and negotiate MPR selections. MPR nodes generate
 Topology Control (TC) messages that allow every node to reconstruct a partial view of the
 network graph. Dijkstra's algorithm is then applied to this graph to compute the routing table.
 Figure~\ref{fig:olsr-mpr} illustrates the MPR mechanism: the source node $S$ selects a minimal
@@ -706,10 +704,7 @@ two-hop neighbourhood, and only these MPRs retransmit its control traffic~\cite{
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.62\textwidth]{olsr_mpr}
-\caption{Multipoint Relay (MPR) selection in OLSR: the source $S$ designates a minimal subset
-of its one-hop neighbours ($M_1$, $M_2$, $M_3$, filled) that covers all of its two-hop
-neighbourhood, so that only the MPRs retransmit flooded control
-messages~\cite{almayouf2025enhancing}.}
+\caption{Multipoint Relay (MPR) selection in OLSR~\cite{almayouf2025enhancing}.}
 \label{fig:olsr-mpr}
 \end{figure}
 
@@ -732,7 +727,7 @@ Route Request (RREQ) message that accumulates in its header the list of every no
 reaches the destination or an intermediate node with a valid cached route, a Route Reply
 (RREP) is returned along the reverse path, carrying the complete discovered route. Subsequent
 data packets from the source embed the full sequence of intermediate hops directly in their
-headers; each forwarding node reads its successor from the header without consulting a local
+headers, and each forwarding node reads its successor from the header without consulting a local
 routing table. A Route Error (RERR) message is generated if an intermediate node detects that
 a link on the active path has failed, notifying the source so that it can use an alternative
 cached route or initiate a new discovery.
@@ -759,10 +754,7 @@ travels back along the established reverse path~\cite{bhatia2022networked}.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.95\textwidth]{aodv_route_discovery}
-\caption{On-demand route discovery in AODV: the source $S$ floods a Route Request (RREQ)
-that propagates towards the destination $D$, and a Route Reply (RRES) returns along the
-established reverse path; each node is tagged with its destination sequence
-number~\cite{bhatia2022networked}.}
+\caption{On-demand route discovery in AODV~\cite{bhatia2022networked}.}
 \label{fig:aodv-discovery}
 \end{figure}
 
@@ -770,7 +762,7 @@ AODV avoids the per-packet header overhead of DSR and scales better to larger ne
 still incurs the discovery latency inherent to all reactive approaches. In highly mobile
 environments, the balance between route lifetime and rediscovery frequency requires careful
 parameter tuning. A large body of comparative studies benchmarks these protocols under mobility
-and varying load~\cite{aldhief2018manet,aggarwal2011performance,wheeb2022performance,hinds2013review,ramphull2021review},
+and varying load~\cite{aldhief2018manet,aggarwal2011performance,wheeb2022performance,ramphull2021review},
 and Table~\ref{tab:protocols} provides a summary comparison of all four protocols.
 
 \begin{table}[h]
@@ -819,9 +811,7 @@ tree structure without ambiguity or any further search.
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{MSTexample}
-\caption{MST topology update after a node movement and a new node join. On the left, the
-original spanning tree; on the right, the recomputed tree after node~E changes position
-(orange) and node~H is added as a new entry (green)~\cite{morais2024synchronization}.}
+\caption{MST recomputation after a node moves and a new node joins~\cite{morais2024synchronization}.}
 \label{fig:mst-example}
 \end{figure}
 
@@ -861,7 +851,7 @@ wasting the infrastructure that the medium-access layer has already established.
 For proactive protocols, the periodic sharing of the connectivity matrix in RA-TDMAs+ is itself a proactive topology
 exchange, so proactive routing is the natural fit. However, standard proactive protocols
 introduce redundancy. The Hello messages of OLSR duplicate the neighbour-discovery function
-already performed by the MATRIX beacon; the MPR selection mechanism reduces flooding
+already performed by the MATRIX beacon. The MPR selection mechanism reduces flooding
 overhead but provides diminishing returns in the small networks typical of robotic deployments
 where nearly all nodes are within two hops of each other. DSDV requires nodes to share a
 routing table in addition to the MATRIX beacon, increasing the size of each slot transmission
@@ -931,10 +921,7 @@ after the addition of the routing module.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\textwidth]{frameworkAna}
-\caption{Updated TDMA framework architecture incorporating the Routing
-module~\cite{morais2024synchronization}. The Routing module reads the MAC address table
-and the Spanning Tree from shared memory and updates the kernel ARP table via
-\texttt{ioctl()} system calls.}
+\caption{Updated TDMA framework architecture with the Routing module~\cite{morais2024synchronization}.}
 \label{fig:framework-ana}
 \end{figure}
 \bigskip
@@ -948,7 +935,7 @@ address. Because the Spanning Tree is cycle-free, there is exactly one path betw
 nodes, making the next-hop lookup unambiguous.
 
 The routing matrix is implemented as a singly linked list. Each entry in the primary list
-represents a node with a direct link to the local node; attached to each primary entry is a
+represents a node with a direct link to the local node. Attached to each primary entry is a
 secondary list of all nodes reachable through that direct neighbour. When the local node needs
 to forward a packet to a destination, it traverses the primary list to find the entry whose secondary
 list contains the destination identifier, and uses the MAC address stored with that primary entry
@@ -959,9 +946,7 @@ source nodes.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist1}
-\caption{Routing linked list for three example source nodes A, C, and G. Each primary entry
-corresponds to a directly connected neighbour; its secondary list contains all nodes reachable
-through that neighbour~\cite{morais2024synchronization}.}
+\caption{Routing linked list for three example source nodes~\cite{morais2024synchronization}.}
 \label{fig:linkedlist1}
 \end{figure}
 \bigskip
@@ -999,8 +984,7 @@ layout.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{statshareAna}
-\caption{Updated state beacon layout, extending the original four fields with a MAC address
-field~\cite{morais2024synchronization}.}
+\caption{Updated state beacon layout with the MAC address field~\cite{morais2024synchronization}.}
 \label{fig:statshare-ana}
 \end{figure}
 \bigskip
@@ -1056,9 +1040,7 @@ the correct MAC address for ARP injection in a single list traversal.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{linkedlist2}
-\caption{MAC address association in the routing linked list for source nodes A and G. The MAC
-address of each direct neighbour is stored alongside its secondary list of reachable
-nodes~\cite{morais2024synchronization}.}
+\caption{MAC address association in the routing linked list~\cite{morais2024synchronization}.}
 \label{fig:linkedlist2}
 \end{figure}
 \bigskip
@@ -1087,9 +1069,7 @@ before the list is rebuilt from the DFS output.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\textwidth]{linkedlist}
-\caption{Incremental routing table update for source node~A. The DFS over neighbour~C yields
-the sorted array $\{E, F, G, H\}$; comparing it against the existing secondary list reveals H as
-a new addition (green), inserted without modifying the unchanged entries~\cite{morais2024synchronization}.}
+\caption{Incremental routing table update for source node~A~\cite{morais2024synchronization}.}
 \label{fig:linkedlist-update}
 \end{figure}
 \bigskip
