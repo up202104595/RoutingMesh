@@ -89,10 +89,10 @@ BASE_IP            = "10.0.0.3"
 TELEMETRY_INTERVAL = 0.2
 
 # ── Parâmetros de vídeo ───────────────────────────────────────
-VIDEO_WIDTH   = 320
-VIDEO_HEIGHT  = 240
+VIDEO_WIDTH   = 640
+VIDEO_HEIGHT  = 480
 VIDEO_FPS     = 15
-VIDEO_BITRATE = 300000   # 300 kbps (specs da Ana: 320x240, 15 fps, 0.3 Mbps)
+VIDEO_BITRATE = 500000   # 500 kbps
 
 # ── Estado global ─────────────────────────────────────────────
 g_speed_l  = 0.0
