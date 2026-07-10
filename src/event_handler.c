@@ -144,7 +144,7 @@ void* event_handler_loop(void *arg) {
                     if (fd >= 0) {
                         close(fd);
                         node->tcp_sockfd[evt->node_id] = -1;
-                        printf("[EVENT] TCP peer %d fechado — vai reconectar via relay\n", evt->node_id);
+                        /* printf("[EVENT] TCP peer %d fechado — vai reconectar via relay\n", evt->node_id); */
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
                 }

@@ -216,7 +216,7 @@ void* tcp_keepalive_loop(void *arg) {
                     pthread_mutex_unlock(&node->tcp_mutex);
                     printf("[TCP] Peer %d ligado\n", i);
                 } else {
-                    printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
+                    /* printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i); */
                 }
             } else {
                 char probe;
@@ -226,8 +226,8 @@ void* tcp_keepalive_loop(void *arg) {
                 bool dead = (r == 0) ||
                             (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK);
                 if (dead) {
-                    printf("[TCP] Peer %d socket morto (r=%zd errno=%d) — a reconectar\n",
-                           i, r, errno);
+                    /* printf("[TCP] Peer %d socket morto (r=%zd errno=%d) — a reconectar\n",
+                           i, r, errno); */
                     pthread_mutex_lock(&node->tcp_mutex);
                     if (node->tcp_sockfd[i] == cur_fd) {
                         close(cur_fd);
@@ -278,7 +278,7 @@ void* tcp_rx_peer_loop(void *arg) {
                 /* Timeout — verifica se fd mudou */
                 continue;
             }
-            printf("[TCP-RX] Peer %d desligou\n", peer_id);
+            /* printf("[TCP-RX] Peer %d desligou\n", peer_id); */
             /* Só fecha se o fd ainda for o mesmo — evita race condition */
             pthread_mutex_lock(&node->tcp_mutex);
             if (node->tcp_sockfd[peer_id] == tcp_fd) {
@@ -293,7 +293,7 @@ void* tcp_rx_peer_loop(void *arg) {
         uint32_t pkt_len = ntohl(net_len);
         if (pkt_len < sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) ||
             pkt_len > 4096) {
-            printf("[TCP-RX] pkt_len invalido=%u — a fechar\n", pkt_len);
+            /* printf("[TCP-RX] pkt_len invalido=%u — a fechar\n", pkt_len); */
             pthread_mutex_lock(&node->tcp_mutex);
             if (node->tcp_sockfd[peer_id] == tcp_fd) {
                 close(tcp_fd);
@@ -307,7 +307,7 @@ void* tcp_rx_peer_loop(void *arg) {
         /* Lê pacote completo */
         ssize_t nr = recv(tcp_fd, buffer, pkt_len, MSG_WAITALL);
         if (nr != (ssize_t)pkt_len) {
-            printf("[TCP-RX] Pacote incompleto esperado=%u recebido=%zd\n", pkt_len, nr);
+            /* printf("[TCP-RX] Pacote incompleto esperado=%u recebido=%zd\n", pkt_len, nr); */
             pthread_mutex_lock(&node->tcp_mutex);
             if (node->tcp_sockfd[peer_id] == tcp_fd) {
                 close(tcp_fd);
@@ -673,7 +673,7 @@ void* tx_loop(void *arg) {
             if (tcp_fd >= 0) {
                 sent = send(tcp_fd, frame, frame_len, MSG_NOSIGNAL);
                 if (sent < 0) {
-                    printf("[TX] TCP peer %d falhou — a reconectar...\n", next_hop);
+                    /* printf("[TX] TCP peer %d falhou — a reconectar...\n", next_hop); */
                     pthread_mutex_lock(&node->tcp_mutex);
                     if (node->tcp_sockfd[next_hop] == tcp_fd) {
                         close(tcp_fd);
@@ -681,11 +681,11 @@ void* tx_loop(void *arg) {
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
                     /* Descarta pacote — keepalive vai reconectar */
-                    printf("[TX] Pacote descartado — sem ligacao TCP para peer %d\n", next_hop);
+                    /* printf("[TX] Pacote descartado — sem ligacao TCP para peer %d\n", next_hop); */
                 }
             } else {
                 /* Sem ligacao TCP — descarta e keepalive vai reconectar */
-                printf("[TX] Sem TCP para peer %d — pacote descartado\n", next_hop);
+                /* printf("[TX] Sem TCP para peer %d — pacote descartado\n", next_hop); */
             }
 
             printf("[TX] MSG_DATA  dst=%d  next_hop=%d(%s)  msg_id=%u  ip_len=%u  sent=%zd\n",
