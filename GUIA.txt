@@ -179,6 +179,34 @@ Raspberry Relay (no 2 — IP sera 172.20.10.2):
   sudo ip link set wlan0 up
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2.1 DESACTIVAR POWER SAVE (fazer em TODOS os nos, depois do modo ad-hoc)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Power save do WiFi poe a radio a "dormir" entre pacotes para poupar
+bateria — isto atrasa a entrega e introduz jitter, o pior possivel
+para TDMA (slots de 50ms sao muito curtos p/ a radio andar a acordar
+e adormecer). Desactivar em todos os nos (Raspberries e PC):
+
+  sudo iw dev wlan0 set power_save off      # Raspberries
+  sudo iw dev wlp5s0 set power_save off     # PC (ajustar nome da interface)
+
+  # confirmar que ficou off:
+  iw dev wlan0 get power_save               # deve responder "Power save: off"
+
+NOTA: isto NAO e persistente — volta a "on" apos reiniciar a interface
+      (down/up) ou apos reiniciar o SO. Corre sempre a seguir a activar
+      o modo ad-hoc (secção 2), antes de arrancar o meshnode.
+
+Opcional (Raspberries) — desactivar tambem o governor de poupanca de
+CPU, para o throttling nao competir com o meshnode/video:
+
+  sudo cpufreq-set -g performance 2>/dev/null || \
+  echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+  # verificar se ha throttling por subtensao (fonte fraca/bateria):
+  vcgencmd get_throttled     # 0x0 = tudo OK; qualquer outro valor = houve/ha throttling
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 3. CORRER — ORDEM OBRIGATORIA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
