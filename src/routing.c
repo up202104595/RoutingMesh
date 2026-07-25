@@ -131,6 +131,43 @@ static uint8_t lookup_next_hop(route_node_t *primary_list, uint8_t destination) 
     return 0;
 }
 
+/*
+ * Instala a ip rule para tráfego de relay vindo do wlan0.
+ *
+ * Cenário 2+ relays:
+ *   N1 → TCP → N2 → ip_forward → wlan0 → N3
+ *   N3 recebe pelo wlan0, precisa de relay para N4:
+ *     iif wlan0 → tabela 200 → ip_forward → wlan0 → N4
+ *
+ * A regra iif tun (instalada em tun_open) cobre o primeiro hop de relay.
+ * Esta regra cobre hops subsequentes onde o pacote chega pelo wlan0.
+ *
+ * Nota: priority 99 < priority 100 (tun rule) garante que wlan0 é
+ * avaliado primeiro, evitando conflito com tráfego local.
+ */
+static void install_wlan_relay_rule(const char *phy_iface) {
+#ifndef RELAY_METHOD_ARP
+    char cmd[256];
+
+    /* Remove regra anterior se existir (idempotente) */
+    snprintf(cmd, sizeof(cmd),
+             "ip rule del iif %s lookup 200 priority 99 2>/dev/null || true",
+             phy_iface);
+    system(cmd);
+
+    /* Instala regra: tráfego recebido pelo wlan0 → tabela 200 */
+    snprintf(cmd, sizeof(cmd),
+             "ip rule add iif %s lookup 200 priority 99",
+             phy_iface);
+    if (system(cmd) != 0) {
+        fprintf(stderr, "[ROUTING] AVISO: falha ao instalar ip rule iif %s lookup 200\n",
+                phy_iface);
+    } else {
+        printf("[ROUTING] ip rule add iif %s lookup 200 priority 99 [OK]\n", phy_iface);
+    }
+#endif
+}
+
 routing_manager_t* routing_manager_create(uint8_t my_node_id, uint8_t num_nodes) {
     routing_manager_t *rm = calloc(1, sizeof(routing_manager_t));
     if (!rm) return NULL;
@@ -184,6 +221,13 @@ void routing_manager_recompute(routing_manager_t *rm,
     /* Remove rotas /32 anteriores antes de recalcular */
 #ifndef RELAY_METHOD_ARP
     ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
+
+    /*
+     * Garante que a regra de relay via wlan0 está instalada.
+     * Necessário para suportar 2+ hops de relay via ip_forward:
+     *   pacote chega pelo wlan0 → tabela 200 → ip_forward → wlan0 → próximo hop
+     */
+    install_wlan_relay_rule(MESH_PHY_IFACE);
 #endif
 
     route_node_t *primary_list = build_routing_structure(
@@ -241,31 +285,34 @@ void routing_manager_recompute(routing_manager_t *rm,
          *   10.0.0.X via 10.0.0.nhop dev tunY
          *   → tun_reader interceta e envia via TCP na slot TDMA
          *
-         * Tabela 200 (src = outro nó, pacote de relay injetado via tun_write):
+         * Tabela 200 (relay via wlan0, 1º hop):
          *   10.0.0.X via 172.20.10.nhop dev wlan0
-         *   → ip rule redireciona aqui; kernel faz ip_forward direto para wlan0
+         *   → ip rule iif tunY lookup 200  (instalado em tun_open)
+         *   → kernel faz ip_forward direto para wlan0
          *
-         * ip rule configurado em tun_open:
-         *   from 10.0.0.0/24 not from 10.0.0.{myID}/32 lookup 200
+         * Tabela 200 (relay via wlan0, 2º+ hop):
+         *   mesmas rotas da tabela 200
+         *   → ip rule iif wlan0 lookup 200  (instalado aqui, priority 99)
+         *   → kernel faz ip_forward para o próximo hop via wlan0
          */
         {
             char dest_ip[32], tun_gw[32], phy_gw[32];
-            snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE,    dest_id);
-            snprintf(tun_gw,  sizeof(tun_gw),  "%s.%u", MESH_NET_BASE,    next_hop);
-            snprintf(phy_gw,  sizeof(phy_gw),  "%s.%u", MESH_NET_PREFIX,  next_hop);
+            snprintf(dest_ip, sizeof(dest_ip), "%s.%u", MESH_NET_BASE,   dest_id);
+            snprintf(tun_gw,  sizeof(tun_gw),  "%s.%u", MESH_NET_BASE,   next_hop);
+            snprintf(phy_gw,  sizeof(phy_gw),  "%s.%u", MESH_NET_PREFIX, next_hop);
 
             /* tabela main: trafego proprio via TUN → TDMA */
             ip_route_add(dest_ip, tun_gw, rm->mesh_iface);
 
-            /* tabela 200: relay via wlan0 → ip_forward direto */
+            /* tabela 200: relay via wlan0 → ip_forward direto (1º e 2º+ hop) */
             ip_route_add_t(dest_ip, phy_gw, MESH_PHY_IFACE, 200);
 
             if (dest_id == next_hop)
-                printf("[ROUTING]   %s via %s dev %s (main) + via %s dev wlan0 (t200) [directo]\n",
-                       dest_ip, tun_gw, rm->mesh_iface, phy_gw);
+                printf("[ROUTING]   %s via %s dev %s (main) + via %s dev %s (t200) [directo]\n",
+                       dest_ip, tun_gw, rm->mesh_iface, phy_gw, MESH_PHY_IFACE);
             else
-                printf("[ROUTING]   %s via %s dev %s (main) + via %s dev wlan0 (t200) [relay via %d]\n",
-                       dest_ip, tun_gw, rm->mesh_iface, phy_gw, next_hop);
+                printf("[ROUTING]   %s via %s dev %s (main) + via %s dev %s (t200) [relay via %d]\n",
+                       dest_ip, tun_gw, rm->mesh_iface, phy_gw, MESH_PHY_IFACE, next_hop);
         }
 #endif
     }
