@@ -13,9 +13,6 @@
 #include "sync.h"
 #include "wifi_quality.h"
 #include "pdr.h"
-#ifdef RELAY_METHOD_ARP
-#include "mac_table.h"
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -414,9 +411,6 @@ void* receiver_loop(void *arg) {
                 g_last_rx_frame[hdr->slot_id] = now_us / round_us;
             }
 
-#ifdef RELAY_METHOD_ARP
-            mac_table_update(hdr->slot_id);
-#endif
             sync_record_delay(hdr->slot_id, hdr->timestamp,
                               hdr->slot_begin_ms, hdr->slot_end_ms, rp_ms);
 
@@ -795,15 +789,8 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
     node->tx_queue    = tx_queue_create();
     g_event_queue     = node->event_queue;
 
-#ifndef RELAY_METHOD_ARP
     if (ip_forward_enable() != 0)
         fprintf(stderr, "[Node %d] AVISO: ip_forward nao activado\n", node_id);
-#endif
-
-#ifdef RELAY_METHOD_ARP
-    mac_table_init();
-    printf("[Node %d] MAC table inicializada\n", node_id);
-#endif
 
     pdr_init();
     sync_init(node_id, num_nodes, (uint16_t)(node->frame_duration_us / 1000));

@@ -10,9 +10,6 @@
 #include "routing.h"
 #include "matrix.h"
 #include "tun.h"
-#ifdef RELAY_METHOD_ARP
-#include "mac_table.h"
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -146,7 +143,6 @@ static uint8_t lookup_next_hop(route_node_t *primary_list, uint8_t destination) 
  * avaliado primeiro, evitando conflito com tráfego local.
  */
 static void install_wlan_relay_rule(const char *phy_iface) {
-#ifndef RELAY_METHOD_ARP
     char cmd[256];
 
     /* Remove regra anterior se existir (idempotente) */
@@ -165,7 +161,6 @@ static void install_wlan_relay_rule(const char *phy_iface) {
     } else {
         printf("[ROUTING] ip rule add iif %s lookup 200 priority 99 [OK]\n", phy_iface);
     }
-#endif
 }
 
 routing_manager_t* routing_manager_create(uint8_t my_node_id, uint8_t num_nodes) {
@@ -219,7 +214,6 @@ void routing_manager_recompute(routing_manager_t *rm,
     printf("[ROUTING] =============================================\n");
 
     /* Remove rotas /32 anteriores antes de recalcular */
-#ifndef RELAY_METHOD_ARP
     ip_route_flush_mesh(MESH_NET_BASE, rm->num_nodes, rm->mesh_iface);
 
     /*
@@ -228,7 +222,6 @@ void routing_manager_recompute(routing_manager_t *rm,
      *   pacote chega pelo wlan0 → tabela 200 → ip_forward → wlan0 → próximo hop
      */
     install_wlan_relay_rule(MESH_PHY_IFACE);
-#endif
 
     route_node_t *primary_list = build_routing_structure(
         rm->my_node_id, spanning_tree, link_quality, active_nodes, num_active);
@@ -255,30 +248,6 @@ void routing_manager_recompute(routing_manager_t *rm,
         if (my_idx != -1 && nh_idx != -1)
             rm->routing_table[i].quality = link_quality[my_idx][nh_idx];
 
-#ifdef RELAY_METHOD_ARP
-        /* ── Metodo ARP (Ana Morais 2024) ──
-         * Associa IP virtual ao MAC fisico do next_hop na tabela ARP.
-         * O kernel envia directamente pelo MAC sem ip_forward.
-         */
-        char dest_tun_ip[32];
-        snprintf(dest_tun_ip, sizeof(dest_tun_ip), "10.0.0.%u", dest_id);
-
-        mac_table_update(next_hop);
-        const char *next_hop_mac = mac_table_get(next_hop);
-        if (next_hop_mac) {
-            tun_arp_set(dest_tun_ip, next_hop_mac);
-            if (dest_id == next_hop)
-                printf("[ROUTING]   arp set %s -> %s  [directo]\n",
-                       dest_tun_ip, next_hop_mac);
-            else
-                printf("[ROUTING]   arp set %s -> %s  [relay via %d, quality=%u]\n",
-                       dest_tun_ip, next_hop_mac,
-                       next_hop, rm->routing_table[i].quality);
-        } else {
-            fprintf(stderr, "[ROUTING]   AVISO: MAC do Node %d desconhecido\n", next_hop);
-        }
-
-#else
         /* Rotas /32 no kernel — política dupla:
          *
          * Tabela MAIN (src = próprio nó):
@@ -314,7 +283,6 @@ void routing_manager_recompute(routing_manager_t *rm,
                 printf("[ROUTING]   %s via %s dev %s (main) + via %s dev %s (t200) [relay via %d]\n",
                        dest_ip, tun_gw, rm->mesh_iface, phy_gw, MESH_PHY_IFACE, next_hop);
         }
-#endif
     }
 
     free_routing_lists(primary_list);
