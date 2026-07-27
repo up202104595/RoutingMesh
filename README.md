@@ -300,52 +300,7 @@ bash tests/run_tests.sh relay    # só medições em modo relay (já ativo)
 bash tests/run_tests.sh both     # direto + relay (pede confirmação)
 ```
 
-### 6.1 Resultados de referência
 
-Medidos em ambiente controlado (2 corridas completas, 3 repetições por
-métrica):
+## 7. Autoria
 
-| Métrica | Valor |
-|---------|-------|
-| RTT canal de controlo (médio) | ~50.3 ms |
-| Jitter | ~4.0 ms |
-| PDR canal de controlo | 100% |
-| Throughput vídeo — direto | ~580 kbps |
-| Throughput vídeo — relay | ~568 kbps |
-| Overhead do relay (throughput) | ~2.1% |
-| Convergência de topologia após falha de link | ~2.76 s ± 110 ms |
-| Padrão de inter-arrival do vídeo | Bimodal (0–10 ms rajada / ~140–150 ms entre frames), idêntico em direto e relay |
-
-O padrão bimodal reflete o encoder H.264 a produzir frames continuamente:
-dentro do slot de 50 ms do Nó 1 os pacotes acumulados são enviados em
-rajada; entre slots há silêncio até ao frame seguinte (150 ms). O relay via
-`ip_forward` não altera este padrão — a operação no kernel é praticamente
-instantânea.
-
----
-
-## 7. Limitações conhecidas / trabalho futuro
-
-- **Deteção de nó morto baseada apenas em beacons UDP:** o `creationTime`
-  que controla a expiração de um nó (`MAX_AGE`) é atualizado pelos beacons
-  MATRIX (UDP, pequenos, toleram sinal fraco), não pelos dados MSG_DATA
-  (TCP). Em condições de sinal marginal, os beacons podem continuar a
-  chegar ocasionalmente enquanto o TCP de dados já não consegue entregar,
-  atrasando ou impedindo a ativação do relay. Ver `pdr.c`, que já calcula o
-  PDR real dos dados mas ainda não controla diretamente a expiração do nó.
-  Alternativas propostas: usar o PDR para gatear a atualização do
-  `creationTime`; manter um timeout separado para dados (`t_last_data`)
-  independente dos beacons; ou degradar a link quality apenas com base em
-  dados entregues, não em beacons recebidos.
-- O feedback de qualidade de vídeo (`{"cmd": "video_poor"}`, porta 9002) já
-  força a degradação da link quality direta quando o vídeo falha no Nó 3,
-  mas cobre apenas esse sintoma específico, não o caso geral acima.
-
----
-
-## 8. Licença / autoria
-
-Miguel Almeida — FEUP, 2025/2026. Encaminhamento MST (DFS sobre listas
-ligadas) baseado no trabalho de Ana Morais; contribuição desta dissertação:
-relay `ip_forward` + Netlink com link quality dinâmica (0–100) e
-sincronização de rotas com o kernel.
+Miguel Almeida — FEUP, 2025/2026
