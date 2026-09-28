@@ -38,6 +38,12 @@ FEEDBACK_PORT = 9002   # porta de feedback de qualidade de video no Nó 1
 
 # ── Video feedback ────────────────────────────────────────────
 VIDEO_PORT          = 5000
+# Transporte da aplicacao de video: "tcp" (default) ou "udp".
+# Tem de coincidir com VIDEO_TRANSPORT no alphabot_node.py.
+# Em TCP a base e o servidor: o proxy escuta em :VIDEO_PORT, aceita a ligacao
+# do robo, mede, e reenvia por UDP local para o ffplay (5001) — o ffplay e as
+# metricas ficam iguais aos do modo UDP.
+VIDEO_TRANSPORT     = "tcp"
 VIDEO_LOSS_TIMEOUT   = 1.5   # segundos sem pacotes → link fraco
 VIDEO_OK_STABLE      = 3.0   # segundos de video estável → link bom
 FEEDBACK_INTERVAL    = 0.5   # envia feedback a cada 0.5s enquanto video falha
@@ -147,41 +153,81 @@ def ffplay_watchdog(proc_ref):
 g_last_video_pkt = 0.0
 g_video_poor     = False
 
+def _video_account(data, tx):
+    """Reencaminha um bloco de video para o ffplay e actualiza as metricas.
+    Ponto unico de medicao, partilhado pelos modos UDP e TCP."""
+    global g_last_video_pkt
+    g_last_video_pkt = time.time()
+    tx.sendto(data, ("127.0.0.1", VIDEO_LOCAL_PORT))
+    with g_lock:
+        g_video_stats["rx_pkts"]      += 1
+        g_video_stats["rx_bytes"]     += len(data)
+        g_video_stats["window_pkts"]  += 1
+        g_video_stats["window_bytes"] += len(data)
+
 def video_monitor():
     """
-    Proxy UDP: recebe todos os pacotes de video na porta 5000,
-    reencaminha intactos para ffplay em 127.0.0.1:5001,
-    e regista o timestamp do último pacote recebido.
-    Sem SO_REUSEPORT — ffplay não toca na porta 5000.
+    Proxy de video: recebe o stream do robo na porta 5000, mede-o, e
+    reencaminha para o ffplay em 127.0.0.1:5001.
+
+    - UDP : recebe datagramas em :5000 (metodo original).
+    - TCP : escuta em :5000 como servidor, aceita a ligacao do robo e le o
+            stream continuo em blocos, reenviando cada bloco por UDP local
+            para o ffplay. Aceita re-ligacoes (o robo reconecta via watchdog).
+
+    O ffplay le sempre udp://127.0.0.1:5001 — nao muda com o transporte.
     """
-    global g_last_video_pkt
-    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    rx.bind(("0.0.0.0", VIDEO_PORT))
-    rx.settimeout(0.5)
-
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
     with g_lock:
         g_video_stats["t_start"]      = time.time()
         g_video_stats["window_start"] = time.time()
 
-    while g_running:
-        try:
-            data = rx.recv(65536)
-            now  = time.time()
-            g_last_video_pkt = now
-            tx.sendto(data, ("127.0.0.1", VIDEO_LOCAL_PORT))
-            with g_lock:
-                g_video_stats["rx_pkts"]      += 1
-                g_video_stats["rx_bytes"]     += len(data)
-                g_video_stats["window_pkts"]  += 1
-                g_video_stats["window_bytes"] += len(data)
-        except socket.timeout:
-            pass
-        except Exception:
-            pass
-    rx.close()
+    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    if VIDEO_TRANSPORT == "tcp":
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", VIDEO_PORT))
+        srv.listen(1)
+        srv.settimeout(0.5)
+        print(f"[VIDEO] Proxy TCP a escutar em :{VIDEO_PORT}")
+        while g_running:
+            try:
+                conn, addr = srv.accept()
+            except socket.timeout:
+                continue
+            except Exception:
+                continue
+            print(f"[VIDEO] Robo ligado ({addr[0]}) — a receber stream TCP")
+            conn.settimeout(0.5)
+            while g_running:
+                try:
+                    # blocos multiplos de 188 (pacote MPEG-TS) p/ o ffplay
+                    data = conn.recv(1316)
+                    if not data:
+                        break              # robo desligou
+                    _video_account(data, tx)
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+            conn.close()
+            print("[VIDEO] Ligacao TCP terminada — a aguardar reconexao")
+        srv.close()
+    else:
+        rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        rx.bind(("0.0.0.0", VIDEO_PORT))
+        rx.settimeout(0.5)
+        while g_running:
+            try:
+                data = rx.recv(65536)
+                _video_account(data, tx)
+            except socket.timeout:
+                pass
+            except Exception:
+                pass
+        rx.close()
+
     tx.close()
 
 def video_feedback_sender():

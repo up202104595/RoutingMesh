@@ -94,6 +94,14 @@ VIDEO_HEIGHT  = 480
 VIDEO_FPS     = 15
 VIDEO_BITRATE = 500000   # 500 kbps
 
+# Transporte da aplicacao de video: "tcp" (default) ou "udp".
+# TCP torna a comparacao L3 vs L2 justa ao nivel da aplicacao (nos dois
+# metodos o video corre sobre TCP fiavel). Tem de coincidir com o
+# VIDEO_TRANSPORT no base_station.py. Em TCP a base e o servidor (escuta em
+# :VIDEO_PORT) e o robo liga-se como cliente.
+VIDEO_TRANSPORT = "tcp"
+VIDEO_PORT      = 5000
+
 # ── Estado global ─────────────────────────────────────────────
 g_speed_l  = 0.0
 g_speed_r  = 0.0
@@ -107,6 +115,12 @@ pwm_a = None; pwm_b = None; pca = None
 # ═════════════════════════════════════════════════════════════
 
 def start_stream():
+    # TCP: liga-se como cliente a base (servidor). UDP: envia sem ligacao.
+    if VIDEO_TRANSPORT == "tcp":
+        out_url = f'"tcp://{BASE_IP}:{VIDEO_PORT}"'
+    else:
+        out_url = f'"udp://{BASE_IP}:{VIDEO_PORT}?pkt_size=1316"'
+
     cmd = (
         f"rpicam-vid -t 0 "
         f"--width {VIDEO_WIDTH} --height {VIDEO_HEIGHT} "
@@ -118,13 +132,14 @@ def start_stream():
         f"-c:v libx264 -preset ultrafast -tune zerolatency "
         f"-g 1 -b:v {VIDEO_BITRATE} "
         f"-f mpegts "
-        f'"udp://{BASE_IP}:5000?pkt_size=1316" '
+        f"{out_url} "
         f"2>/dev/null"
     )
     proc = subprocess.Popen(cmd, shell=True,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
-    print(f"[VIDEO] Stream iniciado — {VIDEO_BITRATE//1000}kbps "
+    print(f"[VIDEO] Stream iniciado ({VIDEO_TRANSPORT.upper()}) — "
+          f"{VIDEO_BITRATE//1000}kbps "
           f"{VIDEO_WIDTH}x{VIDEO_HEIGHT}@{VIDEO_FPS}fps (PID {proc.pid})")
     return proc
 
