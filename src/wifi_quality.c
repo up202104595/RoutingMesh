@@ -27,9 +27,9 @@ static pthread_t       g_thread;
  * forçando o MST a preferir o relay mesmo com o nó ainda "vivo".
  * ───────────────────────────────────────────────────────────── */
 uint8_t wifi_rssi_to_quality(int rssi_dbm) {
-    if (rssi_dbm >= -50) return 100;
-    if (rssi_dbm <= -70) return 0;    /* corte agressivo: relay obrigatório */
-    return (uint8_t)((rssi_dbm + 70) * 100 / 20);
+    if (rssi_dbm >= -40) return 100;
+    if (rssi_dbm <= -55) return 0;    /* relay obrigatório abaixo de -55 dBm */
+    return (uint8_t)((rssi_dbm + 55) * 100 / 15);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -83,6 +83,37 @@ static int parse_iw_dump(mac_rssi_t *out, int max) {
     return count;
 }
 
+/*
+ * parse_iwconfig_signal()
+ *
+ * Fallback para ad-hoc: iwconfig mostra "Signal level=-XX dBm" mesmo
+ * quando iw station dump nao lista peers (brcmfmac em IBSS).
+ * Devolve o RSSI geral da interface ou -100 se nao disponivel.
+ */
+static int parse_iwconfig_signal(void) {
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "iwconfig " MESH_PHY_IFACE " 2>/dev/null");
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return -100;
+
+    char line[256];
+    int rssi = -100;
+    while (fgets(line, sizeof(line), fp)) {
+        int val;
+        /* "Signal level=-65 dBm" ou "Signal level=165/255" */
+        if (strstr(line, "Signal level=")) {
+            if (sscanf(strstr(line, "Signal level=") + 13, "%d", &val) == 1) {
+                if (val < 0)       rssi = val;       /* já em dBm */
+                else if (val > 0)  rssi = val - 256; /* unsigned → signed */
+            }
+            break;
+        }
+    }
+    pclose(fp);
+    return rssi;
+}
+
 /* ─────────────────────────────────────────────────────────────
  * get_ip_for_mac()
  *
@@ -134,12 +165,13 @@ static uint8_t get_node_id_for_mac(const char *mac) {
 }
 
 /* ─────────────────────────────────────────────────────────────
- * wifi_quality_loop() — thread periódica
+ * wifi_quality_loop() — desactivado
+ * Qualidade gerida exclusivamente pela janela deslizante de
+ * beacons TDMA em node.c (MATRIX_updateLinkQuality).
  * ───────────────────────────────────────────────────────────── */
 static void* wifi_quality_loop(void *arg) {
     (void)arg;
-    /* WIFI quality desactivado — usa TCP failure + PDR em vez de RSSI */
-    printf("[WIFI] Thread desactivada (qualidade gerida por TCP+PDR)\n");
+    printf("[WIFI] Thread de qualidade desactivada (usando beacon loss)\n");
     while (g_running) usleep(1000000);
     return NULL;
 }

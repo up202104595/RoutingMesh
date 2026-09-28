@@ -39,6 +39,16 @@ static float   g_delay_array[PKTDELAY_ARRAY_SIZE + 1];
 static float   g_delay_sender[PKTDELAY_ARRAY_SIZE + 1];
 static int64_t g_delay_count = 0;
 
+/* ── convergência da sincronização ── */
+static int     g_stable_rounds = 0;     /* rondas seguidas dentro da banda morta */
+static uint64_t g_init_us       = 0;    /* instante do sync_init (para o tecto rígido) */
+
+static uint64_t sync_now_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
+}
+
 /* ─────────────────────────────────────────────────────────────
  * get_current_round_time_ms()
  *
@@ -49,8 +59,14 @@ static int64_t g_delay_count = 0;
 static double get_current_round_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    int64_t now_ms = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-    return (double)(now_ms % (int64_t)g_round_period_ms);
+    int64_t sec  = (int64_t)ts.tv_sec;
+    int64_t nsec = (int64_t)ts.tv_nsec;
+    /* IGUAL ao tdma_getCurrentRoundTimeD() do Diogo: módulo em ms inteiros e
+     * soma de volta a parte fracionária do ms (preserva precisão sub-ms). */
+    double cur_time_ms =
+        (double)((sec * 1000 + nsec / 1000000) % (int64_t)g_round_period_ms);
+    cur_time_ms += -(double)(nsec / 1000000) + (nsec / 1000000.0);
+    return cur_time_ms;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -60,6 +76,8 @@ void sync_init(uint8_t slot_id, uint8_t num_nodes, uint16_t round_period_ms) {
     g_slot_id        = slot_id;
     g_num_nodes      = num_nodes;
     g_round_period_ms = round_period_ms;
+    g_stable_rounds  = 0;
+    g_init_us        = sync_now_us();
 
     uint16_t width_ms = round_period_ms / num_nodes;
 
@@ -119,9 +137,10 @@ static float compute_delay(uint8_t  sender_slot_id,
     double sender_timestamp_ms = sender_timestamp_s * 1000.0;
     /* timestamp do emissor em ms dentro do round */
     double sender_ts_in_round = fmod(sender_timestamp_ms, (double)g_round_period_ms);
+    /* msg_position: posição do pacote dentro do slot do emissor.
+     * IGUAL ao tdma_getMsgPosition() do Diogo (sem clamp/sanitize extra). */
     float msg_position = (float)(sender_ts_in_round - (double)sender_begin_ms);
     if (msg_position < 0) msg_position += g_round_period_ms;
-    if (msg_position > width_ms) msg_position = 0; /* sanitize */
 
     /* slot_difference: +1=next, -1=prev */
     float slot_difference = (float)sender_slot_id - (float)g_slot_id;
@@ -271,6 +290,15 @@ void sync_adjust_slot(uint16_t round_period_ms) {
             delta = (int32_t)aggByNode[nj];
     }
 
+    /* BANDA MORTA: se o desalinhamento já está dentro do guard, não corrige —
+     * isto pára a rotação perpétua causada pelo resíduo de processamento e
+     * conta as rondas estáveis para o gate de convergência. */
+    if (delta <= SYNC_DEADBAND_MS) {
+        if (g_stable_rounds < 1000000) g_stable_rounds++;
+        return;
+    }
+    g_stable_rounds = 0;   /* houve correção real → ainda não convergiu */
+
     /* limita a CSI% da largura do slot — como no Diogo */
     uint16_t width_ms = g_round_period_ms / g_num_nodes;
     int32_t lim = (int32_t)(SYNC_CSI * width_ms);
@@ -330,4 +358,21 @@ int sync_in_slot(uint64_t now_us, uint16_t round_period_ms) {
         return (t_ms >= s.begin_ms && t_ms < s.end_ms);
     else
         return (t_ms >= s.begin_ms || t_ms < s.end_ms);
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * sync_is_stable() / sync_data_plane_ready()
+ * ───────────────────────────────────────────────────────────── */
+int sync_is_stable(void) {
+    return g_stable_rounds >= SYNC_STABLE_ROUNDS;
+}
+
+int sync_data_plane_ready(void) {
+    if (sync_is_stable()) return 1;
+    /* tecto rígido: admite dados ao fim de SYNC_CONVERGE_CAP_MS mesmo sem
+     * convergência, para nunca esperar mais do que o orçamento de arranque. */
+    if (g_init_us != 0 &&
+        (sync_now_us() - g_init_us) >= (uint64_t)SYNC_CONVERGE_CAP_MS * 1000ULL)
+        return 1;
+    return 0;
 }

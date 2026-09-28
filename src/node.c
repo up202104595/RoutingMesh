@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <netinet/tcp.h>
+#include <stddef.h>   /* offsetof */
 
 #define BASE_PORT        7000
 #define BASE_TCP_PORT    8000
@@ -38,6 +39,11 @@
 #define T_TRANS_US(len)  ((len) * 8ULL * 1000000ULL / WIFI_BPS)
 #define SLOT_USEFUL_US   (SLOT_DURATION_US - GUARD_US)
 #define MAX_BYTES_SLOT   ((SLOT_USEFUL_US / T_TRANS_US(1500)) * 1500ULL)
+
+/* Tamanho REAL do cabecalho MSG_DATA no fio (campos ate payload), SEM o array
+ * fixo payload[1500]. Usar sizeof(msg_data_hdr_t) enviava o buffer inteiro
+ * (~1.5KB) a cada pacote — inflava cada pacote para >1500 bytes. */
+#define MSG_DATA_HDR_WIRE  (offsetof(msg_data_hdr_t, payload))
 
 #ifndef MESH_NET_PREFIX
 #define MESH_NET_PREFIX  "172.20.10"
@@ -73,14 +79,6 @@ event_queue_t *g_event_queue = NULL;
 
 /* último frame em que recebemos pacote de cada nó (para slot miss detection) */
 static volatile uint64_t g_last_rx_frame[MAX_NODES + 1] = {0};
-
-/* flag de link fraco — suprime +3 beacon e força relay */
-volatile int g_video_poor_active = 0;
-
-/* hysteresis de recuperação: tempo (us) em que TCP reconectou */
-#define RECOVERY_GRACE_US     8000000ULL   /* 8s em relay após TCP reconectar */
-#define RECOVERY_PDR_MIN      60.0f        /* PDR mínimo para libertar relay */
-static volatile uint64_t g_tcp_reconnect_time[MAX_NODES + 1] = {0};
 
 void signal_handler(int sig) {
     (void)sig;
@@ -223,14 +221,6 @@ void* tcp_keepalive_loop(void *arg) {
                     node->tcp_sockfd[i] = fd;
                     pthread_mutex_unlock(&node->tcp_mutex);
                     printf("[TCP] Peer %d ligado\n", i);
-                    /* TCP reconectou — entra em período de graça (hysteresis):
-                     * qualidade=20, mantém relay durante RECOVERY_GRACE_US
-                     * ou até PDR > RECOVERY_PDR_MIN, o que vier depois. */
-                    if (g_video_poor_active) {
-                        g_tcp_reconnect_time[i] = get_time_us();
-                        MATRIX_setLinkQuality(i, 20);
-                        printf("[TCP] Peer %d reconectou — hysteresis ON (qualidade=20, grace=8s)\n", i);
-                    }
                 } else {
                     printf("[TCP] Peer %d nao disponivel — a tentar em 1s...\n", i);
                 }
@@ -253,33 +243,6 @@ void* tcp_keepalive_loop(void *arg) {
                 }
             }
         }
-        /* verifica hysteresis: liberta relay quando grace expirou E PDR ok */
-        for (int i = 1; i <= node->num_nodes; i++) {
-            if (i == node->node_id) continue;
-            if (!g_video_poor_active) continue;
-            if (g_tcp_reconnect_time[i] == 0) continue;
-
-            uint64_t elapsed = get_time_us() - g_tcp_reconnect_time[i];
-            float    pdr     = pdr_get((uint8_t)i);
-            bool     grace_ok = elapsed >= RECOVERY_GRACE_US;
-            bool     pdr_ok   = pdr >= RECOVERY_PDR_MIN;
-
-            if (grace_ok && pdr_ok) {
-                g_video_poor_active      = 0;
-                g_tcp_reconnect_time[i]  = 0;
-                uint8_t q = (uint8_t)pdr;
-                MATRIX_setLinkQuality(i, q);
-                printf("[TCP] Peer %d: grace=%.1fs PDR=%.1f%% — relay libertado, qualidade=%u\n",
-                       i, elapsed / 1e6, pdr, q);
-            } else {
-                /* mantém qualidade baixa durante hysteresis */
-                MATRIX_setLinkQuality(i, 20);
-                if ((elapsed % 2000000ULL) < 1000000ULL)   /* log a cada ~2s */
-                    printf("[TCP] Peer %d: hysteresis %.1fs/8s PDR=%.1f%%/%d%% — relay activo\n",
-                           i, elapsed / 1e6, pdr, (int)RECOVERY_PDR_MIN);
-            }
-        }
-
         sleep(1);
         if (!node->running || !g_running) break;
     }
@@ -334,7 +297,7 @@ void* tcp_rx_peer_loop(void *arg) {
         }
 
         uint32_t pkt_len = ntohl(net_len);
-        if (pkt_len < sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) ||
+        if (pkt_len < sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE ||
             pkt_len > 4096) {
             printf("[TCP-RX] pkt_len invalido=%u — a fechar\n", pkt_len);
             pthread_mutex_lock(&node->tcp_mutex);
@@ -381,12 +344,12 @@ void* tcp_rx_peer_loop(void *arg) {
             if (node->tun_fd >= 0)
                 tun_write(node->tun_fd, ip_pkt, ip_len);
         } else {
-            /* Relay via TUN + ip_forward:
-             * Injeta o pacote IP na TUN — o kernel consulta a rota /32
-             * e reencaminha de volta para fora de tun (mesmo fd).
-             * O tun_reader apanha e envia via TCP na slot TDMA de N2. */
-            printf("[TCP-RX] RELAY src=%d dst=%d — tun_write para ip_forward\n",
-                   data->src_id, data->dst_id);
+            /* Relay via kernel ip_forward:
+             * injector o pacote IP na TUN — o kernel consulta a rota /32
+             * adicionada pelo routing_manager (gateway = TUN IP do next_hop)
+             * e faz o forwarding automático de volta para a TUN.
+             * O tun_reader apanha e envia via tcp_sockfd[next_hop]. */
+            printf("[TCP-RX] RELAY src=%d dst=%d\n", data->src_id, data->dst_id);
             if (node->tun_fd >= 0)
                 tun_write(node->tun_fd, ip_pkt, ip_len);
         }
@@ -417,6 +380,24 @@ void* tun_reader_loop(void *arg) {
             if (n > 0) {
                 uint8_t dst_id = tun_get_dst_node(buf, (size_t)n);
                 if (dst_id != 0 && dst_id != node->node_id) {
+                    /* GATE DE CONVERGÊNCIA: só admite tráfego de dados depois de
+                     * a sincronização ter convergido (ou passado o tecto rígido).
+                     * Antes disso descarta — não enfileira — para não acumular
+                     * fila durante a convergência. Os beacons MATRIX não passam
+                     * por aqui, por isso continuam sempre a sincronizar. */
+                    if (!sync_data_plane_ready()) {
+                        static int gate_warned = 0;
+                        if (!gate_warned) {
+                            printf("[GATE] Sync a convergir — trafego de dados em espera...\n");
+                            gate_warned = 1;
+                        }
+                        continue;
+                    }
+                    static int gate_opened = 0;
+                    if (!gate_opened) {
+                        printf("[GATE] Sync convergiu — trafego de dados ADMITIDO\n");
+                        gate_opened = 1;
+                    }
                     tx_queue_push(node->tx_queue, buf, (size_t)n, dst_id);
                     printf("[TUN] Pacote: %zd bytes  dst=%d  queue=%d\n",
                            n, dst_id, tx_queue_size(node->tx_queue));
@@ -472,7 +453,7 @@ void* receiver_loop(void *arg) {
                    hdr->slot_id, n, hdr->slot_begin_ms, hdr->slot_end_ms);
 
         } else if (hdr->type == MSG_DATA) {
-            if ((size_t)n < sizeof(tdma_header_t) + sizeof(msg_data_hdr_t))
+            if ((size_t)n < sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE)
                 continue;
 
             msg_data_hdr_t *data = (msg_data_hdr_t *)(buffer + sizeof(tdma_header_t));
@@ -518,57 +499,104 @@ void* tx_loop(void *arg) {
            node->node_id, rp_ms, SLOT_DURATION_US/1000, GUARD_US/1000);
 
     uint64_t last_round  = 0;
+    uint64_t last_tx_round = (uint64_t)-1;   /* garante 1 transmissão por round */
     uint64_t start_time  = get_time_us();
-    #define STARTUP_GRACE_US  10000000ULL  /* 10s sem slot miss detection */
+    #define STARTUP_GRACE_US  10000000ULL  /* 10s sem detecção */
 
-    /* contador de misses consecutivos por nó */
-    uint8_t consecutive_miss[MAX_NODES + 1] = {0};
-    #define MISS_THRESHOLD 5   /* misses consecutivos antes de degradar qualidade */
+    /*
+     * Janela deslizante de perda de pacotes por nó.
+     * Cada bit representa um frame: 1=recebido, 0=perdido.
+     * Janela de 16 frames (16 × 150ms ≈ 2.4s).
+     * Se taxa de recepção < LOSS_THRESHOLD_PCT → degradar qualidade.
+     */
+    #define LOSS_WINDOW      16
+    #define LOSS_THRESHOLD_PCT 60   /* abaixo de 60% recebidos → link fraco */
+    uint16_t rx_window[MAX_NODES + 1] = {0};  /* bitmask circular */
+    uint8_t  seen[MAX_NODES + 1]      = {0};  /* nó já foi visto */
+    uint8_t  degraded[MAX_NODES + 1]  = {0};  /* link já degradado */
 
     while (node->running && g_running) {
         uint64_t now           = get_time_us();
         uint64_t time_in_frame = now % node->frame_duration_us;
         int      current_slot  = (int)(time_in_frame / SLOT_DURATION_US);
 
-        if (current_slot != (node->node_id - 1)) {
+        /*
+         * SINCRONIZAÇÃO RELATIVA (laço fechado):
+         * o slot de transmissão é o slot AJUSTADO PELOS BEACONS (sync_in_slot /
+         * g_slot), não mais o slot fixo por node_id + relógio absoluto. O
+         * sync_adjust_slot() (algoritmo do Diogo) corrige g_slot a cada round
+         * com base nos delays medidos, tornando o sistema imune a desvios de
+         * relógio entre nós.
+         */
+        if (!sync_in_slot(now, rp_ms)) {
             uint64_t round_us  = (uint64_t)rp_ms * 1000;
             uint64_t cur_round = now / round_us;
             if (cur_round != last_round) {
                 last_round = cur_round;
-                sync_adjust_slot(rp_ms);
+                /* NOTA: sync_adjust_slot() foi movido para o FIM do slot
+                 * (end_of_slot), como no tdma_syncronizeSlot() do Diogo. */
 
-                /* verifica slot misses consecutivos (só após grace period) */
-                if (get_time_us() - start_time < STARTUP_GRACE_US) goto skip_miss;
+                if (get_time_us() - start_time < STARTUP_GRACE_US) goto skip_loss;
+
                 for (int s = 0; s < node->num_nodes; s++) {
                     uint8_t nid = (uint8_t)(s + 1);
                     if (nid == node->node_id) continue;
-                    /* só conta miss se o nó já foi visto pelo menos uma vez */
-                    if (g_last_rx_frame[nid] == 0) continue;
-                    if (g_last_rx_frame[nid] < cur_round - 1) {
-                        consecutive_miss[nid]++;
-                        if (consecutive_miss[nid] >= MISS_THRESHOLD) {
-                            MATRIX_updateLinkQuality(nid, true);
-                            printf("[SLOT] Node %d: %d misses consecutivos — degradar qualidade\n",
-                                   nid, consecutive_miss[nid]);
+                    if (g_last_rx_frame[nid] == 0) continue;  /* nunca visto */
+                    seen[nid] = 1;
+
+                    /* desliza a janela: bit mais antigo sai, novo bit entra */
+                    int received = (g_last_rx_frame[nid] >= cur_round - 1);
+                    rx_window[nid] = (uint16_t)((rx_window[nid] << 1) | received);
+
+                    /* conta bits a 1 na janela */
+                    int rx_count = __builtin_popcount(rx_window[nid]);
+                    int pct      = (rx_count * 100) / LOSS_WINDOW;
+
+                    if (pct < LOSS_THRESHOLD_PCT) {
+                        MATRIX_updateLinkQuality(nid, true);
+                        if (!degraded[nid]) {
+                            printf("[SLOT] Node %d: taxa RX=%d%% (janela %d frames)"
+                                   " — degradar qualidade\n", nid, pct, LOSS_WINDOW);
+                            degraded[nid] = 1;
                         }
                     } else {
-                        consecutive_miss[nid] = 0;  /* reset ao receber */
+                        if (degraded[nid]) {
+                            printf("[SLOT] Node %d: taxa RX=%d%% — link recuperado\n",
+                                   nid, pct);
+                            degraded[nid] = 0;
+                        }
                     }
                 }
-                skip_miss:;
+                skip_loss:;
             }
             usleep(2000);
             continue;
         }
+
+        /* só transmite UMA vez por round (o slot dura ~45ms; evita reenvio) */
+        uint64_t round_us_g = (uint64_t)rp_ms * 1000;
+        uint64_t cur_round_tx = now / round_us_g;
+        if (cur_round_tx == last_tx_round) {
+            usleep(2000);
+            continue;
+        }
+        last_tx_round = cur_round_tx;
 
         uint64_t slot_start_us = now;
         (void)slot_start_us;
         /* BUG 5 FIX: removeDeadLinks() era chamado aqui E dentro de
          * serializeMatrix(), causando dupla remoção por slot.
          * serializeMatrix() já trata disto internamente. */
-        uint64_t slot_end = (now - time_in_frame) +
-                            ((uint64_t)(current_slot + 1) * SLOT_DURATION_US)
-                            - GUARD_US;
+        /* slot_end a partir do slot AJUSTADO PELOS BEACONS (g_slot), com
+         * tratamento de wrap-around no limite do frame. */
+        slot_limits_t sl_end     = sync_get_slot();
+        uint64_t      frame_start = now - (now % round_us_g);
+        uint64_t      slot_end;
+        if (sl_end.end_ms > sl_end.begin_ms)
+            slot_end = frame_start + (uint64_t)sl_end.end_ms * 1000;
+        else  /* slot atravessa o limite do frame */
+            slot_end = frame_start + round_us_g + (uint64_t)sl_end.end_ms * 1000;
+        if (slot_end > GUARD_US) slot_end -= GUARD_US;
 
         /* MATRIX broadcast via UDP */
         int payload_len = 0;
@@ -637,7 +665,7 @@ void* tx_loop(void *arg) {
             data->msg_id   = data_msg_id++;
             data->data_len = (uint16_t)pkt->len;
 
-            if (bytes_sent + sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) + pkt->len > MAX_BYTES_SLOT) {
+            if (bytes_sent + sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE + pkt->len > MAX_BYTES_SLOT) {
                 tx_queue_push(node->tx_queue, pkt->data, pkt->len, pkt->dst_id);
                 free(pkt);
                 break;
@@ -645,7 +673,8 @@ void* tx_loop(void *arg) {
 
             memcpy(data->payload, pkt->data, pkt->len);
             data->data_len = (uint16_t)pkt->len;
-            int total_len = sizeof(tdma_header_t) + sizeof(msg_data_hdr_t) + data->data_len;
+            /* total_len = cabecalhos + SO os data_len bytes reais (sem o array fixo) */
+            int total_len = sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE + data->data_len;
             free(pkt);
 
             const char *next_hop_ip = node->peer_ips[next_hop];
@@ -670,24 +699,13 @@ void* tx_loop(void *arg) {
                 sent = send(tcp_fd, frame, frame_len, MSG_NOSIGNAL);
                 if (sent < 0) {
                     printf("[TX] TCP peer %d falhou — a reconectar...\n", next_hop);
-                    MATRIX_setLinkQuality(next_hop, 0);
-                    g_video_poor_active = 1;
-                    printf("[TX] Qualidade No %d forcada a 0 (TCP falhou)\n", next_hop);
-                    /* força recálculo de routing imediatamente */
-                    if (g_event_queue) {
-                        event_t *evt = malloc(sizeof(event_t));
-                        evt->type      = EVENT_TOPOLOGY_CHANGED;
-                        evt->node_id   = (uint8_t)next_hop;
-                        evt->timestamp = 0.0;
-                        evt->next      = NULL;
-                        event_queue_push(g_event_queue, evt);
-                    }
                     pthread_mutex_lock(&node->tcp_mutex);
                     if (node->tcp_sockfd[next_hop] == tcp_fd) {
                         close(tcp_fd);
                         node->tcp_sockfd[next_hop] = -1;
                     }
                     pthread_mutex_unlock(&node->tcp_mutex);
+                    /* Descarta pacote — keepalive vai reconectar */
                     printf("[TX] Pacote descartado — sem ligacao TCP para peer %d\n", next_hop);
                 }
             } else {
@@ -699,6 +717,11 @@ void* tx_loop(void *arg) {
                    data->dst_id, next_hop, next_hop_ip, data->msg_id, data->data_len, sent);
             if (sent > 0) { pkts_sent++; bytes_sent += (uint64_t)sent; }
         }
+
+        /* END-OF-SLOT: sincroniza o slot UMA vez no fim do nosso slot, depois de
+         * ter recolhido os delays dos beacons dos vizinhos durante a ronda.
+         * É aqui que o Diogo chama tdma_syncronizeSlot() (end_of_slot_operations). */
+        sync_adjust_slot(rp_ms);
 
         float slot_use_pct    = (float)bytes_sent / (float)MAX_BYTES_SLOT * 100.0f;
         float throughput_kbps = (bytes_sent * 8.0f * 1000000.0f) / ((float)SLOT_DURATION_US * 1000.0f);
@@ -818,76 +841,6 @@ node_t* node_init(uint8_t node_id, uint8_t num_nodes) {
     return node;
 }
 
-/* ═══════════════════════════════════════════════════════════════
- * VIDEO FEEDBACK — Nó 1 escuta porta 9002
- * Base Station envia "video_poor" quando video falha.
- * Força qualidade do link para Nó 3 a zero imediatamente.
- * ═══════════════════════════════════════════════════════════════ */
-#define VIDEO_FEEDBACK_PORT  9002
-#define VIDEO_FEEDBACK_PEER  3        /* Nó 3 = base station */
-#define POOR_RECOVERY_US     15000000ULL  /* 15s sem feedback antes de recuperar */
-
-void* video_feedback_loop(void *arg) {
-    node_t *node = (node_t *)arg;
-
-    if (node->node_id != 1) return NULL;
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { perror("[VFEED] socket"); return NULL; }
-
-    int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    struct sockaddr_in addr = {0};
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(VIDEO_FEEDBACK_PORT);
-    addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("[VFEED] bind"); close(sock); return NULL;
-    }
-
-    /* timeout curto para verificar POOR_RECOVERY_US com precisão */
-    struct timeval tv = {1, 0};
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    printf("[VFEED] A escutar feedback de video na porta %d\n", VIDEO_FEEDBACK_PORT);
-
-    uint64_t last_feedback_us = 0;
-
-    while (node->running && g_running) {
-        char buf[256];
-        ssize_t n = recv(sock, buf, sizeof(buf) - 1, 0);
-
-        if (n > 0) {
-            buf[n] = '\0';
-            if (strstr(buf, "video_poor")) {
-                last_feedback_us = get_time_us();
-                g_video_poor_active = 1;
-                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 0);
-                printf("[VFEED] Video falhou — qualidade No %d = 0\n",
-                       VIDEO_FEEDBACK_PEER);
-            }
-        }
-
-        /* recupera só após POOR_RECOVERY_US sem nenhum feedback */
-        if (g_video_poor_active && last_feedback_us > 0) {
-            uint64_t elapsed = get_time_us() - last_feedback_us;
-            if (elapsed >= POOR_RECOVERY_US) {
-                g_video_poor_active = 0;
-                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 80);
-                printf("[VFEED] %lus sem feedback — link No %d recuperado\n",
-                       (unsigned long)(elapsed / 1000000), VIDEO_FEEDBACK_PEER);
-            } else {
-                /* mantém qualidade a zero enquanto em modo poor */
-                MATRIX_setLinkQuality(VIDEO_FEEDBACK_PEER, 0);
-            }
-        }
-    }
-
-    close(sock);
-    return NULL;
-}
-
 void node_run(node_t *node) {
     signal(SIGINT, signal_handler);
     printf("[Node %d] Iniciando threads...\n\n", node->node_id);
@@ -906,9 +859,6 @@ void node_run(node_t *node) {
         pthread_create(&node->tun_thread, NULL, tun_reader_loop, node);
     else
         printf("[Node %d] AVISO: Thread TUN nao iniciada\n", node->node_id);
-
-    pthread_t video_fb_thread;
-    pthread_create(&video_fb_thread, NULL, video_feedback_loop, node);
 
     pthread_t tcp_rx_threads[MAX_NODES + 1];
     memset(tcp_rx_threads, 0, sizeof(tcp_rx_threads));
