@@ -160,15 +160,18 @@ int tun_open(uint8_t node_id) {
              "ip route add 10.0.0.0/24 dev tun%u src 10.0.0.%u 2>/dev/null", node_id, node_id);
     system(cmd);
 
-#ifndef RELAY_METHOD_ARP
-    /* ip_forward + rp_filter */
+    /* ip_forward + rp_filter — necessario nos DOIS metodos:
+     * L3 usa-o para o relay via tabela 200; o ARP (metodo Ana) precisa dele
+     * para o kernel reencaminhar os pacotes UDP de dados salto-a-salto
+     * atraves das entradas ARP injetadas. */
     system("echo 1 > /proc/sys/net/ipv4/ip_forward");
     system("echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter");
     system("echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter");
     system("echo 0 > /proc/sys/net/ipv4/conf/" MESH_PHY_IFACE "/rp_filter");
     printf("[TUN] ip_forward activado, rp_filter desactivado\n");
 
-    /* ip rule: pacotes que CHEGAM pela tun (injectados via tun_write para relay)
+#ifndef RELAY_METHOD_ARP
+    /* L3: pacotes que CHEGAM pela tun (injectados via tun_write para relay)
      * usam tabela 200 → wlan0 ip_forward directo para o destino.
      * Baseado em iif (interface de entrada) em vez de src IP para capturar
      * qualquer src (10.0.0.X ou 172.20.10.X) injectado pelo relay. */
@@ -188,6 +191,15 @@ int tun_open(uint8_t node_id) {
         node_id, node_id, node_id, node_id);
     system(cmd);
     printf("[TUN] iptables FORWARD: tun%u <-> " MESH_PHY_IFACE " ACCEPT\n", node_id);
+#else
+    /* ARP (metodo Ana Morais): o relay e feito pelo KERNEL — o ip_forward
+     * reencaminha o pacote UDP de dados para o MAC do next-hop (entrada ARP).
+     * Basta permitir o forwarding wlan0 -> wlan0. */
+    snprintf(cmd, sizeof(cmd),
+        "iptables -D FORWARD -i " MESH_PHY_IFACE " -o " MESH_PHY_IFACE " -j ACCEPT 2>/dev/null; "
+        "iptables -I FORWARD -i " MESH_PHY_IFACE " -o " MESH_PHY_IFACE " -j ACCEPT");
+    system(cmd);
+    printf("[TUN] iptables FORWARD: " MESH_PHY_IFACE " <-> " MESH_PHY_IFACE " ACCEPT (relay ARP via kernel)\n");
 #endif
 
     /* iptables */

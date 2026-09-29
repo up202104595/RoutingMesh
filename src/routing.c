@@ -212,23 +212,25 @@ void routing_manager_recompute(routing_manager_t *rm,
             rm->routing_table[i].quality = link_quality[my_idx][nh_idx];
 
 #ifdef RELAY_METHOD_ARP
-        /* ── Metodo ARP (Ana Morais 2024) ──
-         * Associa IP virtual ao MAC fisico do next_hop na tabela ARP.
-         * O kernel envia directamente pelo MAC sem ip_forward.
+        /* ── Metodo ARP (Ana Morais) — relay ponta-a-ponta pelo kernel ──
+         * Injeta na tabela ARP: IP FISICO do destino final -> MAC do next-hop.
+         * A fonte envia o pacote UDP de dados para o IP fisico do destino; o
+         * kernel entrega-o ao MAC do next-hop e, nos relays, o ip_forward
+         * repete ate ao destino, sem o pacote passar pela aplicacao.
          */
-        char dest_tun_ip[32];
-        snprintf(dest_tun_ip, sizeof(dest_tun_ip), "10.0.0.%u", dest_id);
+        char dest_phy_ip[32];
+        snprintf(dest_phy_ip, sizeof(dest_phy_ip), "%s.%u", MESH_NET_PREFIX, dest_id);
 
         mac_table_update(next_hop);
         const char *next_hop_mac = mac_table_get(next_hop);
         if (next_hop_mac) {
-            tun_arp_set(dest_tun_ip, next_hop_mac);
+            tun_arp_set(dest_phy_ip, next_hop_mac);
             if (dest_id == next_hop)
                 printf("[ROUTING]   arp set %s -> %s  [directo]\n",
-                       dest_tun_ip, next_hop_mac);
+                       dest_phy_ip, next_hop_mac);
             else
                 printf("[ROUTING]   arp set %s -> %s  [relay via %d, quality=%u]\n",
-                       dest_tun_ip, next_hop_mac,
+                       dest_phy_ip, next_hop_mac,
                        next_hop, rm->routing_table[i].quality);
         } else {
             fprintf(stderr, "[ROUTING]   AVISO: MAC do Node %d desconhecido\n", next_hop);

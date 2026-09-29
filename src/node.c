@@ -677,6 +677,29 @@ void* tx_loop(void *arg) {
             int total_len = sizeof(tdma_header_t) + MSG_DATA_HDR_WIRE + data->data_len;
             free(pkt);
 
+#ifdef RELAY_METHOD_ARP
+            /* ── Metodo Ana Morais (ponta-a-ponta) ──
+             * Envia UM pacote UDP para o IP FISICO do DESTINO FINAL. O kernel
+             * entrega-o ao MAC do next-hop (entrada ARP injetada em routing.c);
+             * nos relays, o ip_forward repete o processo ate ao destino —
+             * dentro deste slot e SEM os relays reentrarem na aplicacao.
+             * Reusa node->sockfd (sport = BASE_PORT+id, excluido do mangle, logo
+             * nao volta ao tun). O destino recebe-o em node->sockfd (porta
+             * BASE_PORT+dst) e o receiver_loop entrega-o ao tun. */
+            (void)next_hop;
+            struct sockaddr_in ddst = {0};
+            ddst.sin_family      = AF_INET;
+            ddst.sin_port        = htons(BASE_PORT + data->dst_id);
+            ddst.sin_addr.s_addr = inet_addr(node->peer_ips[data->dst_id]);
+            ssize_t sent = sendto(node->sockfd, pkt_buffer, total_len, 0,
+                                  (struct sockaddr *)&ddst, sizeof(ddst));
+            if (sent < 0) perror("[TX/ARP] sendto");
+            printf("[TX] MSG_DATA(ARP)  dst=%d  via kernel/ARP (%s)  msg_id=%u  ip_len=%u  sent=%zd\n",
+                   data->dst_id, node->peer_ips[data->dst_id], data->msg_id,
+                   data->data_len, sent);
+            if (sent > 0) { pkts_sent++; bytes_sent += (uint64_t)sent; }
+#else
+            /* ── Metodo Miguel (L3) ── TCP MSG_DATA salto-a-salto no slot TDMA. */
             const char *next_hop_ip = node->peer_ips[next_hop];
             if (next_hop_ip[0] == '\0') {
                 printf("[TX] IP desconhecido para next_hop=%d\n", next_hop);
@@ -716,6 +739,7 @@ void* tx_loop(void *arg) {
             printf("[TX] MSG_DATA  dst=%d  next_hop=%d(%s)  msg_id=%u  ip_len=%u  sent=%zd\n",
                    data->dst_id, next_hop, next_hop_ip, data->msg_id, data->data_len, sent);
             if (sent > 0) { pkts_sent++; bytes_sent += (uint64_t)sent; }
+#endif
         }
 
         /* END-OF-SLOT: sincroniza o slot UMA vez no fim do nosso slot, depois de
