@@ -42,7 +42,7 @@ VIDEO_PORT          = 5000
 # Em TCP a base e o servidor: o proxy escuta em :VIDEO_PORT, aceita a ligacao
 # do robo, mede, e reenvia por UDP local para o ffplay (5001) — o ffplay e as
 # metricas ficam iguais aos do modo UDP.
-VIDEO_TRANSPORT     = "tcp"
+VIDEO_TRANSPORT     = "udp"
 
 # ── Controlo ─────────────────────────────────────────────────
 DEADZONE         = 0.1

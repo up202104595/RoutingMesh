@@ -99,7 +99,7 @@ VIDEO_BITRATE = 500000   # 500 kbps
 # metodos o video corre sobre TCP fiavel). Tem de coincidir com o
 # VIDEO_TRANSPORT no base_station.py. Em TCP a base e o servidor (escuta em
 # :VIDEO_PORT) e o robo liga-se como cliente.
-VIDEO_TRANSPORT = "tcp"
+VIDEO_TRANSPORT = "udp"
 VIDEO_PORT      = 5000
 
 # ── Estado global ─────────────────────────────────────────────
