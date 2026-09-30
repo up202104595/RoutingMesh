@@ -20,8 +20,12 @@
 # N2 (vizinho direto do N3), por fim N3 local. Logs de N1/N2 nos proprios Pi:
 # /tmp/meshnode_<id>.log
 #
+# Enderecos SSH de cada no: tenta primeiro o overlay 10.0.0.x (vai pela mesh a
+# correr) e, se falhar, o fisico 172.20.10.x (1.o arranque, com os nos ao
+# alcance uns dos outros). Assim o primeiro arranque tambem sai do PC.
+#
 # Env (opcional): REMOTE_USER (pi)  REMOTE_DIR (Documents/RoutingMesh)
-#                 N1_HOST (10.0.0.1)  N2_HOST (10.0.0.2)
+#                 N1_HOST / N2_HOST (um unico endereco; desliga o fallback)
 #                 LOCAL_BG=1  DRY_RUN=1 (so mostra o que faria)
 
 METHOD=${1:-}
@@ -33,8 +37,8 @@ esac
 NUM_NODES=3
 REMOTE_USER=${REMOTE_USER:-pi}
 REMOTE_DIR=${REMOTE_DIR:-Documents/RoutingMesh}   # relativo a home remota
-N1_HOST=${N1_HOST:-10.0.0.1}
-N2_HOST=${N2_HOST:-10.0.0.2}
+N1_HOSTS=${N1_HOST:-10.0.0.1 172.20.10.1}
+N2_HOSTS=${N2_HOST:-10.0.0.2 172.20.10.2}
 LOCAL_BG=${LOCAL_BG:-0}
 DRY_RUN=${DRY_RUN:-0}
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -48,18 +52,25 @@ run() {
 }
 pause() { [ "$DRY_RUN" = "1" ] || sleep "$1"; }
 
-launch_remote() {   # $1 = node_id   $2 = host
-    echo "N$1 ($2) -> $METHOD"
-    # -n + redirects + setsid/nohup: o SSH regressa logo e o no continua a
-    # correr mesmo que a ligacao caia quando a mesh reinicia.
-    run ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$2" \
-        "cd $REMOTE_DIR && setsid nohup sudo -n ./run-node.sh $METHOD $1 $NUM_NODES </dev/null >/tmp/meshnode_$1.log 2>&1 &" \
-        || { echo "ERRO: SSH para N$1 ($2) falhou — a abortar"; exit 1; }
+launch_remote() {   # $1 = node_id   $2 = lista de enderecos a tentar, por ordem
+    local id=$1 h
+    for h in $2; do
+        echo "N$id ($h) -> $METHOD"
+        # -n + redirects + setsid/nohup: o SSH regressa logo e o no continua a
+        # correr mesmo que a ligacao caia quando a mesh reinicia.
+        if run ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$h" \
+            "cd $REMOTE_DIR && setsid nohup sudo -n ./run-node.sh $METHOD $id $NUM_NODES </dev/null >/tmp/meshnode_$id.log 2>&1 &"; then
+            return 0
+        fi
+        echo "  (SSH para $h falhou)"
+    done
+    echo "ERRO: SSH para N$id falhou em todos os enderecos ($2) — a abortar"
+    exit 1
 }
 
-launch_remote 1 "$N1_HOST"
+launch_remote 1 "$N1_HOSTS"
 pause 2
-launch_remote 2 "$N2_HOST"
+launch_remote 2 "$N2_HOSTS"
 pause 2
 
 if [ "$LOCAL_BG" = "1" ]; then
