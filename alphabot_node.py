@@ -153,18 +153,41 @@ def stop_stream(proc):
     subprocess.run(["pkill", "-f", "rpicam-vid"], capture_output=True)
     subprocess.run(["pkill", "-f", "ffmpeg"],     capture_output=True)
 
+# Processo da stream (partilhado pelo watchdog e pelo comando video_transport).
+# O lock evita dois reinicios em simultaneo (a camara so aceita um processo).
+g_stream_ref  = [None]
+g_stream_lock = threading.Lock()
+
 def stream_watchdog(proc_ref):
     while g_running:
         time.sleep(5)
         if not g_running:
             break
-        proc = proc_ref[0]
-        if proc is not None and proc.poll() is not None:
-            print("[VIDEO] Stream caiu — a reiniciar em 2s...")
-            stop_stream(proc)
-            time.sleep(2)
-            if g_running:
-                proc_ref[0] = start_stream()
+        with g_stream_lock:
+            proc = proc_ref[0]
+            if proc is not None and proc.poll() is not None:
+                print("[VIDEO] Stream caiu — a reiniciar em 2s...")
+                stop_stream(proc)
+                time.sleep(2)
+                if g_running:
+                    proc_ref[0] = start_stream()
+
+def set_video_transport(mode):
+    """Muda o transporte do video ('tcp'|'udp') e reinicia a stream.
+    Comandado pela base station ao trocar de metodo de relay."""
+    global VIDEO_TRANSPORT
+    if mode not in ("tcp", "udp"):
+        print(f"[VIDEO] Transporte invalido: {mode!r}")
+        return
+    if mode == VIDEO_TRANSPORT:
+        return
+    VIDEO_TRANSPORT = mode
+    print(f"[VIDEO] Transporte -> {mode.upper()} — a reiniciar a stream")
+    with g_stream_lock:
+        stop_stream(g_stream_ref[0])
+        time.sleep(1)
+        if g_running:
+            g_stream_ref[0] = start_stream()
 
 # ═════════════════════════════════════════════════════════════
 # HARDWARE
@@ -300,6 +323,12 @@ def cmd_receiver():
                 motors_stop()
             elif cmd == "servo":
                 if "pan" in msg: servo_set_pan(int(msg["pan"]))
+            elif cmd == "video_transport":
+                # em thread: o reinicio da stream demora e nao pode bloquear
+                # os comandos de movimento
+                threading.Thread(target=set_video_transport,
+                                 args=(str(msg.get("mode", "")),),
+                                 daemon=True).start()
             else:
                 print(f"[CMD] Comando desconhecido: {cmd!r} de {addr}")
         except socket.timeout:
@@ -342,7 +371,7 @@ def main():
     print("╔══════════════════════════════════════╗")
     print("║  AlphaBot2 — Nó 1 — RA-TDMAs+       ║")
     print("╚══════════════════════════════════════╝")
-    print(f"  Stream: udp://{BASE_IP}:5000")
+    print(f"  Stream: {VIDEO_TRANSPORT}://{BASE_IP}:{VIDEO_PORT}")
     print(f"  Video:  {VIDEO_WIDTH}x{VIDEO_HEIGHT}@{VIDEO_FPS}fps {VIDEO_BITRATE//1000}kbps")
     print()
 
@@ -351,7 +380,8 @@ def main():
     print("[ALPHABOT] A aguardar 10s para o meshnode estabilizar...")
     time.sleep(10)
 
-    proc_ref = [start_stream()]
+    g_stream_ref[0] = start_stream()
+    proc_ref = g_stream_ref
 
     threading.Thread(target=cmd_receiver,     daemon=True).start()
     threading.Thread(target=telemetry_sender, daemon=True).start()

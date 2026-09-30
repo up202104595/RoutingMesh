@@ -4,10 +4,15 @@
 #
 # Uso:  ./switch-all.sh <l3|arp>
 #
+# Chamado tambem pela base_station.py (comando "arp"/"l3" ou botoes), com
+# LOCAL_BG=1: o N3 arranca em background (log em /tmp/meshnode_3.log) e o SSH
+# nunca pede password (BatchMode) — precisa de chave SSH.
+#
 # Pre-requisitos:
 #   - a mesh esta a correr (o SSH vai pelos enderecos overlay 10.0.0.x, atraves
 #     do relay). Se nao estiver, arranca cada no com run-node.sh.
-#   - SSH para os Pi (ideal: chave, ssh-copy-id) e sudo sem password nos Pi.
+#   - SSH por chave para os Pi (ssh-copy-id pi@10.0.0.1 ; ssh-copy-id pi@10.0.0.2)
+#     e sudo sem password nos Pi e no PC (ou 'sudo -v' antes, no PC).
 #   - o repositorio esta na mesma pasta relativa a home em N1 e N2, e os
 #     binarios estao compilados (make both ...).
 #
@@ -17,6 +22,7 @@
 #
 # Env (opcional): REMOTE_USER (pi)  REMOTE_DIR (Documents/RoutingMesh)
 #                 N1_HOST (10.0.0.1)  N2_HOST (10.0.0.2)
+#                 LOCAL_BG=1  DRY_RUN=1 (so mostra o que faria)
 
 METHOD=${1:-}
 case "$METHOD" in
@@ -29,22 +35,47 @@ REMOTE_USER=${REMOTE_USER:-pi}
 REMOTE_DIR=${REMOTE_DIR:-Documents/RoutingMesh}   # relativo a home remota
 N1_HOST=${N1_HOST:-10.0.0.1}
 N2_HOST=${N2_HOST:-10.0.0.2}
+LOCAL_BG=${LOCAL_BG:-0}
+DRY_RUN=${DRY_RUN:-0}
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+SSH_OPTS=(-n -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new)
+# sem terminal (chamado pela base_station.py): falhar logo em vez de pedir password
+[ "$LOCAL_BG" = "1" ] && SSH_OPTS+=(-o BatchMode=yes)
+
+run() {
+    if [ "$DRY_RUN" = "1" ]; then echo "[dry-run] $*"; else "$@"; fi
+}
+pause() { [ "$DRY_RUN" = "1" ] || sleep "$1"; }
+
 launch_remote() {   # $1 = node_id   $2 = host
-    echo "[switch] N$1 ($2) -> $METHOD"
+    echo "N$1 ($2) -> $METHOD"
     # -n + redirects + setsid/nohup: o SSH regressa logo e o no continua a
     # correr mesmo que a ligacao caia quando a mesh reinicia.
-    ssh -n -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-        "$REMOTE_USER@$2" \
-        "cd $REMOTE_DIR && setsid nohup sudo ./run-node.sh $METHOD $1 $NUM_NODES </dev/null >/tmp/meshnode_$1.log 2>&1 &" \
-        || { echo "[switch] ERRO: SSH para N$1 ($2) falhou — a abortar"; exit 1; }
+    run ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$2" \
+        "cd $REMOTE_DIR && setsid nohup sudo -n ./run-node.sh $METHOD $1 $NUM_NODES </dev/null >/tmp/meshnode_$1.log 2>&1 &" \
+        || { echo "ERRO: SSH para N$1 ($2) falhou — a abortar"; exit 1; }
 }
 
 launch_remote 1 "$N1_HOST"
-sleep 2
+pause 2
 launch_remote 2 "$N2_HOST"
-sleep 2
+pause 2
 
-echo "[switch] N3 (local) -> $METHOD"
+if [ "$LOCAL_BG" = "1" ]; then
+    echo "N3 (local, em background) -> $METHOD  (log: /tmp/meshnode_3.log)"
+    if [ "$DRY_RUN" = "1" ]; then
+        echo "[dry-run] nohup sudo -n $DIR/run-node.sh $METHOD 3 $NUM_NODES > /tmp/meshnode_3.log &"
+        exit 0
+    fi
+    nohup sudo -n "$DIR/run-node.sh" "$METHOD" 3 "$NUM_NODES" \
+        </dev/null >/tmp/meshnode_3.log 2>&1 &
+    exit 0
+fi
+
+echo "N3 (local) -> $METHOD"
+if [ "$DRY_RUN" = "1" ]; then
+    echo "[dry-run] exec sudo $DIR/run-node.sh $METHOD 3 $NUM_NODES"
+    exit 0
+fi
 exec sudo "$DIR/run-node.sh" "$METHOD" 3 "$NUM_NODES"

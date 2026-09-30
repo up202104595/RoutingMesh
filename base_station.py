@@ -16,6 +16,7 @@ DS4 via USB — mapeamento:
   PS       (btn 10)  : Sair
 """
 
+import os
 import socket
 import json
 import time
@@ -37,12 +38,23 @@ TEL_PORT      = 9001
 
 # ── Video ─────────────────────────────────────────────────────
 VIDEO_PORT          = 5000
-# Transporte da aplicacao de video: "tcp" (default) ou "udp".
-# Tem de coincidir com VIDEO_TRANSPORT no alphabot_node.py.
+# Transporte inicial da aplicacao de video: "udp" ou "tcp".
+# Tem de coincidir com VIDEO_TRANSPORT no alphabot_node.py. Ao trocar de
+# metodo (ver SWITCH) o transporte passa a seguir METHOD_VIDEO e e comutado
+# em tempo real nos dois lados.
 # Em TCP a base e o servidor: o proxy escuta em :VIDEO_PORT, aceita a ligacao
 # do robo, mede, e reenvia por UDP local para o ffplay (5001) — o ffplay e as
 # metricas ficam iguais aos do modo UDP.
 VIDEO_TRANSPORT     = "udp"
+
+# ── SWITCH de metodo de relay (L3 <-> ARP) a partir da base station ──
+# Comando no terminal ("arp" / "l3") ou botoes: Square = ARP, Circle = L3.
+METHODS              = ("l3", "arp")
+# Transporte do video por metodo: o L3 repoe perdas no 1.o salto (TCP da mesh),
+# por isso UDP; o ARP e transparente, por isso a aplicacao usa TCP.
+METHOD_VIDEO         = {"l3": "udp", "arp": "tcp"}
+AUTO_VIDEO_TRANSPORT = True
+REPO_DIR             = os.path.dirname(os.path.abspath(__file__))
 
 # ── Controlo ─────────────────────────────────────────────────
 DEADZONE         = 0.1
@@ -156,32 +168,42 @@ def _video_account(data, tx):
         g_video_stats["window_pkts"]  += 1
         g_video_stats["window_bytes"] += len(data)
 
-def video_monitor():
-    """
-    Proxy de video: recebe o stream do robo na porta 5000, mede-o, e
-    reencaminha para o ffplay em 127.0.0.1:5001.
+g_video_transport = VIDEO_TRANSPORT   # comutavel em tempo real (switch de metodo)
 
-    - UDP : recebe datagramas em :5000 (metodo original).
-    - TCP : escuta em :5000 como servidor, aceita a ligacao do robo e le o
-            stream continuo em blocos, reenviando cada bloco por UDP local
-            para o ffplay. Aceita re-ligacoes (o robo reconecta via watchdog).
+def set_video_transport_local(mode):
+    """Muda o modo do proxy de video ('udp'|'tcp'); o video_monitor adapta-se."""
+    global g_video_transport
+    if mode in ("udp", "tcp") and mode != g_video_transport:
+        print(f"\n[VIDEO] Proxy -> {mode.upper()}")
+        g_video_transport = mode
 
-    O ffplay le sempre udp://127.0.0.1:5001 — nao muda com o transporte.
-    """
-    with g_lock:
-        g_video_stats["t_start"]      = time.time()
-        g_video_stats["window_start"] = time.time()
+def _video_loop_udp(tx, mode):
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    rx.bind(("0.0.0.0", VIDEO_PORT))
+    rx.settimeout(0.5)
+    print(f"[VIDEO] Proxy UDP a receber em :{VIDEO_PORT}")
+    try:
+        while g_running and g_video_transport == mode:
+            try:
+                data = rx.recv(65536)
+                _video_account(data, tx)
+            except socket.timeout:
+                pass
+            except Exception:
+                pass
+    finally:
+        rx.close()
 
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    if VIDEO_TRANSPORT == "tcp":
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("0.0.0.0", VIDEO_PORT))
-        srv.listen(1)
-        srv.settimeout(0.5)
-        print(f"[VIDEO] Proxy TCP a escutar em :{VIDEO_PORT}")
-        while g_running:
+def _video_loop_tcp(tx, mode):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", VIDEO_PORT))
+    srv.listen(1)
+    srv.settimeout(0.5)
+    print(f"[VIDEO] Proxy TCP a escutar em :{VIDEO_PORT}")
+    try:
+        while g_running and g_video_transport == mode:
             try:
                 conn, addr = srv.accept()
             except socket.timeout:
@@ -190,35 +212,53 @@ def video_monitor():
                 continue
             print(f"[VIDEO] Robo ligado ({addr[0]}) — a receber stream TCP")
             conn.settimeout(0.5)
-            while g_running:
-                try:
-                    # blocos multiplos de 188 (pacote MPEG-TS) p/ o ffplay
-                    data = conn.recv(1316)
-                    if not data:
-                        break              # robo desligou
-                    _video_account(data, tx)
-                except socket.timeout:
-                    continue
-                except Exception:
-                    break
-            conn.close()
-            print("[VIDEO] Ligacao TCP terminada — a aguardar reconexao")
-        srv.close()
-    else:
-        rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        rx.bind(("0.0.0.0", VIDEO_PORT))
-        rx.settimeout(0.5)
-        while g_running:
             try:
-                data = rx.recv(65536)
-                _video_account(data, tx)
-            except socket.timeout:
-                pass
-            except Exception:
-                pass
-        rx.close()
+                while g_running and g_video_transport == mode:
+                    try:
+                        # blocos ate 1316 (7 pacotes MPEG-TS) p/ o ffplay
+                        data = conn.recv(1316)
+                        if not data:
+                            break              # robo desligou
+                        _video_account(data, tx)
+                    except socket.timeout:
+                        continue
+                    except Exception:
+                        break
+            finally:
+                conn.close()
+            print("[VIDEO] Ligacao TCP terminada — a aguardar reconexao")
+    finally:
+        srv.close()
 
+def video_monitor():
+    """
+    Proxy de video: recebe o stream do robo na porta 5000, mede-o, e
+    reencaminha para o ffplay em 127.0.0.1:5001.
+
+    - UDP : recebe datagramas em :5000.
+    - TCP : escuta em :5000 como servidor, aceita a ligacao do robo e le o
+            stream continuo em blocos, reenviando cada bloco por UDP local
+            para o ffplay. Aceita re-ligacoes (o robo reconecta via watchdog).
+
+    O modo e g_video_transport e pode mudar em tempo real (switch de metodo):
+    o ciclo em curso termina, fecha os sockets e arranca o do novo modo.
+    O ffplay le sempre udp://127.0.0.1:5001 — nao muda com o transporte.
+    """
+    with g_lock:
+        g_video_stats["t_start"]      = time.time()
+        g_video_stats["window_start"] = time.time()
+
+    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    while g_running:
+        mode = g_video_transport
+        try:
+            if mode == "tcp":
+                _video_loop_tcp(tx, mode)
+            else:
+                _video_loop_udp(tx, mode)
+        except OSError as e:
+            print(f"\n[VIDEO] ERRO no proxy {mode.upper()}: {e} — nova tentativa em 1s")
+            time.sleep(1)
     tx.close()
 
 # ═════════════════════════════════════════════════════════════
@@ -282,6 +322,91 @@ def print_telemetry(speed_label):
     )
 
 # ═════════════════════════════════════════════════════════════
+# SWITCH DE METODO (L3 <-> ARP) a partir da base station
+# ═════════════════════════════════════════════════════════════
+
+g_switching = False
+g_method    = None     # desconhecido ate a primeira troca feita daqui
+
+def _notify_robot_transport(mode):
+    """Pede ao robo para mudar o transporte do video (3x: o UDP pode perder-se)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    msg = json.dumps({"cmd": "video_transport", "mode": mode}).encode()
+    for _ in range(3):
+        try:
+            s.sendto(msg, (ROBOT_IP, CMD_PORT))
+        except Exception:
+            pass
+        time.sleep(0.2)
+    s.close()
+
+def switch_method(method):
+    """
+    Troca o metodo de relay nos 3 nos (correr numa thread):
+      1. confirma que o sudo nao pede password (o N3 local corre em background);
+      2. muda o transporte do video (robo + proxy local), se AUTO_VIDEO_TRANSPORT;
+      3. corre switch-all.sh (N1, N2 por SSH; N3 local) com LOCAL_BG=1.
+    """
+    global g_switching, g_method
+    with g_lock:
+        if g_switching:
+            print("\n[SWITCH] Ja ha uma troca em curso — aguarda.")
+            return
+        g_switching = True
+    try:
+        print(f"\n[SWITCH] A trocar para {method.upper()} ...")
+
+        if subprocess.run(["sudo", "-n", "true"],
+                          capture_output=True).returncode != 0:
+            print("[SWITCH] ERRO: o sudo pede password. Corre 'sudo -v' neste "
+                  "terminal (ou configura NOPASSWD) e tenta de novo.")
+            return
+
+        if AUTO_VIDEO_TRANSPORT:
+            mode = METHOD_VIDEO[method]
+            _notify_robot_transport(mode)      # antes de a mesh reiniciar
+            set_video_transport_local(mode)
+
+        env = dict(os.environ, LOCAL_BG="1")
+        r = subprocess.run([os.path.join(REPO_DIR, "switch-all.sh"), method],
+                           cwd=REPO_DIR, env=env, capture_output=True,
+                           text=True, timeout=90)
+        for line in (r.stdout + r.stderr).splitlines():
+            print(f"[SWITCH] {line}")
+        if r.returncode != 0:
+            print(f"[SWITCH] ERRO: switch-all.sh terminou com codigo {r.returncode}")
+            return
+
+        g_method = method
+        print(f"[SWITCH] Comandos enviados. O {method.upper()} demora ~10-20 s a "
+              f"convergir e o video a voltar. Logs: /tmp/meshnode_<id>.log")
+    except subprocess.TimeoutExpired:
+        print("[SWITCH] ERRO: timeout (SSH sem resposta?)")
+    except Exception as e:
+        print(f"[SWITCH] ERRO: {e}")
+    finally:
+        with g_lock:
+            g_switching = False
+
+def start_switch(method):
+    threading.Thread(target=switch_method, args=(method,), daemon=True).start()
+
+def command_loop():
+    """Comandos escritos no terminal da base: arp | l3 | status | help."""
+    while g_running:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        cmd = line.strip().lower()
+        if cmd in METHODS:
+            start_switch(cmd)
+        elif cmd == "status":
+            print(f"\n[SWITCH] metodo={g_method or '?'}  video={g_video_transport.upper()}"
+                  f"  a_trocar={g_switching}")
+        elif cmd in ("help", "?"):
+            print("\n[SWITCH] comandos: arp | l3 | status   (botoes: Square=ARP, Circle=L3)")
+
+# ═════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════
 
@@ -291,7 +416,7 @@ def main():
     print("║  Base Station — Nó 3 — RA-TDMAs+        ║")
     print("╚══════════════════════════════════════════╝")
     print(f"  Robot:  {ROBOT_IP}:{CMD_PORT}")
-    print(f"  Video:  udp://0.0.0.0:5000")
+    print(f"  Video:  {g_video_transport}://0.0.0.0:{VIDEO_PORT}")
     print()
 
     if not HAS_PYGAME:
@@ -302,6 +427,8 @@ def main():
     threading.Thread(target=telemetry_receiver,    daemon=True).start()
     threading.Thread(target=ffplay_watchdog,        args=(proc_ref,), daemon=True).start()
     threading.Thread(target=video_monitor,          daemon=True).start()
+    if sys.stdin.isatty():
+        threading.Thread(target=command_loop,       daemon=True).start()
 
     pygame.init()
     pygame.joystick.init()
@@ -322,7 +449,10 @@ def main():
     print("  Triangle (btn 2) : Centrar câmara")
     print("  Cross    (btn 0) : STOP emergência")
     print("  D-Pad ←→         : Velocidade -/+")
+    print("  Square   (btn 3) : Trocar para metodo ARP (Layer 2)")
+    print("  Circle   (btn 1) : Trocar para metodo L3")
     print("  PS       (btn 10): Sair")
+    print("  Terminal         : escreve 'arp' ou 'l3' + Enter (tambem: status)")
     print()
 
     sock        = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -333,6 +463,8 @@ def main():
     last_srv_t  = 0.0
     last_dpad_t = 0.0
     dpad_x_prev = 0.0
+    sq_prev     = False
+    ci_prev     = False
 
     print(f"[BASE] Pronto. Velocidade: {SPEED_LABELS[speed_idx]}\n")
     try:
@@ -350,6 +482,15 @@ def main():
                 print("\n[BASE] PARAGEM DE EMERGÊNCIA!")
                 time.sleep(0.1)
                 continue
+
+            # troca de metodo: dispara so no flanco de subida do botao
+            sq = bool(btn(joy, BTN_SQUARE))
+            ci = bool(btn(joy, BTN_CIRCLE))
+            if sq and not sq_prev:
+                start_switch("arp")
+            if ci and not ci_prev:
+                start_switch("l3")
+            sq_prev, ci_prev = sq, ci
 
             dpad_x = axis(joy, AX_DPAD_X)
             if now - last_dpad_t > 0.3 and dpad_x != dpad_x_prev:
