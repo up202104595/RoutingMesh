@@ -344,11 +344,15 @@ void* tcp_rx_peer_loop(void *arg) {
             if (node->tun_fd >= 0)
                 tun_write(node->tun_fd, ip_pkt, ip_len);
         } else {
-            /* Relay via kernel ip_forward:
-             * injector o pacote IP na TUN — o kernel consulta a rota /32
-             * adicionada pelo routing_manager (gateway = TUN IP do next_hop)
-             * e faz o forwarding automático de volta para a TUN.
-             * O tun_reader apanha e envia via tcp_sockfd[next_hop]. */
+            /* Relay (salto intermedio): o TCP termina aqui, por isso o kernel
+             * nunca viu o pacote IP interior. tun_write() entrega-o ao kernel
+             * como se tivesse chegado pela tunN; a regra
+             * "ip rule iif tunN lookup 200" (tun.c) manda-o para a tabela 200,
+             * cuja rota /32 (gateway = IP fisico do next-hop, dev wlan0, ver
+             * routing.c) faz o kernel reencaminha-lo IMEDIATAMENTE por wlan0,
+             * sem fila e sem esperar pelo slot deste no.
+             * Fallback (tabela 200 sem rota, ex.: durante um recompute): segue
+             * a tabela main, volta pela TUN e o tun_reader re-enfileira-o. */
             printf("[TCP-RX] RELAY src=%d dst=%d\n", data->src_id, data->dst_id);
             if (node->tun_fd >= 0)
                 tun_write(node->tun_fd, ip_pkt, ip_len);
@@ -631,7 +635,9 @@ void* tx_loop(void *arg) {
             MATRIX_print();
         }
 
-        /* MSG_DATA via TCP — sem framing extra */
+        /* MSG_DATA: so transmite no slot deste no (nos dois metodos).
+         * L3: TCP para o next-hop com framing [4 bytes tamanho][pacote].
+         * ARP: UDP para o IP fisico do destino final (ver #ifdef abaixo). */
         uint32_t pkts_sent  = 0;
         uint64_t bytes_sent = 0;
         tx_pkt_t *pkt;
