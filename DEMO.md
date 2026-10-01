@@ -130,26 +130,103 @@ entradas ARP do método ARP), por isso basta arrancar o novo.
 5. Espera pelo `[GATE] ... ADMITIDO` e arranca a base e o robô com o
    transporte do novo método (`tcp` para ARP, `udp` para L3).
 
-## Mostrar o relay a reagir a uma falha
+## Testar a quebra de ligação (o relay a assumir)
 
-Corta a ligação direta N1↔N3 **nos dois lados**, só a receção e por MAC
-(o corte por IP também mataria o tráfego que passa pelo N2):
+Com o vídeo a correr nos dois sentidos, corta-se a ligação direta N1↔N3 e
+vê-se a mesh passar a encaminhar pelo N2. **O mesmo comando serve para os dois
+métodos.**
+
+MACs (os que mediste): N1 `d8:3a:dd:33:f3:be`, N2 `2c:cf:67:79:93:50`,
+N3 `f0:9e:4a:a2:20:38`.
+
+**1. Antes de cortar** (guarda isto, é a "foto" da rota direta):
 ```bash
-# T2 (N1 deixa de ouvir o N3):
-ssh $N1 "sudo iptables -I INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP"
-# PC (N3 deixa de ouvir o N1):
-sudo iptables -I INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP
+ssh $N1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
 ```
-Em ~3 s a rota passa pelo N2 e o vídeo continua. Para confirmar, no N1:
-- ARP: `ssh $N1 "arp -an | grep 172.20.10.3"` mostra o MAC do N2
-  (`2c:cf:67:79:93:50`).
-- L3: `ssh $N1 "ip route | grep 10.0.0.3"` mostra `via 10.0.0.2`.
+- L3: `10.0.0.3 via 10.0.0.3 dev tun1` (direto).
+- ARP: `172.20.10.3 ... at f0:9e:4a:a2:20:38 ... PERM` (MAC do N3).
 
-Repor (só limpa a tabela INPUT, não mexe nas regras da mesh):
+**2. Cortar**, só a receção, **por MAC, nos dois lados**:
+```bash
+ssh $N1 "sudo iptables -I INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP"   # N1 deixa de ouvir o N3
+sudo iptables -I INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP              # N3 deixa de ouvir o N1
+```
+Espera ~3 s: o nó só é dado como perdido ao fim de `MAX_AGE = 2 s`, depois a
+árvore é recalculada. O vídeo pára um instante e volta.
+
+**3. Confirmar que passou pelo N2:**
+```bash
+ssh $N1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
+# relay a trabalhar: o contador da regra com pacotes tem de subir entre as duas leituras
+ssh $N2 "sudo iptables -vnxL FORWARD | sed -n 3,5p; sleep 3; sudo iptables -vnxL FORWARD | sed -n 3,5p"
+```
+- L3: `10.0.0.3 via 10.0.0.2 dev tun1`. No N2 sobe a regra `tun2 → wlan0`
+  (o daemon reinjeta o pacote na TUN e o kernel envia-o por `wlan0`).
+- ARP: o MAC de `172.20.10.3` passa a ser o do N2 (`2c:cf:67:79:93:50`). No N2
+  sobe a regra `wlan0 → wlan0` (o kernel reencaminha o datagrama; o daemon do
+  N2 não vê nada).
+- Nos dois: o vídeo continua no ecrã da base.
+
+**4. Repor a ligação** (limpa só a tabela INPUT, não mexe nas regras da mesh):
 ```bash
 ssh $N1 "sudo iptables -F INPUT"
 sudo iptables -F INPUT
 ```
+Em alguns segundos a rota volta a ser direta (repete o passo 1 para ver).
+
+**Porque se corta por MAC e não por IP:** no ARP o pacote vai sempre endereçado
+ao destino final (`172.20.10.3`), mesmo quando passa pelo N2; só o MAC muda a
+cada salto. Cortar por IP deitava fora também o que vem via N2 e o vídeo
+morria em vez de reencaminhar.
+
+**O que esperar:** o L3 (vídeo UDP) retoma assim que a rota muda. O ARP (vídeo
+TCP) retoma quando o TCP da aplicação voltar a enviar, que pode demorar um pouco
+mais. Se no ARP o MAC de `172.20.10.3` ficar a **alternar** entre o do N3 e o do
+N2, é suspeita de beacons reencaminhados a manterem a ligação direta "viva"
+(hipótese ainda não confirmada); regista o que vires.
+
+## Porque o L3 e o ARP fazem de maneira diferente
+
+**O que é igual nos dois** (e é por isso que a comparação é justa): a mesma
+sincronização TDMA, os mesmos beacons e a mesma árvore de caminhos; a fonte lê
+os pacotes da aplicação numa TUN e só transmite no **seu slot**, com o mesmo
+orçamento de bytes por slot; e o relay **reencaminha logo** quando recebe, sem
+esperar pelo slot dele. O pacote da aplicação só volta à aplicação no destino.
+
+**O que é diferente é como o pacote chega ao nó seguinte e como o relay o
+reencaminha:**
+
+| | Método ARP (Ana Morais) | Método L3 (o teu) |
+|---|---|---|
+| Pacote enviado pela fonte | UDP, **endereçado ao destino final** | TCP, **endereçado ao next-hop** |
+| O que escolhe o salto | o **MAC**: entrada ARP `IP do destino → MAC do next-hop` | o **IP**: rota de host `/32` com gateway = next-hop |
+| Quem a instala | o routing, por `ioctl` na tabela ARP | o routing, por `netlink` (tabela main e tabela 200) |
+| Relay | só o **kernel** (`ip_forward`); o daemon do relay não vê o pacote | o **daemon** recebe o TCP e faz `tun_write`; o kernel encaminha pela rota `/32` |
+| Fiabilidade na mesh | nenhuma | no 1.º salto (TCP) |
+| Vídeo da aplicação | **TCP** (a fiabilidade tem de vir da aplicação) | **UDP** (evita TCP dentro de TCP) |
+
+**ARP, porque assim:** é o método da Ana, reproduzido como descrito na tese
+dela (secções 3.2 e 3.3): o routing mantém a tabela ARP de modo a que o IP do
+destino aponte para o MAC do vizinho que é o next-hop; a fonte envia um só
+pacote endereçado ao destino; o kernel de cada relay encaminha-o sem a
+aplicação. A comparação só é justa se o ARP for este método e não uma variante.
+
+**L3, porque assim:** o encaminhamento é por **IP**: o routing instala rotas de
+host `/32` por netlink (~50 µs por rota) e o pacote vai para o IP do next-hop,
+sem depender de endereços MAC nem de manter a tabela ARP. O pacote exterior é
+TCP para o next-hop, o que dá entrega fiável no 1.º salto. Como o TCP **termina**
+no relay, o kernel do relay nunca vê o pacote interior; por isso o daemon faz
+`tun_write` para o entregar ao kernel, e a regra `ip rule iif tunN lookup 200`
+com a rota `/32` da tabela 200 manda-o logo para o `wlan0`.
+
+**Custos de cada um** (para não ficarem por dizer): o L3 tem o daemon no
+caminho do relay e teria TCP-sobre-TCP com vídeo TCP, daí o vídeo UDP; o ARP não
+dá fiabilidade na mesh (daí o vídeo TCP), o datagrama de 1524 bytes é
+fragmentado (hipótese dos blocos pretos) e as entradas ARP têm de ser limpas ao
+trocar de método (o `run-node.sh` faz isso).
+
+> Estas são as razões que o **código** sustenta. O que motivou cada escolha na
+> altura confirma-o no capítulo 3 da tese antes de o afirmares ao professor.
 
 ## Parar tudo
 
