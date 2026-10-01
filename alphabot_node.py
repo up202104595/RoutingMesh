@@ -6,6 +6,8 @@ Inicia o stream de vídeo UDP via TUN para o nó 3.
 O TDMA trata do transporte e relay automaticamente.
 """
 
+import sys
+import signal
 import socket
 import json
 import time
@@ -99,7 +101,8 @@ VIDEO_BITRATE = 500000   # 500 kbps
 # metodos o video corre sobre TCP fiavel). Tem de coincidir com o
 # VIDEO_TRANSPORT no base_station.py. Em TCP a base e o servidor (escuta em
 # :VIDEO_PORT) e o robo liga-se como cliente.
-VIDEO_TRANSPORT = "udp"
+# Pode ser dado como argumento:  python3 alphabot_node.py tcp   (default: udp)
+VIDEO_TRANSPORT = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("tcp", "udp") else "udp"
 VIDEO_PORT      = 5000
 
 # ── Estado global ─────────────────────────────────────────────
@@ -388,6 +391,13 @@ def main():
     threading.Thread(target=stream_watchdog, args=(proc_ref,), daemon=True).start()
 
     print("[ALPHABOT] Pronto. Ctrl+C para parar.\n")
+
+    # SIGTERM (pkill, systemctl stop, SSH) segue o mesmo caminho do Ctrl+C: assim
+    # os motores param e a stream (rpicam-vid/ffmpeg) e terminada em vez de
+    # ficar a prender a camera.
+    def _on_sigterm(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _on_sigterm)
     try:
         while True:
             time.sleep(1)

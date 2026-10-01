@@ -45,7 +45,8 @@ VIDEO_PORT          = 5000
 # Em TCP a base e o servidor: o proxy escuta em :VIDEO_PORT, aceita a ligacao
 # do robo, mede, e reenvia por UDP local para o ffplay (5001) — o ffplay e as
 # metricas ficam iguais aos do modo UDP.
-VIDEO_TRANSPORT     = "udp"
+# Pode ser dado como argumento:  python3 base_station.py tcp   (default: udp)
+VIDEO_TRANSPORT     = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("tcp", "udp") else "udp"
 
 # ── SWITCH de metodo de relay (L3 <-> ARP) a partir da base station ──
 # Comando no terminal ("arp" / "l3") ou botoes: Square = ARP, Circle = L3.
