@@ -22,6 +22,18 @@ o que é TCP é o vídeo da aplicação.)
 | **T2 — Controlo** | arranca/pára o N1, o N2 e o robô por SSH | comandos que regressam logo |
 | **T3 — Base** | `base_station.py` (vídeo + comando do jogo) | aberto, em primeiro plano |
 
+### O que correr em cada terminal (resumo)
+
+| Passo | T1 (PC, daemon N3) | T2 (PC, controlo) | T3 (PC, base) |
+|---|---|---|---|
+| 1 | `sudo ./run-node.sh <l3\|arp> 3 3` | `run-node.sh <l3\|arp> 1 3` no N1 e `... 2 3` no N2, por SSH | |
+| 2 | esperar `[GATE] ... ADMITIDO` | | |
+| 3 | | | `python3 base_station.py <udp\|tcp>` |
+| 4 | | `alphabot_node.py <udp\|tcp>` no N1, por SSH | |
+
+`l3` com `udp`; `arp` com `tcp`. Os comandos completos estão em
+"Demonstração 1" e "Demonstração 2" mais abaixo.
+
 Em **T2**, uma vez por sessão, define estas variáveis (encurtam os comandos):
 ```bash
 N1=pi@172.20.10.1; N2=pi@172.20.10.2; D='cd Documents/RoutingMesh'
@@ -30,11 +42,11 @@ N1=pi@172.20.10.1; N2=pi@172.20.10.2; D='cd Documents/RoutingMesh'
 ## Preparação (uma vez)
 
 1. **Código atualizado nos 3 sítios.** Os ficheiros mais recentes são
-   `src/`, `include/`, `Makefile`, `run-node.sh`, `alphabot_node.py`,
+   `src/`, `include/`, `deploy/`, `Makefile`, `run-node.sh`, `alphabot_node.py`,
    `base_station.py`. Do PC para os Pi:
    ```bash
    for ip in 172.20.10.1 172.20.10.2; do
-     rsync -av src include Makefile run-node.sh alphabot_node.py pi@$ip:Documents/RoutingMesh/
+     rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@$ip:Documents/RoutingMesh/
    done
    ```
 2. **Compilar** (cada comando compila os dois binários: `meshnode_ipforward` e `meshnode_arp`):
@@ -109,7 +121,7 @@ O `run-node.sh` já pára o daemon anterior e limpa o que ficou (inclui as
 entradas ARP do método ARP), por isso basta arrancar o novo.
 
 1. **T3:** Ctrl+C na base station.
-2. **T2:** pára o robô: `ssh $N1 "sudo pkill -f '[a]lphabot_node.py'"`
+2. **T2:** pára o robô e a stream: `ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"`
 3. **T1:** Ctrl+C no daemon (duas vezes se não sair) e arranca o do outro
    método: `sudo ./run-node.sh arp 3 3`
 4. **T2:** `ssh $N1 ... run-node.sh arp 1 3` e `ssh $N2 ... run-node.sh arp 2 3`
@@ -141,12 +153,40 @@ sudo iptables -F INPUT
 ## Parar tudo
 
 ```bash
-# T3: Ctrl+C na base.      T1: Ctrl+C no daemon (ou o comando abaixo).
-ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
+# T3: Ctrl+C na base.      T1: Ctrl+C no daemon (ou o comando do PC abaixo).
+ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
 ssh $N2 "sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
+sudo pkill -KILL -f '[m]eshnode_'      # PC, se o Ctrl+C não chegar
 ```
-Se o daemon do PC não sair com Ctrl+C: `sudo pkill -KILL -f '[m]eshnode_'`.
+O `rpicam-vid` e o `ffmpeg` têm de morrer também: se ficarem, prendem a câmara
+e continuam a enviar vídeo com o transporte antigo.
 O arranque seguinte (`run-node.sh`) limpa a TUN, as rotas e as entradas ARP.
+
+## Ao ligar os Pi: arrancam em ad-hoc?
+
+**Só se o `adhoc.service` estiver ativo e com o IP configurado.** Sem isso, ao
+ligar o Pi fica em Wi-Fi normal e o PC não o alcança (ver passo 4 da
+preparação, à mão, no ecrã do Pi). O PC **nunca** arranca em ad-hoc sozinho
+(perderia a internet): usa sempre os comandos do passo 4.
+
+Para os Pi arrancarem prontos (ad-hoc + IP + SSH), uma vez em cada Pi, no ecrã
+dele. Põe `1` no AlphaBot e `2` no relay:
+```bash
+cd ~/Documents/RoutingMesh
+sudo mkdir -p /etc/routingmesh
+printf 'NODE_ID=1\nNUM_NODES=3\n' | sudo tee /etc/routingmesh/node.conf
+sudo cp deploy/adhoc-start.sh deploy/adhoc-stop.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/adhoc-start.sh /usr/local/bin/adhoc-stop.sh
+sudo cp deploy/adhoc.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable ssh adhoc
+sudo systemctl disable meshnode meshnode-metrics alphabot 2>/dev/null
+sudo reboot
+```
+Depois de reiniciar: `ping -c 3 172.20.10.1` (e `.2`) a partir do PC, já em
+ad-hoc, deve responder, e o daemon arranca-se como na demonstração.
+O `adhoc.service` põe o Wi-Fi em ad-hoc **sem** o meshnode, e o IP é o do
+`NODE_ID`, por isso o `.1` e o `.2` deixam de se trocar.
 
 ## Opcional: trocar de método só escrevendo na base station
 
