@@ -55,7 +55,8 @@ N1=pi@172.20.10.1; N2=pi@172.20.10.2; D='cd Documents/RoutingMesh'
    ssh $N2 "$D && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
    cd ~/Documentos/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
    ```
-3. **Desligar os serviços antigos** (em cada Pi; no N1 inclui o `alphabot`):
+3. **Desligar os serviços antigos** (em cada Pi; no N1 inclui o `alphabot`). O
+   `deploy/install-adhoc.sh` (secção "Ao ligar os Pi") também o faz:
    ```bash
    ssh $N1 "sudo systemctl disable --now meshnode meshnode-metrics alphabot"
    ssh $N2 "sudo systemctl disable --now meshnode meshnode-metrics"
@@ -162,31 +163,55 @@ O `rpicam-vid` e o `ffmpeg` têm de morrer também: se ficarem, prendem a câmar
 e continuam a enviar vídeo com o transporte antigo.
 O arranque seguinte (`run-node.sh`) limpa a TUN, as rotas e as entradas ARP.
 
-## Ao ligar os Pi: arrancam em ad-hoc?
+## Ao ligar os Pi: ad-hoc automático (instalar o serviço, uma vez)
 
-**Só se o `adhoc.service` estiver ativo e com o IP configurado.** Sem isso, ao
-ligar o Pi fica em Wi-Fi normal e o PC não o alcança (ver passo 4 da
-preparação, à mão, no ecrã do Pi). O PC **nunca** arranca em ad-hoc sozinho
-(perderia a internet): usa sempre os comandos do passo 4.
+Sem isto, ao ligar o Pi fica em Wi-Fi normal e o PC não o alcança. Com o
+serviço `adhoc`, cada Pi arranca em ad-hoc com o IP do seu `NODE_ID`
+(`.1` no AlphaBot, `.2` no relay) e com o SSH ativo, e os serviços antigos
+(`meshnode`, `meshnode-metrics`, `alphabot`) ficam desligados. O daemon e o
+robô continuam a ser arrancados à mão, como na demonstração.
 
-Para os Pi arrancarem prontos (ad-hoc + IP + SSH), uma vez em cada Pi, no ecrã
-dele. Põe `1` no AlphaBot e `2` no relay:
+**Do PC, com os Pi alcançáveis** (ad-hoc feito à mão, passo 4 da preparação):
+
+1. **Confirma qual Pi é qual**. O ID fica gravado no Pi, por isso tem de estar
+   certo. O do AlphaBot tem o MAC `d8:3a:dd:33:f3:be`:
+   ```bash
+   ssh $N1 "cat /sys/class/net/wlan0/address"     # deve ser d8:3a:dd:33:f3:be
+   ssh $N2 "cat /sys/class/net/wlan0/address"     # deve ser 2c:cf:67:79:93:50
+   ```
+   Se vierem trocados, troca `$N1` e `$N2` nos comandos abaixo.
+2. **Envia a pasta `deploy/`** (se o `rsync` do passo 1 da preparação já a
+   incluiu, salta):
+   ```bash
+   rsync -av deploy pi@172.20.10.1:Documents/RoutingMesh/
+   rsync -av deploy pi@172.20.10.2:Documents/RoutingMesh/
+   ```
+3. **Instala o serviço e desliga os outros** (o `1` e o `2` são o `NODE_ID`):
+   ```bash
+   ssh $N1 "$D && sudo bash deploy/install-adhoc.sh 1"
+   ssh $N2 "$D && sudo bash deploy/install-adhoc.sh 2"
+   ```
+   Cada um escreve `/etc/routingmesh/node.conf`, instala o `adhoc.service`,
+   desativa e pára `meshnode`, `meshnode-metrics` e `alphabot`, e ativa `ssh` e
+   `adhoc` no boot. **Não** reconfigura o Wi-Fi agora, por isso o SSH não cai.
+4. **Reinicia os Pi e confirma:**
+   ```bash
+   ssh $N1 "sudo reboot"; ssh $N2 "sudo reboot"
+   # ~1 min depois, no PC (já em ad-hoc):
+   ping -c 3 172.20.10.1; ping -c 3 172.20.10.2
+   ssh -o BatchMode=yes $N1 "hostname; systemctl is-active adhoc"
+   ```
+   Se o SSH avisar `HOST IDENTIFICATION HAS CHANGED`, os IPs ficaram noutro Pi:
+   `ssh-keygen -f ~/.ssh/known_hosts -R 172.20.10.1` (e `.2`) e volta a tentar.
+
+Efeito secundário: o Pi deixa de ligar ao Wi-Fi normal (o NetworkManager já não
+gere o `wlan0`). Para dar internet a um Pi (ex.: `git pull`):
 ```bash
-cd ~/Documents/RoutingMesh
-sudo mkdir -p /etc/routingmesh
-printf 'NODE_ID=1\nNUM_NODES=3\n' | sudo tee /etc/routingmesh/node.conf
-sudo cp deploy/adhoc-start.sh deploy/adhoc-stop.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/adhoc-start.sh /usr/local/bin/adhoc-stop.sh
-sudo cp deploy/adhoc.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable ssh adhoc
-sudo systemctl disable meshnode meshnode-metrics alphabot 2>/dev/null
-sudo reboot
+ssh $N1 "sudo systemctl disable adhoc; sudo rm -f /etc/NetworkManager/conf.d/90-manet-unmanaged.conf; sudo reboot"
 ```
-Depois de reiniciar: `ping -c 3 172.20.10.1` (e `.2`) a partir do PC, já em
-ad-hoc, deve responder, e o daemon arranca-se como na demonstração.
-O `adhoc.service` põe o Wi-Fi em ad-hoc **sem** o meshnode, e o IP é o do
-`NODE_ID`, por isso o `.1` e o `.2` deixam de se trocar.
+
+O **PC nunca** arranca em ad-hoc sozinho (perderia a internet): usa sempre os
+comandos do passo 4 da preparação.
 
 ## Opcional: trocar de método só escrevendo na base station
 

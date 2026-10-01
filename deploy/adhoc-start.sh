@@ -3,7 +3,16 @@
 
 source /etc/routingmesh/node.conf
 
+: "${NODE_ID:?NODE_ID em falta em /etc/routingmesh/node.conf}"
+
 echo "[ADHOC] A configurar wlan0 em modo ad-hoc (Node ${NODE_ID})..."
+
+# no boot o wlan0 pode demorar a aparecer (driver)
+for _ in $(seq 1 "${WAIT_IFACE_S:-30}"); do
+    [ -d /sys/class/net/wlan0 ] && break
+    sleep 1
+done
+rfkill unblock wifi 2>/dev/null
 
 systemctl stop NetworkManager
 ip link set wlan0 down

@@ -1,7 +1,7 @@
 [Unit]
 Description=RA-TDMAs+ WiFi Ad-Hoc Mode (manet-mesh)
-# Corre antes do meshnode e antes do wpa_supplicant poder interferir
-Before=meshnode.service wpa_supplicant.service
+# Corre antes do meshnode e antes de qualquer gestor de rede mexer no wlan0
+Before=meshnode.service wpa_supplicant.service NetworkManager.service dhcpcd.service
 After=network-pre.target
 Wants=network-pre.target
 
