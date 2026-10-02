@@ -18,25 +18,25 @@ Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
 | | Método L3 (o teu) | Método ARP (Ana Morais) |
 |---|---|---|
-| Daemon | `sudo ./run-node.sh l3 <id> 3` | `sudo ./run-node.sh arp <id> 3` |
+| Daemon | `sudo ./tmux-node.sh l3 <id>` | `sudo ./tmux-node.sh arp <id>` |
 | **Vídeo da aplicação** | **UDP** (`... udp`) | **TCP** (`... tcp`) |
 
-## Os 5 terminais
+## Como está montada
 
-Cada processo corre **num terminal próprio, em primeiro plano**, para veres os
-logs e os erros. Para parar: **Ctrl+C** nesse terminal.
+- **Os 3 nós correm em `tmux`**, cada um numa sessão chamada `mesh`, **em segundo
+  plano**. Sobrevivem a quedas de SSH e a fechares o terminal. Arrancam-se com um
+  comando por nó (`tmux-node.sh`), e só se "entra" na sessão para ver os logs.
+- **2 terminais visíveis:** a **base station** (PC) e o **robô** (`alphabot_node.py`,
+  por SSH ao N1).
+- **Sem cortes nem bloqueios no guia:** são inseridos por ti, à mão.
 
-| Terminal | Onde | O que correr |
+| Terminal | Onde | O que corre |
 |---|---|---|
-| **T1** | PC | `cd ~/Documentos/RoutingMesh` e `sudo ./run-node.sh l3 3 3` |
-| **T2** | N1 | `ssh pi@172.20.10.1`, depois `cd Documents/RoutingMesh` e `sudo ./run-node.sh l3 1 3` |
-| **T3** | N2 | `ssh pi@172.20.10.2`, depois `cd Documents/RoutingMesh` e `sudo ./run-node.sh l3 2 3` |
-| **T4** | N1 (2.ª sessão) | `ssh pi@172.20.10.1`, depois `cd Documents/RoutingMesh` e `sudo python3 alphabot_node.py udp` |
-| **T5** | PC | `cd ~/Documentos/RoutingMesh` e `python3 base_station.py udp` |
+| **A** | PC | arranca os 3 nós (3 comandos curtos) e depois fica a correr a **base station** |
+| **B** | PC → N1 | o **robô** (`alphabot_node.py`) |
 
-Ordem: **T1, T2, T3** (qualquer ordem) → espera o `[GATE] Sync convergiu` em T1 →
-**T5** (base) → **T4** (robô). Para ARP troca `l3` por `arp` e `udp` por `tcp`.
-Um 6.º terminal do PC serve para os comandos soltos do teste de quebra.
+Ver um nó: `sudo tmux attach -t mesh` (no PC) ou `ssh -t pi@172.20.10.1 "sudo tmux attach -t mesh"`.
+Sair sem o parar: **Ctrl+b e depois d**.
 
 ---
 
@@ -44,27 +44,30 @@ Um 6.º terminal do PC serve para os comandos soltos do teste de quebra.
 
 Se já está feita, passa à **B**.
 
-## A1. Código e compilação
+## A1. Código, compilação e tmux
 
 Na **pasta do repo do PC** (o `rsync` usa caminhos relativos):
 ```bash
 cd ~/Documentos/RoutingMesh
-rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
-rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
-ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
-ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
-chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
+rsync -av src include deploy Makefile run-node.sh tmux-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av src include deploy Makefile run-node.sh tmux-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh tmux-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh tmux-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+chmod +x run-node.sh tmux-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
 ```
 Cada `make both` gera `meshnode_ipforward` (L3) e `meshnode_arp` (ARP); procura
 `Gerado: meshnode_ipforward e meshnode_arp`. Os avisos do `wifi_quality.c` são normais.
 
-Confirma que cada máquina tem o que precisa:
+**Confirma os ficheiros e o tmux nas 3 máquinas:**
 ```bash
-ssh pi@172.20.10.1 "cd Documents/RoutingMesh && ls -l run-node.sh meshnode_ipforward meshnode_arp alphabot_node.py"
-ssh pi@172.20.10.2 "cd Documents/RoutingMesh && ls -l run-node.sh meshnode_ipforward meshnode_arp"
-ls -l run-node.sh meshnode_ipforward meshnode_arp base_station.py
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp alphabot_node.py; which tmux"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp; which tmux"
+ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp base_station.py; which tmux
 ```
-O `run-node.sh` tem de ter `x` nas permissões (`-rwxr-xr-x`).
+`run-node.sh` e `tmux-node.sh` têm de ter `x` (`-rwxr-xr-x`), e o `which tmux` tem de
+imprimir um caminho. **Se faltar o tmux:** precisa de internet. No PC, `sudo apt install tmux`
+**antes** de o pores em ad-hoc. Num Pi, dá-lhe internet (cabo Ethernet, ou desfaz o
+ad-hoc como indicado em A2, "Efeito secundário") e `sudo apt install tmux`.
 
 ## A2. Serviço de ad-hoc nos Pi (para arrancarem sempre em ad-hoc)
 
@@ -145,127 +148,79 @@ sudo systemctl start NetworkManager
 
 # C. Demonstração 1 — método L3 (vídeo UDP)
 
-Abre 5 terminais e corre, **por esta ordem**:
+**1. Arrancar os 3 nós** (terminal **A**, no PC, na pasta do repo). Cada comando
+regressa logo; o nó fica a correr numa sessão tmux:
+```bash
+cd ~/Documentos/RoutingMesh
+sudo ./tmux-node.sh l3 3
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && sudo ./tmux-node.sh l3 1"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && sudo ./tmux-node.sh l3 2"
+```
+Cada um responde `[tmux-node] no <id> em l3 arrancado na sessao tmux 'mesh'`.
+Se der erro (por exemplo `tmux nao esta instalado`), aparece logo no terminal.
 
-1. **T1 (PC):**
-   ```bash
-   cd ~/Documentos/RoutingMesh
-   sudo ./run-node.sh l3 3 3
-   ```
-2. **T2 (N1):**
-   ```bash
-   ssh pi@172.20.10.1
-   cd Documents/RoutingMesh
-   sudo ./run-node.sh l3 1 3
-   ```
-3. **T3 (N2):**
-   ```bash
-   ssh pi@172.20.10.2
-   cd Documents/RoutingMesh
-   sudo ./run-node.sh l3 2 3
-   ```
-4. Espera (~10-20 s) até **T1** mostrar `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
-5. **T5 (PC):**
-   ```bash
-   cd ~/Documentos/RoutingMesh
-   python3 base_station.py udp
-   ```
-6. **T4 (N1):**
-   ```bash
-   ssh pi@172.20.10.1
-   cd Documents/RoutingMesh
-   sudo python3 alphabot_node.py udp
-   ```
-   (o robô espera 10 s antes de começar o vídeo).
+**2. Espera a mesh convergir** (~10-20 s). Para ver o estado sem entrar nas sessões:
+```bash
+sudo tmux capture-pane -p -t mesh | grep -E "GATE|ERRO" | tail -3
+```
+Tem de aparecer `[GATE] Sync convergiu — trafego de dados ADMITIDO`. (Ou
+`sudo tmux attach -t mesh` para veres tudo; sair com **Ctrl+b e d**.)
+
+**3. Base station** (terminal **A**, o mesmo):
+```bash
+python3 base_station.py udp
+```
+
+**4. Robô** (terminal **B**):
+```bash
+ssh pi@172.20.10.1
+cd Documents/RoutingMesh
+sudo python3 alphabot_node.py udp
+```
+(o robô espera 10 s antes de começar o vídeo).
 
 # D. Demonstração 2 — passar para o método ARP (vídeo TCP)
 
-1. **Pára tudo:** Ctrl+C em **T5, T4, T1, T2, T3** (duas vezes no daemon se não
-   sair). O Ctrl+C no robô (T4) pára a stream e a câmara.
-2. **Arranca de novo, igual à Demonstração 1, mas com `arp` e `tcp`:**
-   - **T1 (PC):** `cd ~/Documentos/RoutingMesh` e `sudo ./run-node.sh arp 3 3`
-   - **T2 (N1):** `ssh pi@172.20.10.1`, `cd Documents/RoutingMesh` e `sudo ./run-node.sh arp 1 3`
-   - **T3 (N2):** `ssh pi@172.20.10.2`, `cd Documents/RoutingMesh` e `sudo ./run-node.sh arp 2 3`
-3. Espera o `[GATE] ... ADMITIDO` em **T1**. A base arranca **antes** do robô (em
-   TCP é ela que escuta):
-   - **T5 (PC):** `python3 base_station.py tcp`
-   - **T4 (N1):** `sudo python3 alphabot_node.py tcp`
+1. **Pára os dois programas de vídeo:** **Ctrl+C** na base (terminal A) e no robô
+   (terminal B; o Ctrl+C no robô pára a stream e a câmara).
+2. **Troca os 3 nós para ARP.** O `tmux-node.sh` termina a sessão anterior e o
+   `run-node.sh` limpa a TUN, as rotas e as entradas ARP. No terminal **A**:
+   ```bash
+   sudo ./tmux-node.sh arp 3
+   ssh pi@172.20.10.1 "cd Documents/RoutingMesh && sudo ./tmux-node.sh arp 1"
+   ssh pi@172.20.10.2 "cd Documents/RoutingMesh && sudo ./tmux-node.sh arp 2"
+   ```
+3. Espera o `[GATE] ... ADMITIDO` (`sudo tmux capture-pane -p -t mesh | grep -E "GATE|ERRO" | tail -3`).
+4. A base arranca **antes** do robô (em TCP é ela que escuta):
+   - **A:** `python3 base_station.py tcp`
+   - **B:** `sudo python3 alphabot_node.py tcp` (na sessão SSH ao N1, na pasta `Documents/RoutingMesh`)
 
-O `run-node.sh` pára o daemon anterior e limpa a TUN, as rotas e as entradas ARP,
-por isso não precisas de limpar nada à mão. **Voltar ao L3:** o mesmo, com `l3` e `udp`.
+**Voltar ao L3:** o mesmo com `l3` nos três `tmux-node.sh` e `udp` nos dois
+programas de vídeo.
+
+> **Cortes e bloqueios (por ti, à mão):** o corte de ligação apanha também o SSH
+> direto ao N1. Os nós **continuam a correr** porque estão em tmux; o terminal B
+> (robô) fica parado e retoma depois. Para falar com o N1 durante um corte, vai
+> pelo N2: `ssh -J pi@172.20.10.2 pi@172.20.10.1`. Depois de uma corrida em ARP,
+> limpa as entradas ARP permanentes (secção E).
 
 ---
 
-# E. Testar a quebra de ligação (o relay a assumir)
+# E. Parar tudo
 
-Com o vídeo a correr nos dois sentidos, corta-se a ligação direta N1↔N3 e
-vê-se a mesh passar a encaminhar pelo N2. **O mesmo comando serve para os dois
-métodos.**
+**Programas de vídeo:** Ctrl+C na base (A) e no robô (B).
 
-MACs: N1 `d8:3a:dd:33:f3:be`, N2 `2c:cf:67:79:93:50`, N3 `f0:9e:4a:a2:20:38`.
-
-**1. Antes de cortar** (a "foto" da rota direta):
+**Nós:** terminar as sessões tmux, nos 3 nós:
 ```bash
-ssh pi@172.20.10.1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
+sudo tmux kill-session -t mesh
+ssh pi@172.20.10.1 "sudo tmux kill-session -t mesh"
+ssh pi@172.20.10.2 "sudo tmux kill-session -t mesh"
 ```
-- L3: `10.0.0.3 via 10.0.0.3 dev tun1` (direto).
-- ARP: `172.20.10.3 ... at f0:9e:4a:a2:20:38 ... PERM` (MAC do N3).
-
-**2. Cortar**, só a receção, **por MAC, nos dois lados**. As regras repõem-se
-**sozinhas ao fim de 60 s**, porque com o link cortado o PC já não chega ao N1 por
-`172.20.10.1` e não conseguia repô-las por SSH:
+Se algum nó ficar vivo, ou o robô tiver ficado a prender a câmara:
 ```bash
-sudo -v
-ssh pi@172.20.10.1 "sudo nohup sh -c 'iptables -I INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP; sleep 60; iptables -D INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP' >/dev/null 2>&1 &"
-sudo nohup sh -c 'iptables -I INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP; sleep 60; iptables -D INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP' >/dev/null 2>&1 &
-```
-Durante os 60 s, **o `ssh pi@172.20.10.1` direto deixa de funcionar** (o corte apanha
-também o SSH), e os terminais T2 e T4, que são SSH direto ao N1, **ficam parados**:
-os processos continuam a correr no N1 e os terminais retomam quando a regra se repuser.
-Espera ~3 s: o nó só é dado como perdido ao fim de `MAX_AGE = 2 s`, depois a árvore
-é recalculada. O vídeo pára um instante e volta.
-
-**3. Confirmar que passou pelo N2** (dentro dos 60 s). Ao N1 vai-se **pelo N2**
-(`-J`), porque o caminho direto está cortado:
-```bash
-ssh -J pi@172.20.10.2 pi@172.20.10.1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
-# relay a trabalhar: o contador da regra com pacotes tem de subir entre as duas leituras
-ssh pi@172.20.10.2 "sudo iptables -vnxL FORWARD | sed -n 3,5p; sleep 3; sudo iptables -vnxL FORWARD | sed -n 3,5p"
-```
-- L3: `10.0.0.3 via 10.0.0.2 dev tun1`. No N2 sobe a regra `tun2 → wlan0`
-  (o daemon reinjeta o pacote na TUN e o kernel envia-o por `wlan0`).
-- ARP: o MAC de `172.20.10.3` passa a ser o do N2. No N2 sobe a regra
-  `wlan0 → wlan0` (o kernel reencaminha o datagrama; o daemon do N2 não vê nada).
-- Nos dois: o vídeo continua no ecrã da base.
-
-**4. Repor a ligação.** Repõe-se sozinha aos 60 s. Para repor antes:
-```bash
-sudo iptables -F INPUT                                                  # PC
-ssh -J pi@172.20.10.2 pi@172.20.10.1 "sudo iptables -F INPUT"           # N1, pelo N2
-```
-Em alguns segundos a rota volta a ser direta (repete o passo 1 para ver).
-
-**Porque se corta por MAC:** no ARP o pacote vai sempre endereçado ao destino
-final (`172.20.10.3`), mesmo quando passa pelo N2; só o MAC muda a cada salto.
-Cortar por IP deitava fora também o que vem via N2 e o vídeo morria em vez de
-reencaminhar. O corte por MAC funciona igualmente no L3.
-
-**O que esperar:** o L3 (vídeo UDP) retoma assim que a rota muda. O ARP (vídeo
-TCP) retoma quando o TCP da aplicação voltar a enviar, que pode demorar mais. Se
-no ARP o MAC de `172.20.10.3` ficar a **alternar** entre o do N3 e o do N2, é
-suspeita de beacons reencaminhados a manterem a ligação direta "viva" (hipótese
-ainda não confirmada). A reposição em L3 também não foi testada em hardware;
-regista o que vires.
-
-# F. Parar tudo
-
-**Ctrl+C em cada um dos 5 terminais** (duas vezes no daemon se não sair).
-
-Se algum ficar preso, de um 6.º terminal do PC:
-```bash
+sudo pkill -KILL -f '[m]eshnode_'
 ssh pi@172.20.10.1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -KILL -f '[m]eshnode_'"
 ssh pi@172.20.10.2 "sudo pkill -KILL -f '[m]eshnode_'"
-sudo pkill -KILL -f '[m]eshnode_'
 ```
 O `rpicam-vid` e o `ffmpeg` têm de morrer também: se ficarem, prendem a câmara e
 continuam a enviar com o transporte antigo.
@@ -284,7 +239,7 @@ O `run-node.sh` também as limpa, mas só quando o nó arranca. Para ver o estad
 
 ---
 
-# G. Porque o L3 e o ARP fazem de maneira diferente
+# F. Porque o L3 e o ARP fazem de maneira diferente
 
 **O que é igual nos dois** (e é por isso que a comparação é justa): a mesma
 sincronização TDMA, os mesmos beacons e a mesma árvore de caminhos; a fonte lê
@@ -327,31 +282,23 @@ trocar de método (o `run-node.sh` faz isso).
 > Estas são as razões que o **código** sustenta. O que motivou cada escolha na
 > altura confirma-o no capítulo 3 da tese antes de o afirmares ao professor.
 
-# H. Opcional: trocar de método só escrevendo na base station
+# G. Se algo falhar
 
-A base station também aceita `arp` / `l3` (ou Square / Circle no comando):
-reinicia a mesh nos 3 nós por SSH com `run-node.sh` e muda o transporte do vídeo
-sozinha. Precisa de `sudo -v` no terminal da base e de SSH por chave. Ainda
-**não foi testado em hardware**; o procedimento manual acima é o testado.
-
-# I. Se algo falhar
-
-Como cada processo corre em primeiro plano, a mensagem de erro aparece no
-próprio terminal. As mais comuns:
-
-- **O PC não pinga um Pi, mas os Pi pingam-se entre si; ou dois IPs com o mesmo MAC no
-  `ip neigh`:** entradas ARP permanentes que o método ARP deixou. Limpa-as (secção F).
-- **`Connection timed out` ao N1 durante o corte de ligação:** é o corte a funcionar
-  (apanha o SSH direto). Vai pelo N2: `ssh -J pi@172.20.10.2 pi@172.20.10.1 ...`.
-- **`Permission denied` ao correr `./run-node.sh`:** `chmod +x run-node.sh` nessa máquina.
-- **`No such file ... meshnode_ipforward` / `meshnode_arp`:** falta compilar
-  (A1, `make both ...`) nessa máquina.
-- **`No such file ... run-node.sh`:** falta enviar o código (A1, `rsync`).
+- **`tmux-node.sh: Permission denied`:** `chmod +x tmux-node.sh run-node.sh` nessa máquina (A1).
+- **`ERRO: o tmux nao esta instalado`:** ver A1 (precisa de internet para o instalar).
+- **`ERRO: ... run-node.sh nao existe ou nao e executavel`:** falta enviar o código ou o `chmod +x` (A1).
+- **Ver o que um nó escreveu, incluindo erros:** `sudo tmux capture-pane -p -t mesh | tail -30`
+  (no PC) ou `ssh pi@172.20.10.1 "sudo tmux capture-pane -p -t mesh | tail -30"`. Se o
+  nó terminou, a sessão fica aberta com `--- o no terminou (codigo N) ---`.
+- **`no server running` / `can't find session: mesh`:** o nó não está a correr (ou foi
+  parado). Arranca-o outra vez (secção C).
 - **`rsync: link_stat ... failed`:** não estás na pasta do repo (`cd ~/Documentos/RoutingMesh`).
-- **`Network is unreachable` / `No route to host`:** o PC perdeu o IP ou o
-  ad-hoc (ver B). Confirma com `ping -c 3 172.20.10.1`.
+- **`Network is unreachable` / `No route to host`:** o PC perdeu o IP ou o ad-hoc
+  (ver B). Confirma com `ping -c 3 172.20.10.1`.
+- **O PC não pinga um Pi, mas os Pi pingam-se entre si; ou dois IPs com o mesmo MAC no
+  `ip neigh`:** entradas ARP permanentes que o método ARP deixou. Limpa-as (secção E).
 - **Vídeo não aparece:** a base tem de arrancar antes do robô (TCP), os dois usam
-  o mesmo transporte, e o `[GATE]` já tem de ter aparecido em T1.
+  o mesmo transporte, e o `[GATE]` já tem de ter aparecido.
 - **Câmara ocupada ao reiniciar o robô:** `ssh pi@172.20.10.1 "sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"`.
 - **Blocos pretos no ARP:** hipótese de fragmentação dos pacotes de 1500 bytes.
   Testa `sudo ip link set tun<id> mtu 1400` nos três nós, reinicia o vídeo e compara.
