@@ -392,12 +392,13 @@ def main():
 
     print("[ALPHABOT] Pronto. Ctrl+C para parar.\n")
 
-    # SIGTERM (pkill, systemctl stop, SSH) segue o mesmo caminho do Ctrl+C: assim
+    # SIGTERM/SIGHUP (pkill, painel ou SSH a fechar) seguem o mesmo caminho do Ctrl+C: assim
     # os motores param e a stream (rpicam-vid/ffmpeg) e terminada em vez de
     # ficar a prender a camera.
     def _on_sigterm(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _on_sigterm)
+    signal.signal(signal.SIGHUP,  _on_sigterm)   # painel/SSH a fechar
     try:
         while True:
             time.sleep(1)

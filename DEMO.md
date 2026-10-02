@@ -18,32 +18,35 @@ Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
 | | Método L3 (o teu) | Método ARP (Ana Morais) |
 |---|---|---|
-| Daemon | `sudo ./tmux-node.sh l3 <id>` | `sudo ./tmux-node.sh arp <id>` |
+| Montar tudo (no PC) | `./demo-tmux.sh l3` | `./demo-tmux.sh arp` |
 | **Vídeo da aplicação** | **UDP** (`... udp`) | **TCP** (`... tcp`) |
 
 ## Como está montada
 
-- **Os 3 nós correm em segundo plano**, e sobrevivem a quedas de SSH e a fechares o
-  terminal. Arrancam-se com um comando por nó (`tmux-node.sh`). **Com tmux instalado**
-  cada nó corre numa sessão tmux `mesh`; **sem tmux** (não é preciso instalar nada,
-  nem ter internet nos Pi) corre com `nohup` e escreve em `/tmp/mesh.log`. O script
-  escolhe sozinho.
-- **2 terminais visíveis:** a **base station** (PC) e o **robô** (`alphabot_node.py`,
-  por SSH ao N1).
-- **Sem cortes nem bloqueios no guia:** são inseridos por ti, à mão.
+**Uma única sessão tmux, no PC, corre tudo** como painéis. Os Pi **não precisam de
+tmux**: os nós dos Pi correm em primeiro plano, por SSH, dentro dos painéis do PC.
+Um só comando monta tudo (`./demo-tmux.sh l3` ou `arp`):
 
-| Terminal | Onde | O que corre |
-|---|---|---|
-| **A** | PC | arranca os 3 nós (3 comandos curtos) e depois fica a correr a **base station** |
-| **B** | PC → N1 | o **robô** (`alphabot_node.py`) |
+| Janela tmux | Painéis |
+|---|---|
+| **nos** | **N3** (o próprio PC) · **N1** (SSH ao AlphaBot) · **N2** (SSH ao relay) |
+| **video** | **base station** (`base_station.py`) · **robô** (`alphabot_node.py`, SSH ao N1) |
 
-| | Com tmux | Sem tmux |
-|---|---|---|
-| Ver um nó | `sudo tmux attach -t mesh` (sair sem parar: **Ctrl+b e d**) | `tail -f /tmp/mesh.log` (Ctrl+C só sai do `tail`) |
-| Espreitar | `sudo tmux capture-pane -p -t mesh \| tail -20` | `tail -20 /tmp/mesh.log` |
-| Parar | `sudo tmux kill-session -t mesh` | `sudo pkill -KILL -f '[m]eshnode_'` |
+Na janela **video** os dois comandos ficam **escritos mas por executar**: carregas
+Enter em cada um quando a janela **nos** mostrar o `[GATE]` (a base antes do robô).
 
-Num Pi, antepõe `ssh pi@172.20.10.x "..."` (ou `ssh -t` para o `attach` / `tail -f`).
+**Teclas do tmux** (prefixo **Ctrl+b**, solta e carrega na seguinte):
+
+| Teclas | Faz |
+|---|---|
+| `Ctrl+b` `n` / `p` | janela seguinte / anterior (nos ↔ video) |
+| `Ctrl+b` + setas | mudar de painel (o rato também funciona) |
+| `Ctrl+b` `z` | ampliar / reduzir o painel atual |
+| `Ctrl+b` `d` | sair da sessão **sem parar nada** |
+| `tmux attach -t demo` | voltar à sessão |
+
+**Ctrl+C** num painel pára só o programa desse painel. Sem cortes nem bloqueios no
+guia: são inseridos por ti, à mão.
 
 ---
 
@@ -51,31 +54,29 @@ Num Pi, antepõe `ssh pi@172.20.10.x "..."` (ou `ssh -t` para o `attach` / `tail
 
 Se já está feita, passa à **B**.
 
-## A1. Código, compilação e tmux
+## A1. Código, compilação e tmux (só no PC)
 
 Na **pasta do repo do PC** (o `rsync` usa caminhos relativos):
 ```bash
 cd ~/Documentos/RoutingMesh
-rsync -av src include deploy Makefile run-node.sh tmux-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
-rsync -av src include deploy Makefile run-node.sh tmux-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
-ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh tmux-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
-ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh tmux-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
-chmod +x run-node.sh tmux-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
+rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+chmod +x run-node.sh demo-tmux.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
 ```
 Cada `make both` gera `meshnode_ipforward` (L3) e `meshnode_arp` (ARP); procura
 `Gerado: meshnode_ipforward e meshnode_arp`. Os avisos do `wifi_quality.c` são normais.
 
-**Confirma os ficheiros e o tmux nas 3 máquinas:**
+**Confirma os ficheiros nas 3 máquinas, e o tmux no PC:**
 ```bash
-ssh pi@172.20.10.1 "cd Documents/RoutingMesh && ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp alphabot_node.py; which tmux"
-ssh pi@172.20.10.2 "cd Documents/RoutingMesh && ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp; which tmux"
-ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp base_station.py; which tmux
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && ls -l run-node.sh meshnode_ipforward meshnode_arp alphabot_node.py"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && ls -l run-node.sh meshnode_ipforward meshnode_arp"
+ls -l run-node.sh demo-tmux.sh meshnode_ipforward meshnode_arp base_station.py; which tmux
 ```
-`run-node.sh` e `tmux-node.sh` têm de ter `x` (`-rwxr-xr-x`). **O tmux é opcional:** se o
-`which tmux` não imprimir nada, o `tmux-node.sh` usa o modo sem tmux (`/tmp/mesh.log`) e
-não precisas de internet. **Se mesmo assim o quiseres:** precisa de internet. No PC, `sudo apt install tmux`
-**antes** de o pores em ad-hoc. Num Pi, dá-lhe internet (cabo Ethernet, ou desfaz o
-ad-hoc como indicado em A4) e `sudo apt install tmux`.
+`run-node.sh` e `demo-tmux.sh` têm de ter `x` (`-rwxr-xr-x`). O `which tmux` tem de
+imprimir um caminho **no PC**; se não, `sudo apt install tmux` **antes** de o pôr em
+ad-hoc (depois fica sem internet). Os Pi não precisam de tmux.
 
 ## A2. Serviço de ad-hoc nos Pi (para arrancarem sempre em ad-hoc)
 
@@ -115,7 +116,7 @@ ssh -o BatchMode=yes pi@172.20.10.2 hostname
 Se não, `ssh-copy-id pi@172.20.10.1` e `.2`. Se avisar `HOST IDENTIFICATION HAS CHANGED`:
 `ssh-keygen -f ~/.ssh/known_hosts -R 172.20.10.1` (e `.2`).
 
-## A4. Dar internet a um Pi (ex.: instalar o tmux)
+## A4. Dar internet a um Pi (ex.: `git pull`, `apt`)
 
 **Opção mais simples: cabo Ethernet.** Liga o Pi por cabo a um router com internet.
 O ad-hoc fica como está e a `eth0` apanha IP sozinha (`ip -4 addr show eth0`). Passa
@@ -146,10 +147,9 @@ ad-hoc, cai. Num terminal do Pi:
    recusa repositórios "ainda não válidos". Depois de ligar à internet espera ~1 minuto
    e confirma: `timedatectl` (`System clock synchronized: yes`) e `date`. Se não
    sincronizar: `sudo systemctl restart systemd-timesyncd`.
-4. **Instala:**
+4. **Instala o que precisares** (os Pi não precisam de tmux):
    ```bash
-   sudo apt update && sudo apt install -y tmux
-   which tmux
+   sudo apt update && sudo apt install -y <pacote>
    ```
    Se o `apt update` ainda se queixar de datas:
    `sudo apt update -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false`.
@@ -162,7 +162,7 @@ ad-hoc, cai. Num terminal do Pi:
    O instalador volta a pôr a regra do NetworkManager e a ativar o serviço `adhoc`. Depois
    do reboot o Pi arranca em ad-hoc com o IP certo, como antes.
 
-**O PC** também precisa do tmux (`which tmux`). Põe-no primeiro na rede normal (secção B,
+**O PC** precisa do tmux (`which tmux`). Põe-no primeiro na rede normal (secção B,
 "No fim do dia, voltar o PC ao Wi-Fi normal"), `sudo apt install -y tmux`, e só depois o
 voltas a pôr em ad-hoc (secção B).
 
@@ -207,75 +207,54 @@ sudo systemctl start NetworkManager
 
 # C. Demonstração 1 — método L3 (vídeo UDP)
 
-**1. Arrancar os 3 nós** (terminal **A**, no PC, na pasta do repo). Cada comando
-regressa logo; o nó fica a correr numa sessão tmux:
+**1. Monta a sessão** (num terminal do PC, na pasta do repo, **sem sudo**):
 ```bash
 cd ~/Documentos/RoutingMesh
-sudo ./tmux-node.sh l3 3
-ssh pi@172.20.10.1 "cd Documents/RoutingMesh && sudo ./tmux-node.sh l3 1"
-ssh pi@172.20.10.2 "cd Documents/RoutingMesh && sudo ./tmux-node.sh l3 2"
+./demo-tmux.sh l3
 ```
-Cada um responde `[tmux-node] no <id> em l3 arrancado na sessao tmux 'mesh'`.
-Se der erro (por exemplo `tmux nao esta instalado`), aparece logo no terminal.
+Entras na sessão `demo`, janela **nos**, com 3 painéis: N3 (PC), N1 e N2.
 
-**2. Espera a mesh convergir** (~10-20 s). Para ver o estado no PC sem entrar na sessão:
-```bash
-sudo tmux capture-pane -p -t mesh | grep -E "GATE|ERRO" | tail -3     # com tmux
-grep -E "GATE|ERRO" /tmp/mesh.log | tail -3                            # sem tmux
-```
-Tem de aparecer `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
+**2. Palavra-passe do PC.** O painel do **N3** pede a palavra-passe do `sudo`: escreve-a
+nesse painel (clica nele ou `Ctrl+b` + setas). Os painéis N1 e N2 entram nos Pi sem pedir
+nada (SSH por chave).
 
-**3. Base station** (terminal **A**, o mesmo):
-```bash
-python3 base_station.py udp
-```
+**3. Espera o `[GATE]`** (~10-20 s) num dos painéis, tipicamente o do N3:
+`[GATE] Sync convergiu — trafego de dados ADMITIDO`.
 
-**4. Robô** (terminal **B**):
-```bash
-ssh pi@172.20.10.1
-cd Documents/RoutingMesh
-sudo python3 alphabot_node.py udp
-```
-(o robô espera 10 s antes de começar o vídeo).
+**4. Vai para a janela video** (`Ctrl+b` `n`). Estão dois painéis com comandos já escritos:
+- **base** (esquerda): carrega **Enter** (`python3 base_station.py udp`). Precisa do comando DS4 ligado ao PC.
+- **robô** (direita): depois da base, carrega **Enter** (`ssh -t pi@172.20.10.1 '... sudo python3 alphabot_node.py udp'`).
+  O robô espera ~10 s antes de começar o vídeo.
+
+Para voltar aos nós: `Ctrl+b` `p`.
 
 # D. Demonstração 2 — passar para o método ARP (vídeo TCP)
 
-1. **Pára os dois programas de vídeo:** **Ctrl+C** na base (terminal A) e no robô
-   (terminal B; o Ctrl+C no robô pára a stream e a câmara).
-2. **Troca os 3 nós para ARP.** O `tmux-node.sh` termina a sessão anterior e o
-   `run-node.sh` limpa a TUN, as rotas e as entradas ARP. No terminal **A**:
+1. **Pára os dois programas de vídeo** (janela video): **Ctrl+C** no painel da base e no do
+   robô (o Ctrl+C no robô pára a stream e a câmara).
+2. **Monta a sessão em ARP.** Num terminal do PC (ou `Ctrl+b` `d` para sair do tmux primeiro):
    ```bash
-   sudo ./tmux-node.sh arp 3
-   ssh pi@172.20.10.1 "cd Documents/RoutingMesh && sudo ./tmux-node.sh arp 1"
-   ssh pi@172.20.10.2 "cd Documents/RoutingMesh && sudo ./tmux-node.sh arp 2"
+   cd ~/Documentos/RoutingMesh
+   ./demo-tmux.sh arp
    ```
-3. Espera o `[GATE] ... ADMITIDO` (o comando do passo 2 da demonstração 1).
-4. A base arranca **antes** do robô (em TCP é ela que escuta):
-   - **A:** `python3 base_station.py tcp`
-   - **B:** `sudo python3 alphabot_node.py tcp` (na sessão SSH ao N1, na pasta `Documents/RoutingMesh`)
+   Substitui a sessão anterior; o `run-node.sh` limpa a TUN, as rotas e as entradas ARP.
+   Volta a pedir a palavra-passe no painel do N3.
+3. Espera o `[GATE]` e, na janela video, **Enter na base** e depois **no robô**, agora com `tcp`.
 
-**Voltar ao L3:** o mesmo com `l3` nos três `tmux-node.sh` e `udp` nos dois
-programas de vídeo.
-
-> **Cortes e bloqueios (por ti, à mão):** o corte de ligação apanha também o SSH
-> direto ao N1. Os nós **continuam a correr** porque estão em tmux; o terminal B
-> (robô) fica parado e retoma depois. Para falar com o N1 durante um corte, vai
-> pelo N2: `ssh -J pi@172.20.10.2 pi@172.20.10.1`. Depois de uma corrida em ARP,
-> limpa as entradas ARP permanentes (secção E).
+**Voltar ao L3:** `./demo-tmux.sh l3`.
 
 ---
 
 # E. Parar tudo
 
-**Programas de vídeo:** Ctrl+C na base (A) e no robô (B).
+**Programas de vídeo:** Ctrl+C no painel da base e no do robô (janela video).
 
-**Nós, com tmux:** terminar as sessões, nos 3 nós:
+**Nós e sessão:**
 ```bash
-sudo tmux kill-session -t mesh
-ssh pi@172.20.10.1 "sudo tmux kill-session -t mesh"
-ssh pi@172.20.10.2 "sudo tmux kill-session -t mesh"
+tmux kill-session -t demo
 ```
-**Nós, sem tmux** (ou se algum ficar vivo), ou o robô tiver ficado a prender a câmara:
+Isto fecha os painéis, e as ligações SSH aos Pi fecham com eles (os processos nos Pi
+recebem o fim da sessão e terminam). Se algum ficar vivo, ou o robô tiver ficado a prender a câmara:
 ```bash
 sudo pkill -KILL -f '[m]eshnode_'
 ssh pi@172.20.10.1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -KILL -f '[m]eshnode_'"
@@ -295,6 +274,12 @@ ssh pi@172.20.10.2 'for a in 172.20.10.1 172.20.10.2 172.20.10.3; do sudo ip nei
 ```
 O `run-node.sh` também as limpa, mas só quando o nó arranca. Para ver o estado:
 `ip neigh show dev wlp5s0` (nos Pi, `wlan0`); `PERMANENT` com o MAC errado é lixo.
+
+> **Cortes e bloqueios (por ti, à mão):** o corte de ligação apanha também o SSH direto
+> ao N1, por isso os painéis do **N1** e do **robô** ficam parados durante o corte e
+> retomam depois (os processos continuam a correr no N1). Para falar com o N1 durante um
+> corte, vai pelo N2: `ssh -J pi@172.20.10.2 pi@172.20.10.1`. Se o corte for longo
+> e o SSH cair, os processos no N1 terminam: volta a montar com `./demo-tmux.sh`.
 
 ---
 
@@ -343,20 +328,24 @@ trocar de método (o `run-node.sh` faz isso).
 
 # G. Se algo falhar
 
-- **`tmux-node.sh: Permission denied`:** `chmod +x tmux-node.sh run-node.sh` nessa máquina (A1).
-- **`ERRO: ... run-node.sh nao existe ou nao e executavel`:** falta enviar o código ou o `chmod +x` (A1).
-- **Ver o que um nó escreveu, incluindo erros:** com tmux, `sudo tmux capture-pane -p -t mesh | tail -30`
-  (nos Pi, por `ssh pi@172.20.10.1 "..."`); sem tmux, `tail -30 /tmp/mesh.log`. Se o nó
-  terminou, aparece `--- o no terminou (codigo N) ---`.
-- **`no server running` / `can't find session: mesh` (com tmux) ou `/tmp/mesh.log` vazio/sem o nó (sem tmux):**
-  o nó não está a correr (ou foi parado). Arranca-o outra vez (secção C).
+- **`demo-tmux.sh: Permission denied`:** `chmod +x demo-tmux.sh run-node.sh` no PC (A1).
+- **`ERRO: nao corras com sudo`:** corre `./demo-tmux.sh l3` sem `sudo`; o `sudo` está dentro dos painéis.
+- **`ERRO: o tmux nao esta instalado no PC`:** `sudo apt install tmux` (A1), **antes** de entrares em ad-hoc.
+- **Um painel mostra `--- terminou (codigo N) ---`:** o processo desse painel acabou ou deu erro; a mensagem
+  está acima. `Enter` fecha o painel. Corrige e volta a montar com `./demo-tmux.sh`.
+- **Painel do N1/N2 com `Permission denied` / `Connection refused` / `timed out`:** o SSH não chega ao Pi
+  (ver abaixo), ou falta a chave SSH (A3).
+- **`Permission denied` ao correr `run-node.sh` num Pi:** `ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh"`.
+- **`No such file ... meshnode_ipforward` / `meshnode_arp`:** falta compilar (A1, `make both ...`) nessa máquina.
+- **`No such file ... run-node.sh`:** falta enviar o código (A1, `rsync`).
 - **`rsync: link_stat ... failed`:** não estás na pasta do repo (`cd ~/Documentos/RoutingMesh`).
-- **`Network is unreachable` / `No route to host`:** o PC perdeu o IP ou o ad-hoc
-  (ver B). Confirma com `ping -c 3 172.20.10.1`.
-- **O PC não pinga um Pi, mas os Pi pingam-se entre si; ou dois IPs com o mesmo MAC no
-  `ip neigh`:** entradas ARP permanentes que o método ARP deixou. Limpa-as (secção E).
-- **Vídeo não aparece:** a base tem de arrancar antes do robô (TCP), os dois usam
-  o mesmo transporte, e o `[GATE]` já tem de ter aparecido.
+- **`Network is unreachable` / `No route to host`:** o PC perdeu o IP ou o ad-hoc (ver B).
+  Confirma com `ping -c 3 172.20.10.1`.
+- **O PC não pinga um Pi, mas os Pi pingam-se entre si; ou dois IPs com o mesmo MAC no `ip neigh`:**
+  entradas ARP permanentes que o método ARP deixou. Limpa-as (secção E).
+- **Vídeo não aparece:** a base tem de arrancar antes do robô (TCP), os dois usam o mesmo
+  transporte (já vem certo no `demo-tmux.sh`), e o `[GATE]` já tem de ter aparecido.
 - **Câmara ocupada ao reiniciar o robô:** `ssh pi@172.20.10.1 "sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"`.
+- **Os painéis ficaram sem rato / `Ctrl+b` não responde:** carrega `Ctrl+b` e depois a tecla, uma de cada vez.
 - **Blocos pretos no ARP:** hipótese de fragmentação dos pacotes de 1500 bytes.
   Testa `sudo ip link set tun<id> mtu 1400` nos três nós, reinicia o vídeo e compara.
