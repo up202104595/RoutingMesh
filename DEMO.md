@@ -22,72 +22,126 @@ o que é TCP é o vídeo da aplicação.)
 | **T2 — Controlo** | arranca/pára o N1, o N2 e o robô por SSH | comandos que regressam logo |
 | **T3 — Base** | `base_station.py` (vídeo + comando do jogo) | aberto, em primeiro plano |
 
-### O que correr em cada terminal (resumo)
-
-| Passo | T1 (PC, daemon N3) | T2 (PC, controlo) | T3 (PC, base) |
+| Passo | T1 (daemon N3) | T2 (controlo) | T3 (base) |
 |---|---|---|---|
 | 1 | `sudo ./run-node.sh <l3\|arp> 3 3` | `run-node.sh <l3\|arp> 1 3` no N1 e `... 2 3` no N2, por SSH | |
 | 2 | esperar `[GATE] ... ADMITIDO` | | |
 | 3 | | | `python3 base_station.py <udp\|tcp>` |
 | 4 | | `alphabot_node.py <udp\|tcp>` no N1, por SSH | |
 
-`l3` com `udp`; `arp` com `tcp`. Os comandos completos estão em
-"Demonstração 1" e "Demonstração 2" mais abaixo.
+`l3` com `udp`; `arp` com `tcp`.
 
-Em **T2**, uma vez por sessão, define estas variáveis (encurtam os comandos):
+---
+
+# A. Preparação (uma vez)
+
+Se já está feita, passa à **B**.
+
+## A1. Variáveis dos comandos (em todos os terminais)
+
+Os comandos usam `$N1`, `$N2` e `$D`. Se estiverem vazias, o `ssh` dá
+`hostname contains invalid characters` (trata o comando como nome da máquina).
+Torna-as permanentes, uma vez:
 ```bash
-N1=pi@172.20.10.1; N2=pi@172.20.10.2; D='cd Documents/RoutingMesh'
+cat >> ~/.bashrc <<'EOF'
+export N1=pi@172.20.10.1 N2=pi@172.20.10.2 D='cd Documents/RoutingMesh'
+EOF
+source ~/.bashrc          # nos terminais que já estavam abertos
+echo "$N1 $N2 $D"         # tem de imprimir os 3 valores
 ```
 
-## Preparação (uma vez)
+## A2. Código e compilação
 
-1. **Código atualizado nos 3 sítios.** Os ficheiros mais recentes são
-   `src/`, `include/`, `deploy/`, `Makefile`, `run-node.sh`, `alphabot_node.py`,
-   `base_station.py`. Do PC para os Pi:
-   ```bash
-   for ip in 172.20.10.1 172.20.10.2; do
-     rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@$ip:Documents/RoutingMesh/
-   done
-   ```
-2. **Compilar** (cada comando compila os dois binários: `meshnode_ipforward` e `meshnode_arp`):
-   ```bash
-   ssh $N1 "$D && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
-   ssh $N2 "$D && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
-   cd ~/Documentos/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
-   ```
-3. **Desligar os serviços antigos** (em cada Pi; no N1 inclui o `alphabot`). O
-   `deploy/install-adhoc.sh` (secção "Ao ligar os Pi") também o faz:
-   ```bash
-   ssh $N1 "sudo systemctl disable --now meshnode meshnode-metrics alphabot"
-   ssh $N2 "sudo systemctl disable --now meshnode meshnode-metrics"
-   ```
-4. **Ad-hoc e IPs** nos três nós (têm de se pingar). Perdem-se ao reiniciar.
-   Nos Pi, no ecrã de cada um (`.1` no AlphaBot, `.2` no relay):
-   ```bash
-   sudo systemctl stop NetworkManager
-   sudo ip link set wlan0 down
-   sudo iwconfig wlan0 mode ad-hoc
-   sudo iwconfig wlan0 essid manet-mesh
-   sudo iwconfig wlan0 channel 6
-   sudo ip link set wlan0 up
-   sudo iwconfig wlan0 power off
-   sudo ip addr add 172.20.10.1/28 dev wlan0      # ou 172.20.10.2/28
-   ```
-   No PC (fica sem internet):
-   ```bash
-   sudo systemctl stop NetworkManager; sudo systemctl stop wpa_supplicant
-   sudo ip link set wlp5s0 down
-   sudo iwconfig wlp5s0 mode ad-hoc
-   sudo iwconfig wlp5s0 essid manet-mesh
-   sudo iwconfig wlp5s0 channel 6
-   sudo ip link set wlp5s0 up
-   sudo iwconfig wlp5s0 power off
-   sudo ip addr add 172.20.10.3/28 dev wlp5s0
-   ```
-5. **SSH por chave** (já feito): `ssh -o BatchMode=yes $N1 hostname` e `$N2`
-   têm de responder sem pedir password.
+Na **pasta do repo do PC** (o `rsync` usa caminhos relativos):
+```bash
+cd ~/Documentos/RoutingMesh
+for ip in 172.20.10.1 172.20.10.2; do
+  rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@$ip:Documents/RoutingMesh/
+done
+ssh $N1 "$D && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+ssh $N2 "$D && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
+```
+Cada `make both` gera `meshnode_ipforward` (L3) e `meshnode_arp` (ARP); procura
+`Gerado: meshnode_ipforward e meshnode_arp`. Os avisos do `wifi_quality.c` são normais.
 
-## Demonstração 1 — método L3 (vídeo UDP)
+## A3. Serviço de ad-hoc nos Pi (para arrancarem sempre em ad-hoc)
+
+Sem isto, ao ligar o Pi fica em Wi-Fi normal e o PC não o alcança. O serviço
+`adhoc` põe cada Pi em ad-hoc com o IP do seu `NODE_ID` (`.1` no AlphaBot, `.2`
+no relay), ativa o SSH e desliga os serviços antigos (`meshnode`,
+`meshnode-metrics`, `alphabot`). O daemon e o robô continuam a arrancar-se à mão.
+
+Na pasta do repo do PC, com os Pi alcançáveis:
+```bash
+cd ~/Documentos/RoutingMesh
+# 1. o ID fica gravado no Pi: confirma qual é qual
+ssh $N1 "cat /sys/class/net/wlan0/address"     # d8:3a:dd:33:f3:be (AlphaBot)
+ssh $N2 "cat /sys/class/net/wlan0/address"     # 2c:cf:67:79:93:50 (relay)
+# 2. envia o deploy/ (já vai no rsync da A2)
+rsync -av deploy pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av deploy pi@172.20.10.2:Documents/RoutingMesh/
+# 3. instala (1 e 2 são o NODE_ID) — cada um acaba com "Feito. Reinicia o Pi"
+ssh $N1 "$D && sudo bash deploy/install-adhoc.sh 1"
+ssh $N2 "$D && sudo bash deploy/install-adhoc.sh 2"
+# 4. confirma e reinicia
+ssh $N1 "cat /etc/routingmesh/node.conf; systemctl is-enabled adhoc meshnode"
+ssh $N2 "cat /etc/routingmesh/node.conf; systemctl is-enabled adhoc meshnode"
+ssh $N1 "sudo reboot"; ssh $N2 "sudo reboot"
+```
+Esperado em cada Pi: `NODE_ID=<id>`, `adhoc` **enabled**, `meshnode` **disabled**
+(no N2 o `alphabot` aparece `masked`, o que está certo).
+
+Efeito secundário: o Pi deixa de ligar ao Wi-Fi normal. Para lhe dar internet
+(ex.: `git pull`): `ssh $N1 "sudo systemctl disable adhoc; sudo rm -f /etc/NetworkManager/conf.d/90-manet-unmanaged.conf; sudo reboot"`.
+
+## A4. SSH por chave
+
+```bash
+ssh -o BatchMode=yes $N1 hostname      # tem de responder sem pedir password
+ssh -o BatchMode=yes $N2 hostname
+```
+Se não, `ssh-copy-id pi@172.20.10.1` e `.2`. Se avisar `HOST IDENTIFICATION HAS CHANGED`:
+`ssh-keygen -f ~/.ssh/known_hosts -R 172.20.10.1` (e `.2`).
+
+---
+
+# B. Todos os dias: ligar a rede
+
+**Pi (N1 e N2):** basta ligá-los. Com o serviço da A3 arrancam sozinhos em
+ad-hoc, com o IP certo e com o SSH ativo (~1 minuto).
+
+**PC (N3):** nunca arranca em ad-hoc sozinho (perdia a internet). Põe-no à mão:
+```bash
+sudo systemctl stop NetworkManager; sudo systemctl stop wpa_supplicant
+sudo ip link set wlp5s0 down
+sudo iwconfig wlp5s0 mode ad-hoc
+sudo iwconfig wlp5s0 essid manet-mesh
+sudo iwconfig wlp5s0 channel 6
+sudo ip link set wlp5s0 up
+sudo iwconfig wlp5s0 power off
+sudo ip addr replace 172.20.10.3/28 dev wlp5s0
+```
+
+**Confirma antes de começar:**
+```bash
+ping -c 3 172.20.10.1; ping -c 3 172.20.10.2
+for n in $N1 $N2; do ssh -o BatchMode=yes $n "hostname; systemctl is-active adhoc; ip -4 addr show wlan0 | grep inet"; done
+```
+Esperado: os dois `ping` respondem e cada Pi mostra `active` e o seu IP. Se os
+`ping` não respondem ao fim de 2 minutos, vê os `Cell:` do `iwconfig` nos três
+nós: têm de ser iguais.
+
+**No fim do dia, voltar o PC ao Wi-Fi normal:**
+```bash
+sudo ip addr flush dev wlp5s0; sudo ip link set wlp5s0 down
+sudo iwconfig wlp5s0 mode managed; sudo ip link set wlp5s0 up
+sudo systemctl start NetworkManager
+```
+
+---
+
+# C. Demonstração 1 — método L3 (vídeo UDP)
 
 1. **T1:** `cd ~/Documentos/RoutingMesh && sudo ./run-node.sh l3 3 3`
 2. **T2:**
@@ -100,46 +154,40 @@ N1=pi@172.20.10.1; N2=pi@172.20.10.2; D='cd Documents/RoutingMesh'
 5. **T2:** `ssh $N1 "$D && sudo nohup python3 alphabot_node.py udp >/dev/null 2>&1 </dev/null &"`
    (o robô espera 10 s antes de começar o vídeo).
 
-## Demonstração 2 — método ARP (vídeo TCP)
+# D. Demonstração 2 — passar para o método ARP (vídeo TCP)
 
-É a mesma sequência, com **`arp`** nos `run-node.sh` e **`tcp`** nos dois
-programas de vídeo. A base tem de estar a correr antes do robô (em TCP é ela
-que escuta).
+O `run-node.sh` já pára o daemon anterior e limpa o que ficou (inclui as
+entradas ARP), por isso basta arrancar o novo. Com o L3 a correr:
 
-1. **T1:** `cd ~/Documentos/RoutingMesh && sudo ./run-node.sh arp 3 3`
-2. **T2:**
+1. **T3:** Ctrl+C na base station.
+2. **T2:** pára o robô e a stream (têm de morrer os três, senão a câmara fica presa
+   e continua a enviar com o transporte antigo):
+   ```bash
+   ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"
+   ```
+3. **T1:** Ctrl+C no daemon (duas vezes se não sair) e `sudo ./run-node.sh arp 3 3`
+4. **T2:**
    ```bash
    ssh $N1 "$D && sudo nohup ./run-node.sh arp 1 3 >/dev/null 2>&1 </dev/null &"
    ssh $N2 "$D && sudo nohup ./run-node.sh arp 2 3 >/dev/null 2>&1 </dev/null &"
    ```
-3. Espera pelo `[GATE] ... ADMITIDO` em **T1**.
-4. **T3:** `cd ~/Documentos/RoutingMesh && python3 base_station.py tcp`
-5. **T2:** `ssh $N1 "$D && sudo nohup python3 alphabot_node.py tcp >/dev/null 2>&1 </dev/null &"`
+5. Espera pelo `[GATE] ... ADMITIDO` em **T1**. A base tem de arrancar **antes**
+   do robô (em TCP é ela que escuta):
+   - **T3:** `python3 base_station.py tcp`
+   - **T2:** `ssh $N1 "$D && sudo nohup python3 alphabot_node.py tcp >/dev/null 2>&1 </dev/null &"`
 
-## Trocar de método a meio (ex.: L3 → ARP)
+**Voltar ao L3:** os mesmos passos com `l3` nos `run-node.sh` e `udp` nos dois
+programas de vídeo. **Começar do zero em ARP:** a Demonstração 1 com `arp` e `tcp`.
 
-O `run-node.sh` já pára o daemon anterior e limpa o que ficou (inclui as
-entradas ARP do método ARP), por isso basta arrancar o novo.
-
-1. **T3:** Ctrl+C na base station.
-2. **T2:** pára o robô e a stream: `ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"`
-3. **T1:** Ctrl+C no daemon (duas vezes se não sair) e arranca o do outro
-   método: `sudo ./run-node.sh arp 3 3`
-4. **T2:** `ssh $N1 ... run-node.sh arp 1 3` e `ssh $N2 ... run-node.sh arp 2 3`
-   (os comandos da Demonstração 2).
-5. Espera pelo `[GATE] ... ADMITIDO` e arranca a base e o robô com o
-   transporte do novo método (`tcp` para ARP, `udp` para L3).
-
-## Testar a quebra de ligação (o relay a assumir)
+# E. Testar a quebra de ligação (o relay a assumir)
 
 Com o vídeo a correr nos dois sentidos, corta-se a ligação direta N1↔N3 e
 vê-se a mesh passar a encaminhar pelo N2. **O mesmo comando serve para os dois
 métodos.**
 
-MACs (os que mediste): N1 `d8:3a:dd:33:f3:be`, N2 `2c:cf:67:79:93:50`,
-N3 `f0:9e:4a:a2:20:38`.
+MACs: N1 `d8:3a:dd:33:f3:be`, N2 `2c:cf:67:79:93:50`, N3 `f0:9e:4a:a2:20:38`.
 
-**1. Antes de cortar** (guarda isto, é a "foto" da rota direta):
+**1. Antes de cortar** (a "foto" da rota direta):
 ```bash
 ssh $N1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
 ```
@@ -162,9 +210,8 @@ ssh $N2 "sudo iptables -vnxL FORWARD | sed -n 3,5p; sleep 3; sudo iptables -vnxL
 ```
 - L3: `10.0.0.3 via 10.0.0.2 dev tun1`. No N2 sobe a regra `tun2 → wlan0`
   (o daemon reinjeta o pacote na TUN e o kernel envia-o por `wlan0`).
-- ARP: o MAC de `172.20.10.3` passa a ser o do N2 (`2c:cf:67:79:93:50`). No N2
-  sobe a regra `wlan0 → wlan0` (o kernel reencaminha o datagrama; o daemon do
-  N2 não vê nada).
+- ARP: o MAC de `172.20.10.3` passa a ser o do N2. No N2 sobe a regra
+  `wlan0 → wlan0` (o kernel reencaminha o datagrama; o daemon do N2 não vê nada).
 - Nos dois: o vídeo continua no ecrã da base.
 
 **4. Repor a ligação** (limpa só a tabela INPUT, não mexe nas regras da mesh):
@@ -174,18 +221,31 @@ sudo iptables -F INPUT
 ```
 Em alguns segundos a rota volta a ser direta (repete o passo 1 para ver).
 
-**Porque se corta por MAC e não por IP:** no ARP o pacote vai sempre endereçado
-ao destino final (`172.20.10.3`), mesmo quando passa pelo N2; só o MAC muda a
-cada salto. Cortar por IP deitava fora também o que vem via N2 e o vídeo
-morria em vez de reencaminhar.
+**Porque se corta por MAC:** no ARP o pacote vai sempre endereçado ao destino
+final (`172.20.10.3`), mesmo quando passa pelo N2; só o MAC muda a cada salto.
+Cortar por IP deitava fora também o que vem via N2 e o vídeo morria em vez de
+reencaminhar. O corte por MAC funciona igualmente no L3.
 
 **O que esperar:** o L3 (vídeo UDP) retoma assim que a rota muda. O ARP (vídeo
-TCP) retoma quando o TCP da aplicação voltar a enviar, que pode demorar um pouco
-mais. Se no ARP o MAC de `172.20.10.3` ficar a **alternar** entre o do N3 e o do
-N2, é suspeita de beacons reencaminhados a manterem a ligação direta "viva"
-(hipótese ainda não confirmada); regista o que vires.
+TCP) retoma quando o TCP da aplicação voltar a enviar, que pode demorar mais. Se
+no ARP o MAC de `172.20.10.3` ficar a **alternar** entre o do N3 e o do N2, é
+suspeita de beacons reencaminhados a manterem a ligação direta "viva" (hipótese
+ainda não confirmada). A reposição em L3 também não foi testada em hardware;
+regista o que vires.
 
-## Porque o L3 e o ARP fazem de maneira diferente
+# F. Parar tudo
+
+```bash
+# T3: Ctrl+C na base.      T1: Ctrl+C no daemon (ou o último comando abaixo).
+ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
+ssh $N2 "sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
+sudo pkill -KILL -f '[m]eshnode_'      # PC, se o Ctrl+C não chegar
+```
+O arranque seguinte (`run-node.sh`) limpa a TUN, as rotas e as entradas ARP.
+
+---
+
+# G. Porque o L3 e o ARP fazem de maneira diferente
 
 **O que é igual nos dois** (e é por isso que a comparação é justa): a mesma
 sincronização TDMA, os mesmos beacons e a mesma árvore de caminhos; a fonte lê
@@ -228,81 +288,23 @@ trocar de método (o `run-node.sh` faz isso).
 > Estas são as razões que o **código** sustenta. O que motivou cada escolha na
 > altura confirma-o no capítulo 3 da tese antes de o afirmares ao professor.
 
-## Parar tudo
+# H. Opcional: trocar de método só escrevendo na base station
 
-```bash
-# T3: Ctrl+C na base.      T1: Ctrl+C no daemon (ou o comando do PC abaixo).
-ssh $N1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
-ssh $N2 "sudo pkill -INT -f '[m]eshnode_'; sleep 3; sudo pkill -KILL -f '[m]eshnode_'"
-sudo pkill -KILL -f '[m]eshnode_'      # PC, se o Ctrl+C não chegar
-```
-O `rpicam-vid` e o `ffmpeg` têm de morrer também: se ficarem, prendem a câmara
-e continuam a enviar vídeo com o transporte antigo.
-O arranque seguinte (`run-node.sh`) limpa a TUN, as rotas e as entradas ARP.
+A base station também aceita `arp` / `l3` (ou Square / Circle no comando):
+reinicia a mesh nos 3 nós por SSH com `run-node.sh` e muda o transporte do vídeo
+sozinha. Precisa de `sudo -v` no terminal da base e de SSH por chave. Ainda
+**não foi testado em hardware**; o procedimento manual acima é o testado.
 
-## Ao ligar os Pi: ad-hoc automático (instalar o serviço, uma vez)
+# I. Se algo falhar
 
-Sem isto, ao ligar o Pi fica em Wi-Fi normal e o PC não o alcança. Com o
-serviço `adhoc`, cada Pi arranca em ad-hoc com o IP do seu `NODE_ID`
-(`.1` no AlphaBot, `.2` no relay) e com o SSH ativo, e os serviços antigos
-(`meshnode`, `meshnode-metrics`, `alphabot`) ficam desligados. O daemon e o
-robô continuam a ser arrancados à mão, como na demonstração.
-
-**Do PC, com os Pi alcançáveis** (ad-hoc feito à mão, passo 4 da preparação):
-
-1. **Confirma qual Pi é qual**. O ID fica gravado no Pi, por isso tem de estar
-   certo. O do AlphaBot tem o MAC `d8:3a:dd:33:f3:be`:
-   ```bash
-   ssh $N1 "cat /sys/class/net/wlan0/address"     # deve ser d8:3a:dd:33:f3:be
-   ssh $N2 "cat /sys/class/net/wlan0/address"     # deve ser 2c:cf:67:79:93:50
-   ```
-   Se vierem trocados, troca `$N1` e `$N2` nos comandos abaixo.
-2. **Envia a pasta `deploy/`** (se o `rsync` do passo 1 da preparação já a
-   incluiu, salta):
-   ```bash
-   rsync -av deploy pi@172.20.10.1:Documents/RoutingMesh/
-   rsync -av deploy pi@172.20.10.2:Documents/RoutingMesh/
-   ```
-3. **Instala o serviço e desliga os outros** (o `1` e o `2` são o `NODE_ID`):
-   ```bash
-   ssh $N1 "$D && sudo bash deploy/install-adhoc.sh 1"
-   ssh $N2 "$D && sudo bash deploy/install-adhoc.sh 2"
-   ```
-   Cada um escreve `/etc/routingmesh/node.conf`, instala o `adhoc.service`,
-   desativa e pára `meshnode`, `meshnode-metrics` e `alphabot`, e ativa `ssh` e
-   `adhoc` no boot. **Não** reconfigura o Wi-Fi agora, por isso o SSH não cai.
-4. **Reinicia os Pi e confirma:**
-   ```bash
-   ssh $N1 "sudo reboot"; ssh $N2 "sudo reboot"
-   # ~1 min depois, no PC (já em ad-hoc):
-   ping -c 3 172.20.10.1; ping -c 3 172.20.10.2
-   ssh -o BatchMode=yes $N1 "hostname; systemctl is-active adhoc"
-   ```
-   Se o SSH avisar `HOST IDENTIFICATION HAS CHANGED`, os IPs ficaram noutro Pi:
-   `ssh-keygen -f ~/.ssh/known_hosts -R 172.20.10.1` (e `.2`) e volta a tentar.
-
-Efeito secundário: o Pi deixa de ligar ao Wi-Fi normal (o NetworkManager já não
-gere o `wlan0`). Para dar internet a um Pi (ex.: `git pull`):
-```bash
-ssh $N1 "sudo systemctl disable adhoc; sudo rm -f /etc/NetworkManager/conf.d/90-manet-unmanaged.conf; sudo reboot"
-```
-
-O **PC nunca** arranca em ad-hoc sozinho (perderia a internet): usa sempre os
-comandos do passo 4 da preparação.
-
-## Opcional: trocar de método só escrevendo na base station
-
-A base station também aceita `arp` / `l3` (ou Square / Circle no comando): reinicia a
-mesh nos 3 nós por SSH com `run-node.sh` e muda o transporte do vídeo sozinha.
-Precisa de `sudo -v` no terminal da base e de SSH por chave. Ainda **não foi
-testado em hardware**; o procedimento manual acima é o testado.
-
-## Se algo falhar
-
-- **`Network is unreachable` / `No route to host`:** o PC ou o Pi perdeu o IP ou o
-  ad-hoc (passo 4 da preparação). Confirma com `ping -c 3 172.20.10.1`.
-- **Vídeo não aparece:** confirma que a base foi arrancada antes do robô
-  (TCP), que os dois usam o mesmo transporte, e que o `[GATE]` já apareceu.
+- **`hostname contains invalid characters`:** `$N1`/`$N2`/`$D` estão vazias neste
+  terminal. Faz `source ~/.bashrc` (ver A1).
+- **`Network is unreachable` / `No route to host`:** o PC perdeu o IP ou o
+  ad-hoc (ver B). Confirma com `ping -c 3 172.20.10.1`.
+- **`rsync: link_stat ... deploy failed`:** não estás na pasta do repo
+  (`cd ~/Documentos/RoutingMesh`).
+- **Vídeo não aparece:** a base tem de arrancar antes do robô (TCP), os dois usam
+  o mesmo transporte, e o `[GATE]` já tem de ter aparecido.
 - **Câmara ocupada ao reiniciar o robô:** `ssh $N1 "sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"`.
 - **Blocos pretos no ARP:** hipótese de fragmentação dos pacotes de 1500 bytes.
   Testa `sudo ip link set tun<id> mtu 1400` nos três nós, reinicia o vídeo e compara.
