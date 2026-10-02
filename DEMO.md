@@ -211,17 +211,24 @@ ssh pi@172.20.10.1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
 - L3: `10.0.0.3 via 10.0.0.3 dev tun1` (direto).
 - ARP: `172.20.10.3 ... at f0:9e:4a:a2:20:38 ... PERM` (MAC do N3).
 
-**2. Cortar**, só a receção, **por MAC, nos dois lados**:
+**2. Cortar**, só a receção, **por MAC, nos dois lados**. As regras repõem-se
+**sozinhas ao fim de 60 s**, porque com o link cortado o PC já não chega ao N1 por
+`172.20.10.1` e não conseguia repô-las por SSH:
 ```bash
-ssh pi@172.20.10.1 "sudo iptables -I INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP"   # N1 deixa de ouvir o N3
-sudo iptables -I INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP              # N3 deixa de ouvir o N1
+sudo -v
+ssh pi@172.20.10.1 "sudo nohup sh -c 'iptables -I INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP; sleep 60; iptables -D INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP' >/dev/null 2>&1 &"
+sudo nohup sh -c 'iptables -I INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP; sleep 60; iptables -D INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP' >/dev/null 2>&1 &
 ```
-Espera ~3 s: o nó só é dado como perdido ao fim de `MAX_AGE = 2 s`, depois a
-árvore é recalculada. O vídeo pára um instante e volta.
+Durante os 60 s, **o `ssh pi@172.20.10.1` direto deixa de funcionar** (o corte apanha
+também o SSH), e os terminais T2 e T4, que são SSH direto ao N1, **ficam parados**:
+os processos continuam a correr no N1 e os terminais retomam quando a regra se repuser.
+Espera ~3 s: o nó só é dado como perdido ao fim de `MAX_AGE = 2 s`, depois a árvore
+é recalculada. O vídeo pára um instante e volta.
 
-**3. Confirmar que passou pelo N2:**
+**3. Confirmar que passou pelo N2** (dentro dos 60 s). Ao N1 vai-se **pelo N2**
+(`-J`), porque o caminho direto está cortado:
 ```bash
-ssh pi@172.20.10.1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
+ssh -J pi@172.20.10.2 pi@172.20.10.1 "ip route | grep '^10.0.0.3'; arp -an | grep 172.20.10.3"
 # relay a trabalhar: o contador da regra com pacotes tem de subir entre as duas leituras
 ssh pi@172.20.10.2 "sudo iptables -vnxL FORWARD | sed -n 3,5p; sleep 3; sudo iptables -vnxL FORWARD | sed -n 3,5p"
 ```
@@ -231,10 +238,10 @@ ssh pi@172.20.10.2 "sudo iptables -vnxL FORWARD | sed -n 3,5p; sleep 3; sudo ipt
   `wlan0 → wlan0` (o kernel reencaminha o datagrama; o daemon do N2 não vê nada).
 - Nos dois: o vídeo continua no ecrã da base.
 
-**4. Repor a ligação** (limpa só a tabela INPUT, não mexe nas regras da mesh):
+**4. Repor a ligação.** Repõe-se sozinha aos 60 s. Para repor antes:
 ```bash
-ssh pi@172.20.10.1 "sudo iptables -F INPUT"
-sudo iptables -F INPUT
+sudo iptables -F INPUT                                                  # PC
+ssh -J pi@172.20.10.2 pi@172.20.10.1 "sudo iptables -F INPUT"           # N1, pelo N2
 ```
 Em alguns segundos a rota volta a ser direta (repete o passo 1 para ver).
 
@@ -262,6 +269,18 @@ sudo pkill -KILL -f '[m]eshnode_'
 ```
 O `rpicam-vid` e o `ffmpeg` têm de morrer também: se ficarem, prendem a câmara e
 continuam a enviar com o transporte antigo.
+
+**Depois de uma corrida em ARP, limpa as entradas ARP permanentes.** O método ARP
+associa o IP de cada destino ao MAC do vizinho que faz de next-hop (por isso dois
+IPs podem aparecer com o **mesmo MAC**), e o `meshnode` **não as apaga ao sair**.
+Se ficarem, o `ping` e o SSH entre os nós falham ou vão pelo caminho errado:
+```bash
+for a in 172.20.10.1 172.20.10.2; do sudo ip neigh del $a dev wlp5s0 2>/dev/null; done
+ssh pi@172.20.10.1 'for a in 172.20.10.1 172.20.10.2 172.20.10.3; do sudo ip neigh del $a dev wlan0 2>/dev/null; done'
+ssh pi@172.20.10.2 'for a in 172.20.10.1 172.20.10.2 172.20.10.3; do sudo ip neigh del $a dev wlan0 2>/dev/null; done'
+```
+O `run-node.sh` também as limpa, mas só quando o nó arranca. Para ver o estado:
+`ip neigh show dev wlp5s0` (nos Pi, `wlan0`); `PERMANENT` com o MAC errado é lixo.
 
 ---
 
@@ -320,6 +339,10 @@ sozinha. Precisa de `sudo -v` no terminal da base e de SSH por chave. Ainda
 Como cada processo corre em primeiro plano, a mensagem de erro aparece no
 próprio terminal. As mais comuns:
 
+- **O PC não pinga um Pi, mas os Pi pingam-se entre si; ou dois IPs com o mesmo MAC no
+  `ip neigh`:** entradas ARP permanentes que o método ARP deixou. Limpa-as (secção F).
+- **`Connection timed out` ao N1 durante o corte de ligação:** é o corte a funcionar
+  (apanha o SSH direto). Vai pelo N2: `ssh -J pi@172.20.10.2 pi@172.20.10.1 ...`.
 - **`Permission denied` ao correr `./run-node.sh`:** `chmod +x run-node.sh` nessa máquina.
 - **`No such file ... meshnode_ipforward` / `meshnode_arp`:** falta compilar
   (A1, `make both ...`) nessa máquina.
