@@ -23,9 +23,11 @@ Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
 ## Como está montada
 
-- **Os 3 nós correm em `tmux`**, cada um numa sessão chamada `mesh`, **em segundo
-  plano**. Sobrevivem a quedas de SSH e a fechares o terminal. Arrancam-se com um
-  comando por nó (`tmux-node.sh`), e só se "entra" na sessão para ver os logs.
+- **Os 3 nós correm em segundo plano**, e sobrevivem a quedas de SSH e a fechares o
+  terminal. Arrancam-se com um comando por nó (`tmux-node.sh`). **Com tmux instalado**
+  cada nó corre numa sessão tmux `mesh`; **sem tmux** (não é preciso instalar nada,
+  nem ter internet nos Pi) corre com `nohup` e escreve em `/tmp/mesh.log`. O script
+  escolhe sozinho.
 - **2 terminais visíveis:** a **base station** (PC) e o **robô** (`alphabot_node.py`,
   por SSH ao N1).
 - **Sem cortes nem bloqueios no guia:** são inseridos por ti, à mão.
@@ -35,8 +37,13 @@ Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 | **A** | PC | arranca os 3 nós (3 comandos curtos) e depois fica a correr a **base station** |
 | **B** | PC → N1 | o **robô** (`alphabot_node.py`) |
 
-Ver um nó: `sudo tmux attach -t mesh` (no PC) ou `ssh -t pi@172.20.10.1 "sudo tmux attach -t mesh"`.
-Sair sem o parar: **Ctrl+b e depois d**.
+| | Com tmux | Sem tmux |
+|---|---|---|
+| Ver um nó | `sudo tmux attach -t mesh` (sair sem parar: **Ctrl+b e d**) | `tail -f /tmp/mesh.log` (Ctrl+C só sai do `tail`) |
+| Espreitar | `sudo tmux capture-pane -p -t mesh \| tail -20` | `tail -20 /tmp/mesh.log` |
+| Parar | `sudo tmux kill-session -t mesh` | `sudo pkill -KILL -f '[m]eshnode_'` |
+
+Num Pi, antepõe `ssh pi@172.20.10.x "..."` (ou `ssh -t` para o `attach` / `tail -f`).
 
 ---
 
@@ -64,8 +71,9 @@ ssh pi@172.20.10.1 "cd Documents/RoutingMesh && ls -l run-node.sh tmux-node.sh m
 ssh pi@172.20.10.2 "cd Documents/RoutingMesh && ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp; which tmux"
 ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp base_station.py; which tmux
 ```
-`run-node.sh` e `tmux-node.sh` têm de ter `x` (`-rwxr-xr-x`), e o `which tmux` tem de
-imprimir um caminho. **Se faltar o tmux:** precisa de internet. No PC, `sudo apt install tmux`
+`run-node.sh` e `tmux-node.sh` têm de ter `x` (`-rwxr-xr-x`). **O tmux é opcional:** se o
+`which tmux` não imprimir nada, o `tmux-node.sh` usa o modo sem tmux (`/tmp/mesh.log`) e
+não precisas de internet. **Se mesmo assim o quiseres:** precisa de internet. No PC, `sudo apt install tmux`
 **antes** de o pores em ad-hoc. Num Pi, dá-lhe internet (cabo Ethernet, ou desfaz o
 ad-hoc como indicado em A4) e `sudo apt install tmux`.
 
@@ -210,12 +218,12 @@ ssh pi@172.20.10.2 "cd Documents/RoutingMesh && sudo ./tmux-node.sh l3 2"
 Cada um responde `[tmux-node] no <id> em l3 arrancado na sessao tmux 'mesh'`.
 Se der erro (por exemplo `tmux nao esta instalado`), aparece logo no terminal.
 
-**2. Espera a mesh convergir** (~10-20 s). Para ver o estado sem entrar nas sessões:
+**2. Espera a mesh convergir** (~10-20 s). Para ver o estado no PC sem entrar na sessão:
 ```bash
-sudo tmux capture-pane -p -t mesh | grep -E "GATE|ERRO" | tail -3
+sudo tmux capture-pane -p -t mesh | grep -E "GATE|ERRO" | tail -3     # com tmux
+grep -E "GATE|ERRO" /tmp/mesh.log | tail -3                            # sem tmux
 ```
-Tem de aparecer `[GATE] Sync convergiu — trafego de dados ADMITIDO`. (Ou
-`sudo tmux attach -t mesh` para veres tudo; sair com **Ctrl+b e d**.)
+Tem de aparecer `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
 
 **3. Base station** (terminal **A**, o mesmo):
 ```bash
@@ -241,7 +249,7 @@ sudo python3 alphabot_node.py udp
    ssh pi@172.20.10.1 "cd Documents/RoutingMesh && sudo ./tmux-node.sh arp 1"
    ssh pi@172.20.10.2 "cd Documents/RoutingMesh && sudo ./tmux-node.sh arp 2"
    ```
-3. Espera o `[GATE] ... ADMITIDO` (`sudo tmux capture-pane -p -t mesh | grep -E "GATE|ERRO" | tail -3`).
+3. Espera o `[GATE] ... ADMITIDO` (o comando do passo 2 da demonstração 1).
 4. A base arranca **antes** do robô (em TCP é ela que escuta):
    - **A:** `python3 base_station.py tcp`
    - **B:** `sudo python3 alphabot_node.py tcp` (na sessão SSH ao N1, na pasta `Documents/RoutingMesh`)
@@ -261,13 +269,13 @@ programas de vídeo.
 
 **Programas de vídeo:** Ctrl+C na base (A) e no robô (B).
 
-**Nós:** terminar as sessões tmux, nos 3 nós:
+**Nós, com tmux:** terminar as sessões, nos 3 nós:
 ```bash
 sudo tmux kill-session -t mesh
 ssh pi@172.20.10.1 "sudo tmux kill-session -t mesh"
 ssh pi@172.20.10.2 "sudo tmux kill-session -t mesh"
 ```
-Se algum nó ficar vivo, ou o robô tiver ficado a prender a câmara:
+**Nós, sem tmux** (ou se algum ficar vivo), ou o robô tiver ficado a prender a câmara:
 ```bash
 sudo pkill -KILL -f '[m]eshnode_'
 ssh pi@172.20.10.1 "sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -KILL -f '[m]eshnode_'"
@@ -336,13 +344,12 @@ trocar de método (o `run-node.sh` faz isso).
 # G. Se algo falhar
 
 - **`tmux-node.sh: Permission denied`:** `chmod +x tmux-node.sh run-node.sh` nessa máquina (A1).
-- **`ERRO: o tmux nao esta instalado`:** ver A1 (precisa de internet para o instalar).
 - **`ERRO: ... run-node.sh nao existe ou nao e executavel`:** falta enviar o código ou o `chmod +x` (A1).
-- **Ver o que um nó escreveu, incluindo erros:** `sudo tmux capture-pane -p -t mesh | tail -30`
-  (no PC) ou `ssh pi@172.20.10.1 "sudo tmux capture-pane -p -t mesh | tail -30"`. Se o
-  nó terminou, a sessão fica aberta com `--- o no terminou (codigo N) ---`.
-- **`no server running` / `can't find session: mesh`:** o nó não está a correr (ou foi
-  parado). Arranca-o outra vez (secção C).
+- **Ver o que um nó escreveu, incluindo erros:** com tmux, `sudo tmux capture-pane -p -t mesh | tail -30`
+  (nos Pi, por `ssh pi@172.20.10.1 "..."`); sem tmux, `tail -30 /tmp/mesh.log`. Se o nó
+  terminou, aparece `--- o no terminou (codigo N) ---`.
+- **`no server running` / `can't find session: mesh` (com tmux) ou `/tmp/mesh.log` vazio/sem o nó (sem tmux):**
+  o nó não está a correr (ou foi parado). Arranca-o outra vez (secção C).
 - **`rsync: link_stat ... failed`:** não estás na pasta do repo (`cd ~/Documentos/RoutingMesh`).
 - **`Network is unreachable` / `No route to host`:** o PC perdeu o IP ou o ad-hoc
   (ver B). Confirma com `ping -c 3 172.20.10.1`.
