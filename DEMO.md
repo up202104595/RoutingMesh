@@ -67,7 +67,7 @@ ls -l run-node.sh tmux-node.sh meshnode_ipforward meshnode_arp base_station.py; 
 `run-node.sh` e `tmux-node.sh` têm de ter `x` (`-rwxr-xr-x`), e o `which tmux` tem de
 imprimir um caminho. **Se faltar o tmux:** precisa de internet. No PC, `sudo apt install tmux`
 **antes** de o pores em ad-hoc. Num Pi, dá-lhe internet (cabo Ethernet, ou desfaz o
-ad-hoc como indicado em A2, "Efeito secundário") e `sudo apt install tmux`.
+ad-hoc como indicado em A4) e `sudo apt install tmux`.
 
 ## A2. Serviço de ad-hoc nos Pi (para arrancarem sempre em ad-hoc)
 
@@ -96,7 +96,7 @@ ssh pi@172.20.10.2 "sudo reboot"
 Esperado em cada Pi: `NODE_ID=<id>`, `adhoc` **enabled**, `meshnode` **disabled**.
 
 Efeito secundário: o Pi deixa de ligar ao Wi-Fi normal. Para lhe dar internet
-(ex.: `git pull`): `ssh pi@172.20.10.1 "sudo systemctl disable adhoc; sudo rm -f /etc/NetworkManager/conf.d/90-manet-unmanaged.conf; sudo reboot"`.
+(instalar o tmux, `git pull`, ...) ver **A4**.
 
 ## A3. SSH por chave
 
@@ -106,6 +106,57 @@ ssh -o BatchMode=yes pi@172.20.10.2 hostname
 ```
 Se não, `ssh-copy-id pi@172.20.10.1` e `.2`. Se avisar `HOST IDENTIFICATION HAS CHANGED`:
 `ssh-keygen -f ~/.ssh/known_hosts -R 172.20.10.1` (e `.2`).
+
+## A4. Dar internet a um Pi (ex.: instalar o tmux)
+
+**Opção mais simples: cabo Ethernet.** Liga o Pi por cabo a um router com internet.
+O ad-hoc fica como está e a `eth0` apanha IP sozinha (`ip -4 addr show eth0`). Passa
+logo ao passo 4.
+
+**Sem cabo: tirar o Pi do ad-hoc e ligá-lo ao Wi-Fi normal.** Faz-se **no ecrã de cada
+Pi** (teclado e rato dele), porque ao mudar o `wlan0` o SSH, que vai pelo próprio
+ad-hoc, cai. Num terminal do Pi:
+
+1. **Pára o ad-hoc e deixa o NetworkManager gerir o Wi-Fi.** O `adhoc-stop.sh` devolve o
+   `wlan0` ao modo normal; a regra do instalador impedia o NetworkManager de lhe
+   mexer, e num Pi o serviço estava `masked`:
+   ```bash
+   sudo systemctl disable --now adhoc
+   sudo rm -f /etc/NetworkManager/conf.d/90-manet-unmanaged.conf
+   sudo systemctl unmask NetworkManager
+   sudo systemctl enable --now NetworkManager
+   sudo systemctl restart NetworkManager
+   nmcli device status          # o wlan0 deve aparecer disconnected (ou connected)
+   ```
+2. **Liga ao Wi-Fi** (escreves tu o nome e a palavra-passe), ou pelo ícone de rede do ambiente
+   de trabalho:
+   ```bash
+   sudo nmcli device wifi connect "NOME_DA_REDE" password "PALAVRA_PASSE"
+   ping -c 3 8.8.8.8
+   ```
+3. **O relógio dos Pi está atrasado** (em junho, quando estamos em outubro), e o `apt`
+   recusa repositórios "ainda não válidos". Depois de ligar à internet espera ~1 minuto
+   e confirma: `timedatectl` (`System clock synchronized: yes`) e `date`. Se não
+   sincronizar: `sudo systemctl restart systemd-timesyncd`.
+4. **Instala:**
+   ```bash
+   sudo apt update && sudo apt install -y tmux
+   which tmux
+   ```
+   Se o `apt update` ainda se queixar de datas:
+   `sudo apt update -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false`.
+5. **Volta ao ad-hoc** (põe `1` no AlphaBot e `2` no relay), na pasta do repo do Pi:
+   ```bash
+   cd ~/Documents/RoutingMesh
+   sudo bash deploy/install-adhoc.sh 1        # ou 2
+   sudo reboot
+   ```
+   O instalador volta a pôr a regra do NetworkManager e a ativar o serviço `adhoc`. Depois
+   do reboot o Pi arranca em ad-hoc com o IP certo, como antes.
+
+**O PC** também precisa do tmux (`which tmux`). Põe-no primeiro na rede normal (secção B,
+"No fim do dia, voltar o PC ao Wi-Fi normal"), `sudo apt install -y tmux`, e só depois o
+voltas a pôr em ad-hoc (secção B).
 
 ---
 
