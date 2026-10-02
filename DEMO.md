@@ -10,6 +10,12 @@ Máquinas (todas em ad-hoc, rede `172.20.10.0/28`):
 
 Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
+> **Em que máquina corro isto?** Os comandos das secções **A** e **B** correm **no
+> PC** (prompt `miguel@miguel-Bravo-...`). Os `ssh pi@172.20.10.x` levam-te aos Pi.
+> Se o prompt for `pi@raspberrypi` estás **dentro de um Pi** (sem internet e sem
+> chave SSH para o outro Pi): sai com `exit` e volta ao PC. Nunca corras no Pi os
+> comandos do PC (`wlp5s0`, `rsync`, `make both ... wlp5s0`).
+
 | | Método L3 (o teu) | Método ARP (Ana Morais) |
 |---|---|---|
 | Daemon | `sudo ./run-node.sh l3 <id> 3` | `sudo ./run-node.sh arp <id> 3` |
