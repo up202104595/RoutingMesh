@@ -221,10 +221,7 @@ painel (clica nele). Os painéis N1 e N2 entram nos Pi sem pedir nada (SSH por c
 
 **3. Espera.** Em ~10-20 s aparece o `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
 
-**4. A base e o robô arrancam sozinhos.** Esperam que a mesh esteja pronta (o `[GATE] ... ADMITIDO` no painel do N3 há 15 s, ou o `ping 10.0.0.1` a responder), a base
-arranca primeiro e o robô uns segundos depois. A base abre o `ffplay` (precisa do comando DS4
-ligado ao PC); o robô espera ~10 s antes de começar o vídeo. Se não ficar pronta em 180 s,
-arrancam mesmo assim e avisam.
+**4. A base e o robô arrancam sozinhos**, sem esperar por nada: a base 5 s depois de lançares o script e o robô 2 s depois da base. A base abre o `ffplay` (precisa do comando DS4 ligado ao PC); o vídeo só aparece quando o `[GATE]` já tiver abrido.
 
 *(Para os arrancar à mão: `MANUAL_VIDEO=1 ./demo-tmux.sh l3` deixa os dois comandos escritos, por executar.)*
 
