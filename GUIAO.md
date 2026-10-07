@@ -19,6 +19,44 @@ por chave) está no `DEMO.md`, secção **A**.
 | N2 (relay) | `172.20.10.2` | `2c:cf:67:79:93:50` |
 | N3 (PC) | `172.20.10.3` | `f0:9e:4a:a2:20:38` |
 
+## Enviar e compilar nos nós (quando o código mudou)
+
+Faz isto **sempre que o código mudou** (`src/`, `include/` ou `Makefile`). Para trocar de método
+não é preciso (os dois binários já existem em cada nó); o `demo-tmux.sh`, a `base_station.py` e
+este guião só contam no PC. Os três nós têm de ficar com o **mesmo código**.
+
+```bash
+# 1. enviar (na pasta do repo do PC)
+cd ~/Documentos/RoutingMesh
+rsync -av src include Makefile run-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av src include Makefile run-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
+
+# 2. compilar nos três (procura "Gerado: meshnode_ipforward e meshnode_arp")
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+chmod +x run-node.sh demo-tmux.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
+```
+No PC, se o `make` der `Ficheiro de texto ocupado`, ainda há um `meshnode` a correr:
+`tmux kill-session -t demo; sudo pkill -KILL -f '[m]eshnode_'`.
+
+```bash
+# 3. confirmar que o código é igual nas três máquinas (os 3 valores têm de ser iguais)
+H='(find src include -type f \( -name "*.c" -o -name "*.h" \) | LC_ALL=C sort | xargs cat; cat Makefile) | md5sum'
+cd ~/Documentos/RoutingMesh && bash -c "$H"
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && bash -c '$H'"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && bash -c '$H'"
+
+# scripts: run-node.sh igual nas três; alphabot_node.py do N1 igual ao do PC
+md5sum run-node.sh alphabot_node.py
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && md5sum run-node.sh alphabot_node.py"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && md5sum run-node.sh"
+
+# 4. permissões e binários (x em run-node.sh e demo-tmux.sh; binários com a data de agora)
+ls -l run-node.sh demo-tmux.sh meshnode_ipforward meshnode_arp base_station.py
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && ls -l run-node.sh meshnode_ipforward meshnode_arp alphabot_node.py"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && ls -l run-node.sh meshnode_ipforward meshnode_arp"
+```
+
 ## 1. Antes de começar (sem público, ~5 min)
 
 1. **Liga os dois Pi** (arrancam sozinhos em ad-hoc com o IP certo, ~1 min).
