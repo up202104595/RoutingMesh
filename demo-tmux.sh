@@ -9,8 +9,9 @@
 # Os Pi nao precisam de tmux: os nos dos Pi correm em primeiro plano, por SSH,
 # dentro dos paineis do PC.
 #
-# A base e o robo ARRANCAM SOZINHOS: esperam que a mesh responda (ping a 10.0.0.1),
-# a base arranca primeiro e o robo uns segundos depois.
+# A base e o robo ARRANCAM SOZINHOS: esperam que a mesh esteja pronta (o [GATE]
+# ADMITIDO no painel do N3, ou o ping a 10.0.0.1 a responder), a base arranca
+# primeiro e o robo uns segundos depois.
 #
 # Uso (no PC, como utilizador normal — NAO com sudo):
 #     ./demo-tmux.sh <l3|arp>
@@ -26,6 +27,7 @@
 #      (Documents/RoutingMesh)  NO_ATTACH=1 (cria e nao entra)
 #      MANUAL_VIDEO=1 (base e robo ficam escritos, sem arrancar)
 #      ROBOT_DELAY (6 s de avanco da base)  MESH_WAIT (180 s no maximo)
+#      GATE_GRACE (15 s de espera depois de o [GATE] aparecer no painel do N3)
 
 usage() { echo "Uso: $0 <l3|arp>   (no PC, sem sudo)"; exit 1; }
 
@@ -62,12 +64,18 @@ N2=${N2_HOST:-pi@172.20.10.2}
 RD=${REMOTE_DIR:-Documents/RoutingMesh}
 ROBOT_DELAY=${ROBOT_DELAY:-6}
 MESH_WAIT=${MESH_WAIT:-180}
+GATE_GRACE=${GATE_GRACE:-15}
 
 # Se o comando terminar (ou der erro) o painel fica aberto com o codigo de saida.
 wrap() { printf '%s; rc=$?; echo; echo "--- terminou (codigo $rc). Enter para fechar ---"; read' "$1"; }
 
-# Espera que a mesh responda (overlay 10.0.0.1 = N1 a falar com o PC pela mesh).
-WAIT_MESH='echo "[a esperar que a mesh convirja (ping 10.0.0.1) ...]"; i=0; until ping -c1 -W1 10.0.0.1 >/dev/null 2>&1; do i=$((i+1)); if [ $i -ge '"$MESH_WAIT"' ]; then echo "[aviso] a mesh nao respondeu em '"$MESH_WAIT"' s - a arrancar mesmo assim"; break; fi; sleep 1; done; echo "[mesh pronta]"'
+# Espera que a mesh esteja pronta. Pronta quando:
+#   - o ping a 10.0.0.1 responde, OU
+#   - o painel do N3 mostra "[GATE] ... ADMITIDO" ha pelo menos GATE_GRACE segundos
+#     (o ping pelo overlay pode nao passar mesmo com a mesh a funcionar).
+# Se nada disto acontecer em MESH_WAIT segundos, arranca mesmo assim e avisa.
+WAIT_TPL='echo "[a esperar que a mesh convirja ...]"; st=$(date +%s); gs=""; while :; do if ping -c1 -W1 10.0.0.1 >/dev/null 2>&1; then echo "[mesh pronta: o ping a 10.0.0.1 responde]"; break; fi; if tmux capture-pane -p -t @PANE@ -S - 2>/dev/null | grep -q "GATE.*ADMITIDO"; then [ -z "$gs" ] && gs=$(date +%s); if [ $(( $(date +%s) - gs )) -ge @GRACE@ ]; then echo "[mesh pronta: [GATE] aberto ha @GRACE@ s]"; break; fi; fi; if [ $(( $(date +%s) - st )) -ge @MAXW@ ]; then echo "[aviso] a mesh nao ficou pronta em @MAXW@ s - a arrancar mesmo assim"; break; fi; sleep 1; done'
+wait_mesh() { local t=$WAIT_TPL; t=${t//@PANE@/$1}; t=${t//@GRACE@/$GATE_GRACE}; t=${t//@MAXW@/$MESH_WAIT}; printf '%s' "$t"; }
 
 CMD_N3="sudo ./run-node.sh $METHOD 3 3"
 CMD_N1="ssh -t $N1 'cd $RD && sudo ./run-node.sh $METHOD 1 3'"
@@ -89,8 +97,8 @@ if [ "${MANUAL_VIDEO:-0}" = "1" ]; then
     tmux send-keys -t "$PB" "$CMD_BASE"
     tmux send-keys -t "$PR" "$CMD_ROBOT"
 else
-    PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$WAIT_MESH; $CMD_BASE")")
-    PR=$(split_pct 50 -h -t "$PB" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$WAIT_MESH; sleep $ROBOT_DELAY; $CMD_ROBOT")")
+    PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$(wait_mesh "$P3"); $CMD_BASE")")
+    PR=$(split_pct 50 -h -t "$PB" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$(wait_mesh "$P3"); sleep $ROBOT_DELAY; $CMD_ROBOT")")
 fi
 P1=$(split_pct 67 -h -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N1")")
 P2=$(split_pct 50 -h -t "$P1" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N2")")
