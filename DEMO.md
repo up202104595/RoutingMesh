@@ -219,9 +219,9 @@ cd ~/Documentos/RoutingMesh
 **2. Palavra-passe do PC.** O painel do **N3** pede a palavra-passe do `sudo`: escreve-a nesse
 painel (clica nele). Os painéis N1 e N2 entram nos Pi sem pedir nada (SSH por chave).
 
-**3. Espera.** Em ~10-20 s aparece o `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
+**3. Espera.** Os nós sincronizam em poucos segundos; não há gate: o tráfego de dados passa logo.
 
-**4. A base e o robô arrancam sozinhos**, sem esperar por nada: a base 5 s depois de lançares o script e o robô 2 s depois da base. A base abre o `ffplay` (precisa do comando DS4 ligado ao PC); o vídeo só aparece quando o `[GATE]` já tiver abrido.
+**4. A base e o robô arrancam sozinhos**, sem esperar por nada: a base 5 s depois de lançares o script e o robô 2 s depois da base. A base abre o `ffplay` (precisa do comando DS4 ligado ao PC).
 
 *(Para os arrancar à mão: `MANUAL_VIDEO=1 ./demo-tmux.sh l3` deixa os dois comandos escritos, por executar.)*
 
@@ -232,7 +232,7 @@ Tens de fechar os 5 processos (o método está compilado em cada nó e o transpo
 2. **Confirma que não ficou nada vivo** (secção **E**, se necessário).
 3. **Monta em ARP**, de **fora** da sessão: `./demo-tmux.sh arp` (substitui a sessão; o
    `run-node.sh` limpa a TUN, as rotas e as entradas ARP). O arranque é igual: palavra-passe no
-   painel N3, `[GATE]`, base e robô sozinhos, agora com `tcp`.
+   painel N3, base e robô sozinhos, agora com `tcp`.
 
 **Voltar ao L3:** `./demo-tmux.sh l3`.
 
@@ -335,7 +335,7 @@ trocar de método (o `run-node.sh` faz isso).
 - **O PC não pinga um Pi, mas os Pi pingam-se entre si; ou dois IPs com o mesmo MAC no `ip neigh`:**
   entradas ARP permanentes que o método ARP deixou. Limpa-as (secção E).
 - **Vídeo não aparece:** a base tem de arrancar antes do robô (TCP), os dois usam o mesmo
-  transporte (já vem certo no `demo-tmux.sh`), e o `[GATE]` já tem de ter aparecido.
+  transporte (já vem certo no `demo-tmux.sh`).
 - **Câmara ocupada ao reiniciar o robô:** `ssh pi@172.20.10.1 "sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"`.
 - **Os painéis ficaram sem rato / `Ctrl+b` não responde:** carrega `Ctrl+b` e depois a tecla, uma de cada vez.
 - **Blocos pretos no ARP:** hipótese de fragmentação dos pacotes de 1500 bytes.

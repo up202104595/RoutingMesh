@@ -110,8 +110,8 @@ Entras numa sessão tmux com **5 painéis visíveis** ao mesmo tempo:
 
 **O que fazes e o que vês:**
 1. O painel **N3** pede a **palavra-passe do `sudo`**: clica nele e escreve-a. N1 e N2 entram nos Pi sem pedir nada.
-2. Os três painéis dos nós enchem-se de logs. Em ~10-20 s aparece `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
-3. **A base e o robô arrancam sozinhos**, sem esperar por nada: a base 5 s depois de lançares o script e o robô 2 s depois da base. A base abre o `ffplay`; o vídeo só aparece quando o `[GATE]` já tiver abrido.
+2. Os três painéis dos nós enchem-se de logs. Quando a base e o robô arrancarem, no painel N1 começam a aparecer linhas `[TUN] Pacote: ... dst=3`: são os pacotes de vídeo a entrar na mesh.
+3. **A base e o robô arrancam sozinhos**, sem esperar por nada: a base 5 s depois de lançares o script e o robô 2 s depois da base. A base abre o `ffplay`.
 4. O vídeo aparece no monitor 2.
 
 **O que dizer:** é uma rede ad-hoc mesh multi-hop de robôs; os nós sincronizam o acesso ao meio
@@ -153,7 +153,7 @@ Se algum mostrar processos: `sudo pkill -KILL -f '[m]eshnode_'` (e, no N1,
 
 ## 4. Parte 2 — método Layer 2 (ARP) com bloqueio
 
-**Arranque:** igual à Parte 1 (palavra-passe no painel N3, `[GATE]`, base e robô sozinhos). O
+**Arranque:** igual à Parte 1 (palavra-passe no painel N3, base e robô sozinhos). O
 vídeo agora vai em **TCP**, porque o ARP é um relay transparente que não repõe perdas: é a
 aplicação que dá a fiabilidade.
 
@@ -256,8 +256,8 @@ Se o PC deve voltar ao Wi-Fi normal: `DEMO.md`, secção **B**, "No fim do dia".
 |---|---|
 | Um painel mostra `--- terminou (codigo N) ---` | Lê as linhas acima desse aviso (é o erro). `Enter` fecha o painel. Corrige e monta outra vez: `Ctrl+b d`, `tmux kill-session -t demo`, `./demo-tmux.sh <método>`. |
 | Os painéis N1/N2 dão `Permission denied`, `Connection refused` ou `timed out` | O SSH não chega ao Pi: `ping` ao Pi; se não responde, o PC perdeu o ad-hoc (passo 1.2) ou o Pi não arrancou em ad-hoc. |
-| Não aparece o `[GATE]` | Os nós não se ouvem: `ping` entre eles; vê se os três painéis estão a correr. |
-| O vídeo não aparece | A base e o robô arrancam aos 5 s, antes do `[GATE]`. Confirma que o `[GATE]` apareceu no painel N3. Se o robô já terminou, na janela **controlo** (`Ctrl+b n`): `ssh -t pi@172.20.10.1 'cd Documents/RoutingMesh && sudo python3 alphabot_node.py udp'` (`tcp` no ARP). |
+| Não aparecem linhas `[TUN] Pacote` no painel N1 | O robô só lança a câmara 10 s depois de arrancar, por isso demora ~17 s. Se nunca aparecerem: `ssh pi@172.20.10.1 'pgrep -a rpicam-vid; pgrep -a ffmpeg; ip route get 10.0.0.3'`. |
+| O vídeo não aparece | Se o robô já terminou, na janela **controlo** (`Ctrl+b n`): `ssh -t pi@172.20.10.1 'cd Documents/RoutingMesh && sudo python3 alphabot_node.py udp'` (`tcp` no ARP). |
 | Vídeo não aparece | A base tem de arrancar antes do robô (já acontece), com o mesmo transporte. Confirma o DS4 ligado. |
 | Câmara ocupada ao reiniciar o robô | `ssh pi@172.20.10.1 "sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"` |
 | O PC não pinga um Pi, mas os Pi pingam-se | Entradas ARP permanentes velhas: os comandos do passo 5. |
