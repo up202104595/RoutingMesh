@@ -26,6 +26,16 @@ não é preciso (os dois binários já existem em cada nó); o `demo-tmux.sh`, a
 este guião só contam no PC. Os três nós têm de ficar com o **mesmo código**.
 
 ```bash
+# 0. descarregar o codigo mais recente (PC COM internet, antes de o pores em ad-hoc)
+which git rsync tmux            # se faltar algum: sudo apt install -y git rsync tmux
+cd ~/Documentos
+mv RoutingMesh RoutingMesh-antigo
+git clone -b claude/youthful-tesla-a6e0g8 https://github.com/up202104595/RoutingMesh.git RoutingMesh
+cd RoutingMesh && git log --oneline -1      # tem de mostrar o commit e00387a ou mais recente
+# (se o clone pedir password, o repo e privado: descarrega o ZIP no browser e extrai-o para ~/Documentos/RoutingMesh)
+# actualizar depois:  git pull origin claude/youthful-tesla-a6e0g8
+
+# (poe o PC em ad-hoc: os Pi estao em ad-hoc e so assim lhes chega)
 # 1. enviar (na pasta do repo do PC)
 cd ~/Documentos/RoutingMesh
 rsync -av src include Makefile run-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
