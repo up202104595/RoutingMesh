@@ -10,6 +10,9 @@ Máquinas (todas em ad-hoc, rede `172.20.10.0/28`):
 
 Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
+> **A sequência ao vivo da demonstração (L3, mudar de método, ARP com bloqueio e como o explicar)
+> está no `GUIAO.md`.** Este ficheiro é a referência: preparação, rede, parar, porquê, problemas.
+
 > **Em que máquina corro isto?** Os comandos das secções **A** e **B** correm **no
 > PC** (prompt `miguel@miguel-Bravo-...`). Os `ssh pi@172.20.10.x` levam-te aos Pi.
 > Se o prompt for `pi@raspberrypi` estás **dentro de um Pi** (sem internet e sem
@@ -23,30 +26,31 @@ Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
 ## Como está montada
 
-**Uma única sessão tmux, no PC, corre tudo** como painéis. Os Pi **não precisam de
-tmux**: os nós dos Pi correm em primeiro plano, por SSH, dentro dos painéis do PC.
-Um só comando monta tudo (`./demo-tmux.sh l3` ou `arp`):
+**Uma única sessão tmux, no PC, corre tudo** como painéis. Os Pi **não precisam de tmux**:
+os nós dos Pi correm em primeiro plano, por SSH, dentro dos painéis do PC. Um só comando monta
+tudo (`./demo-tmux.sh l3` ou `arp`), com **5 painéis visíveis ao mesmo tempo**:
 
-| Janela tmux | Painéis |
-|---|---|
-| **nos** | **N3** (o próprio PC) · **N1** (SSH ao AlphaBot) · **N2** (SSH ao relay) |
-| **video** | **base station** (`base_station.py`) · **robô** (`alphabot_node.py`, SSH ao N1) |
-
-Na janela **video** os dois comandos ficam **escritos mas por executar**: carregas
-Enter em cada um quando a janela **nos** mostrar o `[GATE]` (a base antes do robô).
+```
+┌───────────────┬───────────────┬───────────────┐
+│ N3 · PC       │ N1 · AlphaBot │ N2 · relay    │
+├───────────────┴───────┬───────┴───────────────┤
+│ BASE STATION          │ ROBO N1               │   (arrancam sozinhos)
+└───────────────────────┴───────────────────────┘
+```
+Há também uma janela **controlo** (`Ctrl+b` `n`) com uma shell livre no PC.
 
 **Teclas do tmux** (prefixo **Ctrl+b**, solta e carrega na seguinte):
 
 | Teclas | Faz |
 |---|---|
-| `Ctrl+b` `n` / `p` | janela seguinte / anterior (nos ↔ video) |
-| `Ctrl+b` + setas | mudar de painel (o rato também funciona) |
+| `Ctrl+b` `n` / `p` | janela seguinte / anterior (demo ↔ controlo) |
+| `Ctrl+b` + setas (ou o rato) | mudar de painel |
 | `Ctrl+b` `z` | ampliar / reduzir o painel atual |
 | `Ctrl+b` `d` | sair da sessão **sem parar nada** |
 | `tmux attach -t demo` | voltar à sessão |
 
-**Ctrl+C** num painel pára só o programa desse painel. Sem cortes nem bloqueios no
-guia: são inseridos por ti, à mão.
+**Ctrl+C** num painel pára só o programa desse painel. Sem cortes nem bloqueios aqui: o
+bloqueio faz-se à mão (ver o `GUIAO.md`).
 
 ---
 
@@ -212,34 +216,26 @@ sudo systemctl start NetworkManager
 cd ~/Documentos/RoutingMesh
 ./demo-tmux.sh l3
 ```
-Entras na sessão `demo`, janela **nos**, com 3 painéis: N3 (PC), N1 e N2.
+**2. Palavra-passe do PC.** O painel do **N3** pede a palavra-passe do `sudo`: escreve-a nesse
+painel (clica nele). Os painéis N1 e N2 entram nos Pi sem pedir nada (SSH por chave).
 
-**2. Palavra-passe do PC.** O painel do **N3** pede a palavra-passe do `sudo`: escreve-a
-nesse painel (clica nele ou `Ctrl+b` + setas). Os painéis N1 e N2 entram nos Pi sem pedir
-nada (SSH por chave).
+**3. Espera.** Em ~10-20 s aparece o `[GATE] Sync convergiu — trafego de dados ADMITIDO`.
 
-**3. Espera o `[GATE]`** (~10-20 s) num dos painéis, tipicamente o do N3:
-`[GATE] Sync convergiu — trafego de dados ADMITIDO`.
+**4. A base e o robô arrancam sozinhos.** Esperam que a mesh responda (`ping 10.0.0.1`), a base
+arranca primeiro e o robô uns segundos depois. A base abre o `ffplay` (precisa do comando DS4
+ligado ao PC); o robô espera ~10 s antes de começar o vídeo. Se a mesh não responder em 180 s,
+arrancam mesmo assim e avisam.
 
-**4. Vai para a janela video** (`Ctrl+b` `n`). Estão dois painéis com comandos já escritos:
-- **base** (esquerda): carrega **Enter** (`python3 base_station.py udp`). Precisa do comando DS4 ligado ao PC.
-- **robô** (direita): depois da base, carrega **Enter** (`ssh -t pi@172.20.10.1 '... sudo python3 alphabot_node.py udp'`).
-  O robô espera ~10 s antes de começar o vídeo.
-
-Para voltar aos nós: `Ctrl+b` `p`.
+*(Para os arrancar à mão: `MANUAL_VIDEO=1 ./demo-tmux.sh l3` deixa os dois comandos escritos, por executar.)*
 
 # D. Demonstração 2 — passar para o método ARP (vídeo TCP)
 
-1. **Pára os dois programas de vídeo** (janela video): **Ctrl+C** no painel da base e no do
-   robô (o Ctrl+C no robô pára a stream e a câmara).
-2. **Monta a sessão em ARP.** Num terminal do PC (ou `Ctrl+b` `d` para sair do tmux primeiro):
-   ```bash
-   cd ~/Documentos/RoutingMesh
-   ./demo-tmux.sh arp
-   ```
-   Substitui a sessão anterior; o `run-node.sh` limpa a TUN, as rotas e as entradas ARP.
-   Volta a pedir a palavra-passe no painel do N3.
-3. Espera o `[GATE]` e, na janela video, **Enter na base** e depois **no robô**, agora com `tcp`.
+Tens de fechar os 5 processos (o método está compilado em cada nó e o transporte do vídeo muda):
+1. **Pára tudo:** `Ctrl+C` nos 5 painéis, ou `Ctrl+b` `d` e depois `tmux kill-session -t demo`.
+2. **Confirma que não ficou nada vivo** (secção **E**, se necessário).
+3. **Monta em ARP**, de **fora** da sessão: `./demo-tmux.sh arp` (substitui a sessão; o
+   `run-node.sh` limpa a TUN, as rotas e as entradas ARP). O arranque é igual: palavra-passe no
+   painel N3, `[GATE]`, base e robô sozinhos, agora com `tcp`.
 
 **Voltar ao L3:** `./demo-tmux.sh l3`.
 
@@ -247,9 +243,7 @@ Para voltar aos nós: `Ctrl+b` `p`.
 
 # E. Parar tudo
 
-**Programas de vídeo:** Ctrl+C no painel da base e no do robô (janela video).
-
-**Nós e sessão:**
+**Tudo:** `Ctrl+C` nos 5 painéis, ou `Ctrl+b` `d` e depois:
 ```bash
 tmux kill-session -t demo
 ```
