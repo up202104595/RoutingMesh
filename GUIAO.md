@@ -38,8 +38,8 @@ cd RoutingMesh && git log --oneline -1      # tem de mostrar o commit e00387a ou
 # (poe o PC em ad-hoc: os Pi estao em ad-hoc e so assim lhes chega)
 # 1. enviar (na pasta do repo do PC)
 cd ~/Documentos/RoutingMesh
-rsync -av src include Makefile run-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
-rsync -av src include Makefile run-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
+rsync -av src include Makefile run-node.sh alphabot_node.py macs.conf pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av src include Makefile run-node.sh alphabot_node.py macs.conf pi@172.20.10.2:Documents/RoutingMesh/
 
 # 2. compilar nos três (procura "Gerado: meshnode_ipforward e meshnode_arp")
 ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"

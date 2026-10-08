@@ -20,15 +20,42 @@
 static char g_mac_table[MAX_NODES + 1][MAC_STR_LEN];
 static int  g_mac_known[MAX_NODES + 1];
 
+/*
+ * Tabela fixa de MACs (opcional): ficheiro "macs.conf" no directorio de
+ * trabalho (ou o caminho em $MESH_MACS_FILE), uma linha "<id> <mac>".
+ * Os nos listados ficam conhecidos desde o inicio e nunca sao aprendidos do
+ * ARP — o roteamento escreve la entradas PERMANENT "IP do destino -> MAC do
+ * next-hop", e ler o MAC de um no a partir delas gravava o MAC errado.
+ */
+static void mac_table_load_file(void) {
+    const char *path = getenv("MESH_MACS_FILE");
+    if (!path || !*path) path = "macs.conf";
+    FILE *fp = fopen(path, "r");
+    if (!fp) return;
+    char line[128];
+    while (fgets(line, sizeof(line), fp)) {
+        unsigned id;
+        char mac[MAC_STR_LEN];
+        if (line[0] == '#') continue;
+        if (sscanf(line, "%u %17s", &id, mac) != 2) continue;
+        if (id == 0 || id > MAX_NODES || strlen(mac) != 17) continue;
+        strncpy(g_mac_table[id], mac, MAC_STR_LEN - 1);
+        g_mac_known[id] = 1;
+        printf("[MAC] Node %u -> %s  [macs.conf]\n", id, mac);
+    }
+    fclose(fp);
+}
+
 void mac_table_init(void) {
     memset(g_mac_table, 0, sizeof(g_mac_table));
     memset(g_mac_known, 0, sizeof(g_mac_known));
+    mac_table_load_file();
 }
 
 /*
- * Tenta obter MAC via "arp -n 172.20.10.X"
- * Parse da saída:
- *   172.20.10.8  ether  d8:3a:dd:33:f3:be  C  wlan0
+ * Tenta obter MAC via "ip neigh show 172.20.10.X", ignorando entradas
+ * PERMANENT (essas foram escritas pelo proprio roteamento e contem o MAC do
+ * next-hop, nao o do no pedido).
  */
 void mac_table_update(uint8_t node_id) {
     if (node_id == 0 || node_id > MAX_NODES) return;
@@ -36,7 +63,7 @@ void mac_table_update(uint8_t node_id) {
 
     char cmd[128];
     snprintf(cmd, sizeof(cmd),
-             "arp -n %s.%u 2>/dev/null | awk 'NR==2{print $3}'",
+             "ip neigh show %s.%u 2>/dev/null | grep -v PERMANENT | awk '{for(i=1;i<NF;i++) if($i==\"lladdr\"){print $(i+1); exit}}'",
              MESH_NET_PREFIX, node_id);
 
     FILE *fp = popen(cmd, "r");
@@ -64,7 +91,7 @@ void mac_table_update(uint8_t node_id) {
 
             /* tenta arp novamente */
             snprintf(cmd, sizeof(cmd),
-                     "arp -n %s.%u 2>/dev/null | awk 'NR==2{print $3}'",
+                     "ip neigh show %s.%u 2>/dev/null | grep -v PERMANENT | awk '{for(i=1;i<NF;i++) if($i==\"lladdr\"){print $(i+1); exit}}'",
                      MESH_NET_PREFIX, node_id);
             fp = popen(cmd, "r");
             if (!fp) return;

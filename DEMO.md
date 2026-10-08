@@ -63,8 +63,8 @@ Se já está feita, passa à **B**.
 Na **pasta do repo do PC** (o `rsync` usa caminhos relativos):
 ```bash
 cd ~/Documentos/RoutingMesh
-rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@172.20.10.1:Documents/RoutingMesh/
-rsync -av src include deploy Makefile run-node.sh alphabot_node.py pi@172.20.10.2:Documents/RoutingMesh/
+rsync -av src include deploy Makefile run-node.sh alphabot_node.py macs.conf pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av src include deploy Makefile run-node.sh alphabot_node.py macs.conf pi@172.20.10.2:Documents/RoutingMesh/
 ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
 ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
 chmod +x run-node.sh demo-tmux.sh && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
