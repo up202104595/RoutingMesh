@@ -21,7 +21,7 @@ Pastas: `~/Documentos/RoutingMesh` no PC e `~/Documents/RoutingMesh` nos Pi.
 
 | | Método L3 (o teu) | Método ARP (Ana Morais) |
 |---|---|---|
-| Montar tudo (no PC) | `./demo-tmux.sh l3` | `./demo-tmux.sh arp` |
+| Montar tudo (no PC) | `./demo-tmux.sh l3` | `N1_LOCAL=1 ./demo-tmux.sh arp` (N1 e robô à mão no monitor do Pi; ver `GUIAO.md`, 4.0) |
 | **Vídeo da aplicação** | **UDP** (`... udp`) | **TCP** (`... tcp`) |
 
 ## Como está montada
@@ -230,7 +230,7 @@ painel (clica nele). Os painéis N1 e N2 entram nos Pi sem pedir nada (SSH por c
 Tens de fechar os 5 processos (o método está compilado em cada nó e o transporte do vídeo muda):
 1. **Pára tudo:** `Ctrl+C` nos 5 painéis, ou `Ctrl+b` `d` e depois `tmux kill-session -t demo`.
 2. **Confirma que não ficou nada vivo** (secção **E**, se necessário).
-3. **Monta em ARP**, de **fora** da sessão: `./demo-tmux.sh arp` (substitui a sessão; o
+3. **Monta em ARP**, de **fora** da sessão: `N1_LOCAL=1 ./demo-tmux.sh arp` (e o N1 e o robô à mão, no monitor do Pi: `GUIAO.md`, 4.0) (substitui a sessão; o
    `run-node.sh` limpa a TUN, as rotas e as entradas ARP). O arranque é igual: palavra-passe no
    painel N3, base e robô sozinhos, agora com `tcp`.
 
