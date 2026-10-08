@@ -200,6 +200,21 @@ void copyLine(tdma_matrix_t *finalMatrix, tdma_matrix_t *matrixToCopy,
     }
 }
 
+#ifdef RELAY_METHOD_ARP
+/* Mascara (1 bit por node_id) dos nos que ouvimos DIRECTAMENTE. Sem lock: o
+ * chamador ja detem g_matrix_mutex. Mudar quem ouvimos directamente tambem
+ * dispara o recalculo, porque no ARP o MAC de cada destino depende disso. */
+static uint32_t direct_mask_locked(void) {
+    uint32_t mask = 0;
+    int8_t me = searchId(&g_myMatrix, getMyIP());
+    if(me < 0) return 0;
+    for(int j = 0; j < g_myMatrix.numberOfActiveNodes; j++)
+        if(j != me && g_myMatrix.matrix[me][j] == 1 && g_myMatrix.idOfActiveNodes[j] < 32)
+            mask |= (1u << g_myMatrix.idOfActiveNodes[j]);
+    return mask;
+}
+#endif
+
 void discoverIds(tdma_matrix_t *finalMatrix, tdma_matrix_t *matrixA, tdma_matrix_t *matrixB) {
     memcpy(finalMatrix->idOfActiveNodes, matrixA->idOfActiveNodes, sizeof(uint8_t) * matrixA->numberOfActiveNodes);
     finalMatrix->numberOfActiveNodes = matrixA->numberOfActiveNodes;
@@ -222,6 +237,9 @@ void discoverIds(tdma_matrix_t *finalMatrix, tdma_matrix_t *matrixA, tdma_matrix
 void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
     pthread_mutex_lock(&g_matrix_mutex);
     int nodes_before = g_myMatrix.numberOfActiveNodes;
+#ifdef RELAY_METHOD_ARP
+    uint32_t direct_before = direct_mask_locked();
+#endif
     
     uint8_t old_mst[MAX_NODES][MAX_NODES];
     for(int i = 0; i < MAX_NODES; i++)
@@ -327,6 +345,13 @@ void matrix_update(tdma_matrix_t *newMat, uint8_t other_IP) {
         printf("[MATRIX] Mudanca no numero de nos: %d -> %d\n", nodes_before, g_myMatrix.numberOfActiveNodes);
     }
     
+#ifdef RELAY_METHOD_ARP
+    if(direct_mask_locked() != direct_before) {
+        topology_changed = true;
+        printf("[MATRIX] Vizinhos diretos mudaram\n");
+    }
+#endif
+
     if(g_myMatrix.numberOfActiveNodes >= 2 && nodes_before >= 2) {
         for(int i = 0; i < g_myMatrix.numberOfActiveNodes && !topology_changed; i++) {
             for(int j = 0; j < g_myMatrix.numberOfActiveNodes; j++) {
@@ -408,6 +433,17 @@ void MATRIX_get_snapshot(matrix_snapshot_t *snap) {
         snap->mst_ptrs[i] = snap->mst[i];
     }
     pthread_mutex_unlock(&g_matrix_mutex);
+}
+
+/* 1 se este no ouve node_id DIRECTAMENTE (a nossa linha da matriz, posta a 1 na
+ * recepcao de um beacon dele e a 0 quando ele expira — MAX_AGE). */
+int MATRIX_is_direct(uint8_t node_id) {
+    pthread_mutex_lock(&g_matrix_mutex);
+    int8_t me = searchId(&g_myMatrix, getMyIP());
+    int8_t n  = searchId(&g_myMatrix, node_id);
+    int r = (me >= 0 && n >= 0 && g_myMatrix.matrix[me][n] == 1);
+    pthread_mutex_unlock(&g_matrix_mutex);
+    return r;
 }
 
 void MATRIX_print(void) {

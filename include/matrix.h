@@ -78,6 +78,7 @@ void MATRIX_print(void);
 tdma_matrix_t* MATRIX_get(void);
 uint8_t MATRIX_getNumNodes(void);
 void MATRIX_get_snapshot(matrix_snapshot_t *snap);
+int MATRIX_is_direct(uint8_t node_id);   /* 1 se ouvimos node_id directamente */
 
 /* serializeMatrix: serializa a matriz global de forma thread-safe.
  * Devolve buffer alocado (free() pelo caller) ou NULL em erro.
