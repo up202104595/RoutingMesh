@@ -25,8 +25,6 @@
 #
 # Env: N1_HOST (pi@172.20.10.1)  N2_HOST (pi@172.20.10.2)  REMOTE_DIR
 #      (Documents/RoutingMesh)  NO_ATTACH=1 (cria e nao entra)
-#      N1_LOCAL=1 (o N1 e o robo NAO ficam no tmux: correm a parte, no monitor
-#                  do Pi; o tmux fica so com N3, N2 e a base)
 #      MANUAL_VIDEO=1 (base e robo ficam escritos, sem arrancar)
 #      START_DELAY (5 s ate arrancar a base)  ROBOT_DELAY (2 s de a base ao robo)
 
@@ -83,29 +81,22 @@ split_pct() { local pct=$1; shift; tmux split-window -l "${pct}%" "$@" 2>/dev/nu
 # ── janela "demo": em cima N3 | N1 | N2, em baixo BASE | ROBO ────
 # (layout explicito: o 'tiled' do tmux escolhia 2 colunas x 3 linhas)
 P3=$(tmux new-session -d -s "$S" -n demo -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N3")") || { echo "ERRO: nao consegui criar a sessao tmux"; exit 1; }
-if [ "${N1_LOCAL:-0}" = "1" ]; then
-    # So N3, N2 e BASE: o N1 e o robo correm a parte, no monitor do Pi.
-    PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "sleep $START_DELAY; $CMD_BASE")")
-    P2=$(split_pct 50 -h -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N2")")
-    P1=""; PR=""
+if [ "${MANUAL_VIDEO:-0}" = "1" ]; then
+    PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}')
+    PR=$(split_pct 50 -h -t "$PB" -c "$DIR" -P -F '#{pane_id}')
+    tmux send-keys -t "$PB" "$CMD_BASE"
+    tmux send-keys -t "$PR" "$CMD_ROBOT"
 else
-    if [ "${MANUAL_VIDEO:-0}" = "1" ]; then
-        PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}')
-        PR=$(split_pct 50 -h -t "$PB" -c "$DIR" -P -F '#{pane_id}')
-        tmux send-keys -t "$PB" "$CMD_BASE"
-        tmux send-keys -t "$PR" "$CMD_ROBOT"
-    else
-        PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "sleep $START_DELAY; $CMD_BASE")")
-        PR=$(split_pct 50 -h -t "$PB" -c "$DIR" -P -F '#{pane_id}' "$(wrap "sleep $((START_DELAY + ROBOT_DELAY)); $CMD_ROBOT")")
-    fi
-    P1=$(split_pct 67 -h -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N1")")
-    P2=$(split_pct 50 -h -t "$P1" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N2")")
+    PB=$(split_pct 40 -v -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "sleep $START_DELAY; $CMD_BASE")")
+    PR=$(split_pct 50 -h -t "$PB" -c "$DIR" -P -F '#{pane_id}' "$(wrap "sleep $((START_DELAY + ROBOT_DELAY)); $CMD_ROBOT")")
 fi
+P1=$(split_pct 67 -h -t "$P3" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N1")")
+P2=$(split_pct 50 -h -t "$P1" -c "$DIR" -P -F '#{pane_id}' "$(wrap "$CMD_N2")")
 tmux select-pane -t "$P3" -T "N3 - PC ($METHOD)"
-[ -n "$P1" ] && tmux select-pane -t "$P1" -T "N1 - AlphaBot ($METHOD)"
+tmux select-pane -t "$P1" -T "N1 - AlphaBot ($METHOD)"
 tmux select-pane -t "$P2" -T "N2 - relay ($METHOD)"
 tmux select-pane -t "$PB" -T "BASE STATION ($VIDEO)"
-[ -n "$PR" ] && tmux select-pane -t "$PR" -T "ROBO N1 ($VIDEO)"
+tmux select-pane -t "$PR" -T "ROBO N1 ($VIDEO)"
 
 # ── janela "controlo": shell livre no PC ─────────────────────────
 tmux new-window -t "$S:" -n controlo -c "$DIR" >/dev/null
