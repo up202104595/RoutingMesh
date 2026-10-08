@@ -1,0 +1,216 @@
+COMANDOS DA DEMONSTRACAO (Layer 3) - tudo com IPs escritos, sem variaveis
+=========================================================================
+
+Nos:   N1 = AlphaBot  172.20.10.1  MAC d8:3a:dd:33:f3:be   (interface wlan0)
+       N2 = relay     172.20.10.2  MAC 2c:cf:67:79:93:50   (interface wlan0)
+       N3 = PC        172.20.10.3  MAC f0:9e:4a:a2:20:38   (interface wlp5s0)
+
+Onde correr cada bloco esta escrito no titulo: [PC] = terminal do PC,
+[N1] = terminal no monitor do Pi do AlphaBot, [PC->Pi] = do PC, por SSH.
+
+
+-------------------------------------------------------------------------
+0. DESCARREGAR O CODIGO  [PC, COM INTERNET, antes do ad-hoc]
+-------------------------------------------------------------------------
+No browser (conta GitHub aberta) guarda o ZIP deste endereco:
+  https://github.com/up202104595/RoutingMesh/archive/refs/heads/claude/youthful-tesla-a6e0g8.zip
+
+cd ~/Documentos
+mv RoutingMesh RoutingMesh-antigo2
+unzip ~/Transferências/RoutingMesh-claude-youthful-tesla-a6e0g8.zip
+mv RoutingMesh-claude-youthful-tesla-a6e0g8 RoutingMesh
+cd ~/Documentos/RoutingMesh
+ls
+# tem de mostrar: src include Makefile run-node.sh demo-tmux.sh deploy
+
+
+-------------------------------------------------------------------------
+1. PC EM AD-HOC  [PC]
+-------------------------------------------------------------------------
+sudo systemctl stop NetworkManager; sudo systemctl stop wpa_supplicant
+sudo ip link set wlp5s0 down
+sudo iwconfig wlp5s0 mode ad-hoc
+sudo iwconfig wlp5s0 essid manet-mesh
+sudo iwconfig wlp5s0 channel 6
+sudo ip link set wlp5s0 up
+sudo iwconfig wlp5s0 power off
+sudo ip addr replace 172.20.10.3/28 dev wlp5s0
+
+ping -c 2 172.20.10.1
+ping -c 2 172.20.10.2
+ssh -o BatchMode=yes pi@172.20.10.1 hostname
+ssh -o BatchMode=yes pi@172.20.10.2 hostname
+
+
+-------------------------------------------------------------------------
+2. MATAR PROCESSOS ANTERIORES  [PC e PC->Pi]
+-------------------------------------------------------------------------
+# No PC (fora do tmux):
+tmux kill-session -t demo 2>/dev/null
+sudo pkill -KILL -f '[m]eshnode_'; sudo pkill -KILL -x meshnode
+sudo pkill -f '[b]ase_station.py'; sudo pkill -f '[f]fplay'
+sudo iptables -F INPUT
+for a in 172.20.10.1 172.20.10.2; do sudo ip neigh del $a dev wlp5s0 2>/dev/null; done
+
+# Nos Pi (a partir do PC):
+ssh pi@172.20.10.1 "sudo systemctl disable --now meshnode meshnode-metrics alphabot 2>/dev/null; sudo pkill -f '[a]lphabot_node.py'; sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'; sudo pkill -KILL -f '[m]eshnode_'; sudo pkill -KILL -x meshnode; sudo iptables -F INPUT; for a in 172.20.10.1 172.20.10.2 172.20.10.3; do sudo ip neigh del \$a dev wlan0 2>/dev/null; done"
+ssh pi@172.20.10.2 "sudo systemctl disable --now meshnode meshnode-metrics 2>/dev/null; sudo pkill -KILL -f '[m]eshnode_'; sudo pkill -KILL -x meshnode; sudo iptables -F INPUT; for a in 172.20.10.1 172.20.10.2 172.20.10.3; do sudo ip neigh del \$a dev wlan0 2>/dev/null; done"
+
+# Confirmar que nao ficou nada (os tres tem de vir VAZIOS):
+pgrep -af '[m]eshnode|[b]ase_station|[f]fplay'
+ssh pi@172.20.10.1 "pgrep -af '[m]eshnode|[a]lphabot_node|[r]picam-vid|[f]fmpeg'"
+ssh pi@172.20.10.2 "pgrep -af '[m]eshnode'"
+# (se o N1 tiver terminais abertos com o no ou o robo, faz Ctrl+C la)
+
+
+-------------------------------------------------------------------------
+3. ENVIAR E COMPILAR NOS TRES  [PC]
+-------------------------------------------------------------------------
+cd ~/Documentos/RoutingMesh
+chmod +x run-node.sh demo-tmux.sh
+make clean && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlp5s0
+rsync -av --delete src include Makefile run-node.sh alphabot_node.py deploy pi@172.20.10.1:Documents/RoutingMesh/
+rsync -av --delete src include Makefile run-node.sh alphabot_node.py deploy pi@172.20.10.2:Documents/RoutingMesh/
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && chmod +x run-node.sh && make clean && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && chmod +x run-node.sh && make clean && make both MESH_NET_PREFIX=172.20.10 MESH_PHY_IFACE=wlan0"
+# no fim de cada make: "Gerado: meshnode_ipforward e meshnode_arp"
+
+
+-------------------------------------------------------------------------
+4. VERIFICAR QUE FICOU IGUAL NOS TRES  [PC e PC->Pi]
+-------------------------------------------------------------------------
+H='(find src include -type f \( -name "*.c" -o -name "*.h" \) | LC_ALL=C sort | xargs cat; cat Makefile) | md5sum'
+bash -c "$H"
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && $H"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && $H"
+# os tres valores iguais (e diferentes de d41d8cd98f00b204e9800998ecf8427e)
+
+md5sum run-node.sh alphabot_node.py demo-tmux.sh
+ssh pi@172.20.10.1 "cd Documents/RoutingMesh && md5sum run-node.sh alphabot_node.py"
+ssh pi@172.20.10.2 "cd Documents/RoutingMesh && md5sum run-node.sh"
+ls -l meshnode_ipforward meshnode_arp run-node.sh demo-tmux.sh
+
+
+-------------------------------------------------------------------------
+5. ARRANCAR O LAYER 3  [PC, terminal normal, SEM sudo]
+-------------------------------------------------------------------------
+cd ~/Documentos/RoutingMesh
+tmux kill-session -t demo 2>/dev/null
+./demo-tmux.sh l3
+# Escreve a palavra-passe do sudo no painel N3 (e as dos Pi, se pedirem).
+# A base arranca aos 5 s e o robo aos 7 s. O video (UDP) aparece ao fim de ~17 s.
+#
+# Navegacao tmux (Ctrl+b e depois):  n / p = janela seguinte/anterior,
+# setas = painel, z = ampliar painel, d = sair sem parar nada.
+# Voltar:  tmux attach -t demo
+
+
+-------------------------------------------------------------------------
+6. VER AS ROTAS ANTES DO BLOQUEIO  [PC] e [N1]  (janela "controlo": Ctrl+b n)
+-------------------------------------------------------------------------
+# No Layer 3 as rotas estao no kernel (tabela main), por netlink:
+ip route show | grep 10.0.0
+# Esperado, ligacao direta:
+#   PC:  10.0.0.1 via 10.0.0.1 dev tun3     e   10.0.0.2 via 10.0.0.2 dev tun3
+#   N1:  10.0.0.2 via 10.0.0.2 dev tun1     e   10.0.0.3 via 10.0.0.3 dev tun1
+
+
+-------------------------------------------------------------------------
+7. O BLOQUEIO (corta a ligacao direta N1 - N3)  -  NOS DOIS LADOS
+-------------------------------------------------------------------------
+Nota: neste guiao o corte esta preparado e explicado para o Layer 3, mas
+ainda nao foi testado em hardware.
+
+--- 7a. POR IP (o natural no Layer 3: cada salto e identificado pelo IP) ---
+# [N1]  (terminal do Pi)
+sudo iptables -I INPUT -s 172.20.10.3 -j DROP
+
+# [PC]  (janela "controlo")
+sudo iptables -I INPUT -s 172.20.10.1 -j DROP
+
+--- 7b. POR MAC (alternativa; corta tudo o que a trama traz daquele no) ---
+# [N1]
+sudo iptables -I INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP
+
+# [PC]
+sudo iptables -I INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP
+
+# Usa 7a OU 7b, nao os dois. Aplica SEMPRE nos dois lados (N1 e PC), um logo
+# a seguir ao outro. NAO bloqueies nada no N2.
+# Espera ~5 a 10 s (a ligacao so e dada como perdida ao fim de 2 s sem beacons).
+
+# Ver se a regra apanha trafego (o contador "pkts" tem de subir):
+sudo iptables -L INPUT -n -v
+
+
+-------------------------------------------------------------------------
+8. O QUE TEM DE ACONTECER DEPOIS DO BLOQUEIO  (ao fim de ~5-10 s)
+-------------------------------------------------------------------------
+ip route show | grep 10.0.0
+# Esperado, desvio pelo N2:
+#   PC:  10.0.0.1 via 10.0.0.2 dev tun3
+#   N1:  10.0.0.3 via 10.0.0.2 dev tun1
+# Nos paineis do N3 e do N1 aparecem: [MATRIX] TIMEOUT: No ... expirou,
+# [MATRIX] MST mudou!  e  [ROUTING]   ... [relay via 2]
+# O video pode parar um instante e depois continua (agora pelo N2).
+
+# Prova de que o N2 esta a reencaminhar (do PC):
+ssh pi@172.20.10.2 "sudo iptables -vnxL FORWARD | sed -n 3,5p; sleep 3; sudo iptables -vnxL FORWARD | sed -n 3,5p"
+# o contador da regra dos pacotes sobe entre as duas leituras
+
+
+-------------------------------------------------------------------------
+9. REPOR A LIGACAO  [N1] e [PC]
+-------------------------------------------------------------------------
+# So esvazia a cadeia INPUT (onde estao os bloqueios). NAO uses "iptables -F"
+# sozinho: apagava tambem as regras de FORWARD do relay.
+sudo iptables -F INPUT
+
+# Ou tirar so a regra que puseste (a mesma, com -D em vez de -I):
+sudo iptables -D INPUT -s 172.20.10.3 -j DROP                                    # [N1]  (7a)
+sudo iptables -D INPUT -s 172.20.10.1 -j DROP                                    # [PC]  (7a)
+sudo iptables -D INPUT -m mac --mac-source f0:9e:4a:a2:20:38 -j DROP             # [N1]  (7b)
+sudo iptables -D INPUT -m mac --mac-source d8:3a:dd:33:f3:be -j DROP             # [PC]  (7b)
+
+# Em alguns segundos as rotas voltam a ser diretas:
+ip route show | grep 10.0.0
+
+
+-------------------------------------------------------------------------
+10. SE O VIDEO NAO VOLTAR
+-------------------------------------------------------------------------
+# Relancar so o robo (a base fica a correr). Na janela "controlo" do PC:
+ssh -t pi@172.20.10.1 'cd Documents/RoutingMesh && sudo python3 alphabot_node.py udp'
+
+# Camara ocupada:
+ssh pi@172.20.10.1 "sudo pkill -f '[r]picam-vid'; sudo pkill -f '[f]fmpeg'"
+
+# Rotas/pacotes no N1:
+ssh pi@172.20.10.1 'pgrep -a rpicam-vid; pgrep -a ffmpeg; ip route get 10.0.0.3'
+
+
+-------------------------------------------------------------------------
+11. PORQUE ESTE BLOQUEIO E NOS DOIS LADOS
+-------------------------------------------------------------------------
+- Simula a falha da ligacao direta N1-N3 por software (com tres nos nao da
+  para os afastar quando se quer). Para a rede e igual a o radio ter caido:
+  deixa de receber os beacons desse vizinho, ao fim de 2 s a ligacao sai da
+  matriz de topologia, a arvore e recalculada e o unico caminho passa a ser
+  pelo N2.
+- Nos dois lados, porque a topologia mantem uma aresta se UM dos sentidos
+  estiver confirmado (so lhe tira 20 pontos). Com um lado so, a ligacao
+  pode ficar na arvore e nao ha desvio.
+- Cadeia INPUT: so descarta o que o no RECEBE do outro.
+- Por IP no Layer 3: cada salto e uma ligacao entre vizinhos enderecada ao
+  IP do vizinho; o que passa pelo relay vem com o IP do relay (ou com IPs do
+  overlay 10.0.0.x), por isso o filtro corta so a ligacao direta.
+
+
+-------------------------------------------------------------------------
+12. FIM  [PC e N1]
+-------------------------------------------------------------------------
+# Ctrl+b d   (sai do tmux) e depois:
+tmux kill-session -t demo
+sudo iptables -F INPUT                                   # [PC]
+ssh pi@172.20.10.1 "sudo iptables -F INPUT"
+ssh pi@172.20.10.2 "sudo iptables -F INPUT"
