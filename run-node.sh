@@ -67,26 +67,6 @@ ip neigh show dev "$IFACE" nud permanent 2>/dev/null \
     | awk '$1 ~ /^172\.20\.10\./ {print $1}' \
     | while read -r addr; do ip neigh del "$addr" dev "$IFACE" 2>/dev/null; done
 
-# ── 2b. ARP: MAC de cada no posto a mao no arranque (macs.conf) ───
-# Cada IP fisico fica com o MAC do PROPRIO no, em entrada PERMANENT. Assim, antes
-# de o roteamento mexer em nada, cada no fala direto com cada um dos outros.
-if [ "$METHOD" = "arp" ]; then
-    if [ -r "$DIR/macs.conf" ]; then
-        while read -r id mac _; do
-            case "$id" in ''|\#*) continue ;; esac
-            [ "$id" = "$NODE_ID" ] && continue
-            [ "$id" -le "$NUM_NODES" ] 2>/dev/null || continue
-            if ip neigh replace "172.20.10.$id" lladdr "$mac" dev "$IFACE" nud permanent; then
-                echo "[run-node] arp manual: 172.20.10.$id -> $mac"
-            else
-                echo "[run-node] AVISO: nao consegui pôr 172.20.10.$id -> $mac em $IFACE"
-            fi
-        done < "$DIR/macs.conf"
-    else
-        echo "[run-node] AVISO: falta $DIR/macs.conf — sem MACs manuais"
-    fi
-fi
-
 # ── 3. Arrancar ──────────────────────────────────────────────────
 echo "[run-node] metodo=$METHOD  binario=$BIN  no=$NODE_ID/$NUM_NODES  iface=$IFACE"
 cd "$DIR" || exit 1

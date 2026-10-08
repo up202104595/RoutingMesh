@@ -221,24 +221,19 @@ void routing_manager_recompute(routing_manager_t *rm,
         char dest_phy_ip[32];
         snprintf(dest_phy_ip, sizeof(dest_phy_ip), "%s.%u", MESH_NET_PREFIX, dest_id);
 
-        /* Se ouvimos o destino directamente, o MAC e o proprio (cada IP o seu
-         * MAC). So se NAO o ouvimos e que vamos pelo next-hop da arvore. */
-        uint8_t arp_hop = MATRIX_is_direct(dest_id) ? dest_id : next_hop;
-        rm->routing_table[i].next_hop = arp_hop;
-
-        mac_table_update(arp_hop);
-        const char *next_hop_mac = mac_table_get(arp_hop);
+        mac_table_update(next_hop);
+        const char *next_hop_mac = mac_table_get(next_hop);
         if (next_hop_mac) {
             tun_arp_set(dest_phy_ip, next_hop_mac);
-            if (dest_id == arp_hop)
+            if (dest_id == next_hop)
                 printf("[ROUTING]   arp set %s -> %s  [directo]\n",
                        dest_phy_ip, next_hop_mac);
             else
                 printf("[ROUTING]   arp set %s -> %s  [relay via %d, quality=%u]\n",
                        dest_phy_ip, next_hop_mac,
-                       arp_hop, rm->routing_table[i].quality);
+                       next_hop, rm->routing_table[i].quality);
         } else {
-            fprintf(stderr, "[ROUTING]   AVISO: MAC do Node %d desconhecido\n", arp_hop);
+            fprintf(stderr, "[ROUTING]   AVISO: MAC do Node %d desconhecido\n", next_hop);
         }
 
 #else
